@@ -62,6 +62,11 @@ sur le tableau blanc, puis termine la session pour retrouver la fiche de révisi
 Les pages et les polices de l’interface sont compilées dans `gerald/home/webui/`; aucun accès
 réseau n’est requis pour afficher le TD ou les formules KaTeX.
 
+Captures : [accueil](docs/notch-greeting.png), [encoche réduite](docs/notch-collapsed.png),
+[chat](docs/notch-panel.png), [documents](docs/notch-settings-documents.png),
+[historique](docs/notch-settings-historique.png), [TD](docs/td-exercises.png) et
+[exercice au tableau](docs/board-exercise.png).
+
 ## Free GPU fallback (Colab)
 
 1. Ouvrez [`colab/gerald_grounder.ipynb`](colab/gerald_grounder.ipynb) dans Google Colab.

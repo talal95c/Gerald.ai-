@@ -28,12 +28,16 @@ function App() {
   const [historyMessages, setHistoryMessages] = useState<{role: string; text: string}[] | null>(null);
   const idleTimer = useRef<number | null>(null);
   const pointerInside = useRef(false);
+  const modeRef = useRef(mode);
   const scheduleCollapse = () => {
     if (idleTimer.current !== null) window.clearTimeout(idleTimer.current);
     idleTimer.current = window.setTimeout(() => {
-      if (!pointerInside.current) { setMode("collapsed"); bridge.setMode("collapsed"); }
+      if (!pointerInside.current && modeRef.current === "greeting") {
+        setMode("collapsed"); bridge.setMode("collapsed");
+      }
     }, 6000);
   };
+  useEffect(() => { modeRef.current = mode; }, [mode]);
   useEffect(() => {
     const connect = () => {
       bridge.state(json => setState(JSON.parse(json)));
@@ -81,7 +85,7 @@ function App() {
       {settingsTab==="Raccourcis"&&<div className="setting-grid"><article><div className="eyebrow"><b/> RACCOURCIS</div><p>Maintenir pour parler</p><kbd>{state.hotkey_label}</kbd></article></div>}
     </main>
   </section>;
-  if (mode === "panel") return <section className="panel window" onKeyDown={event=>{if(event.key==="Escape")close();}}>
+  if (mode === "panel") return <section className="panel window" onKeyDown={event=>{if(event.key==="Escape")close();}} onBlur={event=>{if(!event.currentTarget.contains(event.relatedTarget as Node))close();}}>
     <header><div className="eyebrow"><b/> GERALD</div><button className="gear" onClick={settings} aria-label="Réglages">⚙</button></header>
     <h1><Reveal text="Dis bonjour à"/> <em><Reveal text="Gerald."/></em></h1><p className="sub">Tout ce que tu demandes, à la voix ou à l’écrit, se retrouve ici.</p>
     <div className="messages">{answer && <article className="answer"><Reveal text={answer}/>{sources.length>0&&<div className="sources">{sources.map((s,i)=><span key={i}>{s.document}{s.page?` · p. ${s.page}`:""}</span>)}</div>}</article>}{error&&<article>{error}</article>}</div>

@@ -137,3 +137,24 @@ def test_open_home_returns_a_stable_cached_widget(qapplication, monkeypatch):
     assert first is second
     first.close()
     home._td_window.close()
+
+
+def test_notch_activation_waits_for_explicit_focus_request(qapplication, monkeypatch):
+    import gerald.home.notch as notch
+
+    class FakeSurface(QWidget):
+        def __init__(self, _bridge, _file, parent=None):
+            super().__init__(parent)
+
+    monkeypatch.setattr(notch, "_WebSurface", FakeSurface)
+    window = notch.NotchWindow(Bridge(EmptyStore(), object(), object()))
+    activated = []
+    monkeypatch.setattr(QWidget, "activateWindow", lambda self: activated.append(self))
+
+    window.activateWindow()
+    assert activated == []
+
+    window._focus_requested = True
+    window.activateWindow()
+    assert activated == [window]
+    window.close()
