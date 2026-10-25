@@ -37,7 +37,7 @@ MOCK_BRIDGE = """
   };
   const signals = {
     stateChanged: signal(), modeChanged: signal(), answer: signal(),
-    answerError: signal(), recapReady: signal()
+    answerError: signal(), recapReady: signal(), agentStatus: signal()
   };
   window.__mockSignals = signals;
   window.bridge = {
@@ -75,53 +75,23 @@ def capture_web_screenshots() -> None:
             headless=True,
             args=["--no-sandbox", "--allow-file-access-from-files"],
         )
-        page = browser.new_page(
-            viewport={"width": 1280, "height": 900},
-            device_scale_factor=2,
-            color_scheme="light",
-        )
+        def notch(name: str, size: tuple[int, int], *scripts: str) -> None:
+            shot = browser.new_page(viewport={"width": size[0], "height": size[1]}, device_scale_factor=2)
+            shot.add_init_script(MOCK_BRIDGE)
+            shot.goto(url, wait_until="networkidle")
+            for script in scripts:
+                shot.evaluate(script)
+                shot.wait_for_timeout(350)
+            shot.screenshot(path=str(DOCS / f"{name}.png"), omit_background=True)
+            shot.close()
+
+        emit = "window.__mockSignals.{}.emit('{}')".format
+        notch("notch-greeting", (240, 36))
+        notch("notch-listening", (240, 36), emit("modeChanged", "collapsed"), emit("agentStatus", "listening"))
+        notch("notch-panel", (660, 64), emit("modeChanged", "panel"))
+        notch("notch-settings-documents", (660, 300), emit("modeChanged", "settings"))
+        page = browser.new_page(viewport={"width": 1280, "height": 900}, device_scale_factor=2, color_scheme="light")
         page.add_init_script(MOCK_BRIDGE)
-        page.goto(url, wait_until="networkidle")
-        greeting = page.locator(".greeting")
-        greeting.wait_for()
-        page.wait_for_timeout(600)
-        greeting.screenshot(path=str(DOCS / "notch-greeting.png"))
-
-        page.mouse.move(1200, 850)
-        page.wait_for_timeout(6200)
-        page.locator(".collapsed").wait_for()
-        collapsed = page.locator(".collapsed").bounding_box()
-        page.screenshot(path=str(DOCS / "notch-collapsed.png"), clip=collapsed)
-        page.evaluate("document.querySelector('.collapsed').click()")
-        page.locator(".panel").wait_for()
-        page.evaluate(
-            """() => window.__mockSignals.answer.emit(JSON.stringify({
-              text: "Le discriminant vaut Δ = b² − 4ac. Ici, Δ = 1, donc l’équation possède deux racines réelles.",
-              sources: [{document: "Polynômes du second degré.md", page: 2}]
-            }))"""
-        )
-        page.wait_for_timeout(2000)
-        page.locator(".panel").screenshot(path=str(DOCS / "notch-panel.png"))
-        page.evaluate(
-            """() => window.__mockSignals.answer.emit(JSON.stringify({
-              text: "La réponse est 42.",
-              sources: []
-            }))"""
-        )
-        page.wait_for_function("document.querySelector('.answer')?.textContent.includes('42')")
-        if page.locator(".sources").count():
-            raise AssertionError("An empty source list must not render a source-chip row")
-
-        page.locator(".panel .gear").click()
-        page.locator(".settings").wait_for()
-        page.get_by_role("button", name="Documents").click()
-        page.wait_for_timeout(200)
-        page.locator(".settings").screenshot(path=str(DOCS / "notch-settings-documents.png"))
-
-        page.get_by_role("button", name="Historique").click()
-        page.wait_for_timeout(200)
-        page.locator(".settings").screenshot(path=str(DOCS / "notch-settings-historique.png"))
-
         page.goto((WEBUI / "td.html").as_uri(), wait_until="networkidle")
         page.locator(".paper").wait_for()
         page.screenshot(path=str(DOCS / "td-exercises.png"), full_page=True)

@@ -49,6 +49,7 @@ class Bridge(QObject):
     focusRequested = pyqtSignal(bool)
     sessionOpenChanged = pyqtSignal(bool)
     recapReady = pyqtSignal(str)
+    agentStatus = pyqtSignal(str)
 
     def __init__(
         self, store, indexer, settings, *, ask_fn=None, open_board=None, end_session=None, on_library_changed=None
@@ -235,6 +236,9 @@ class Bridge(QObject):
     @pyqtSlot(bool)
     def requestFocus(self, requested: bool) -> None:
         self.focusRequested.emit(requested)
+
+    def set_agent_status(self, status: str) -> None:
+        self.agentStatus.emit(status)
 
     @pyqtSlot()
     def quit(self) -> None:

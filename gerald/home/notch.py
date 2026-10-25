@@ -30,7 +30,7 @@ class _WebSurface(QWidget):
 
 
 class NotchWindow(QWidget):
-    sizes = {"greeting": (380, 72), "collapsed": (220, 34), "panel": (440, 300), "settings": (880, 560)}
+    sizes = {"greeting": (240, 36), "collapsed": (240, 36), "panel": (660, 64), "settings": (660, 300)}
 
     def __init__(self, bridge: Bridge):
         flags = (
@@ -52,7 +52,7 @@ class NotchWindow(QWidget):
         bridge.focusRequested.connect(self.request_focus)
         bridge.recapReady.connect(self._open_recap_in_view)
         self._animation = QPropertyAnimation(self, b"geometry", self)
-        self._animation.setDuration(260)
+        self._animation.setDuration(160)
         self._animation.setEasingCurve(QEasingCurve.Type.OutCubic)
         self._anchor("greeting", animate=False)
         self._apply_capture_exclusion()

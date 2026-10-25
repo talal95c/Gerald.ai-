@@ -4,100 +4,100 @@ import { AppState, getBridge } from "./bridge";
 import "./style.css";
 
 const bridge = getBridge();
-const settingSections = ["Général", "Documents", "Historique", "Raccourcis"];
+const tabs = ["Tableau", "Documents", "Historique", "Raccourcis"];
 const emptyState: AppState = {
   greeting: "Bonjour.", hotkey_label: "CTRL + SHIFT", documents: [],
   conversations: [], session_open: false, recap_pending: false
 };
+const statusText: Record<string, string> = {listening: "J’écoute", thinking: "Je réfléchis", speaking: "Je parle", error: "Micro indisponible", offline: "Hors ligne"};
+
+const icons: Record<string, React.ReactNode> = {
+  "Tableau": <><rect x="3" y="4" width="14" height="10" rx="2"/><path className="cut" d="M6 11.2c1.4-3.6 2.6-3.6 4 0s2.6 3.6 4 0M7 17h6M10 14v3"/></>,
+  "Documents": <><path d="M6 3h5.6L15 6.4V16a1 1 0 0 1-1 1H6a1 1 0 0 1-1-1V4a1 1 0 0 1 1-1z"/><path className="cut" d="M11.4 3v3.6H15M7.6 10.2h4.8M7.6 13h3.4"/></>,
+  "Historique": <><circle cx="10" cy="10" r="6.6"/><path className="cut" d="M10 6.4V10l2.6 1.6"/></>,
+  "Raccourcis": <><rect x="3" y="5.5" width="14" height="9" rx="2.2"/><path className="cut" d="M6 8.6h.01M8.7 8.6h.01M11.3 8.6h.01M14 8.6h.01M7 11.6h6"/></>,
+};
+
+function NavIcon({name, active}: {name: string; active: boolean}) {
+  const id = `g-${tabs.indexOf(name)}`;
+  return <svg className="nav-icon" viewBox="0 0 20 20" aria-hidden="true">
+    <defs><linearGradient id={id} x1="0" y1="0" x2="1" y2="1"><stop offset="0" stopColor="#FFFDBD"/><stop offset="1" stopColor="#E8C547"/></linearGradient></defs>
+    <g fill={active ? `url(#${id})` : "none"} stroke={active ? "#FFFDBD" : "#262626"} strokeWidth="1.4" strokeLinejoin="round" strokeLinecap="round">{icons[name]}</g>
+  </svg>;
+}
+
+function NavBar({active, onChange}: {active: string; onChange: (tab: string) => void}) {
+  const refs = useRef<Record<string, HTMLButtonElement | null>>({});
+  const [thumb, setThumb] = useState({left: 0, width: 0});
+  useEffect(() => {
+    const el = refs.current[active];
+    if (el) setThumb({left: el.offsetLeft, width: el.offsetWidth});
+  }, [active]);
+  return <nav className="navbar" role="tablist">
+    <span className="nav-thumb" style={{transform:`translateX(${thumb.left}px)`, width: thumb.width}} />
+    {tabs.map(x=><button key={x} ref={el=>{refs.current[x]=el;}} role="tab" aria-selected={active===x} className={active===x?"active":""} onClick={()=>onChange(x)}><NavIcon name={x} active={active===x}/><span>{x}</span></button>)}
+  </nav>;
+}
+
 
 function Reveal({text}: {text: string}) {
   const words = text.split(/(\s+)/);
   return <>{words.map((word,index)=>/^\s+$/.test(word)?word:<span className="reveal-word" style={{animationDelay:`${index*40}ms`}} key={`${word}-${index}`}>{word}</span>)}</>;
 }
 
+function Wave({status}: {status: string}) {
+  return <span className={`wave ${status}`} aria-hidden="true">{[0,1,2,3,4].map(i=><i key={i} style={{animationDelay:`${i*90}ms`}}/>)}</span>;
+}
+
 function App() {
   const [mode, setMode] = useState("greeting");
   const [state, setState] = useState(emptyState);
-  const [question, setQuestion] = useState("");
-  const [answer, setAnswer] = useState("");
-  const [sources, setSources] = useState<{document: string; page?: number}[]>([]);
-  const [error, setError] = useState("");
+  const [status, setStatus] = useState("idle");
+  const [tab, setTab] = useState("Documents");
   const [recap, setRecap] = useState("");
-  const [settingsTab, setSettingsTab] = useState("Général");
-  const [historyFilter, setHistoryFilter] = useState("Toutes");
   const [historyMessages, setHistoryMessages] = useState<{role: string; text: string}[] | null>(null);
-  const idleTimer = useRef<number | null>(null);
-  const pointerInside = useRef(false);
-  const modeRef = useRef(mode);
-  const scheduleCollapse = () => {
-    if (idleTimer.current !== null) window.clearTimeout(idleTimer.current);
-    idleTimer.current = window.setTimeout(() => {
-      if (!pointerInside.current && modeRef.current === "greeting") {
-        setMode("collapsed"); bridge.setMode("collapsed");
-      }
-    }, 6000);
-  };
-  useEffect(() => { modeRef.current = mode; }, [mode]);
+  const timer = useRef<number | null>(null);
+  const go = (next: string) => { setMode(next); bridge.setMode(next); };
+  const clear = () => { if (timer.current !== null) window.clearTimeout(timer.current); };
+  const later = (next: string, ms: number) => { clear(); timer.current = window.setTimeout(() => go(next), ms); };
   useEffect(() => {
     const connect = () => {
       bridge.state(json => setState(JSON.parse(json)));
       bridge.stateChanged.connect(json => setState(JSON.parse(json)));
       bridge.modeChanged.connect(setMode);
-      bridge.answer.connect(json => {
-        const result = JSON.parse(json);
-        setAnswer(result.text);
-        setSources(result.sources || []);
-        setError("");
-      });
-      bridge.answerError.connect(setError);
       bridge.recapReady.connect(setRecap);
+      bridge.agentStatus?.connect(setStatus);
     };
-    if (window.qt && !window.bridge) {
-      window.addEventListener("gerald-bridge-ready", connect, {once:true});
-    } else {
-      connect();
-    }
-    scheduleCollapse();
-    return () => {
-      if (idleTimer.current !== null) window.clearTimeout(idleTimer.current);
-      window.removeEventListener("gerald-bridge-ready", connect);
-    };
+    if (window.qt && !window.bridge) window.addEventListener("gerald-bridge-ready", connect, {once:true});
+    else connect();
+    later("collapsed", 2600);
+    return clear;
   }, []);
-  const open = () => {
-    if (idleTimer.current !== null) window.clearTimeout(idleTimer.current);
-    setMode("panel"); bridge.setMode("panel");
+  const pick = (name: string) => {
+    if (name === "Tableau") { bridge.openBoard("Exercice", "[]"); go("collapsed"); return; }
+    setHistoryMessages(null);
+    if (mode === "settings" && tab === name) { go("panel"); return; }
+    setTab(name); go("settings");
   };
-  const settings = () => {
-    pointerInside.current = false;
-    if (idleTimer.current !== null) window.clearTimeout(idleTimer.current);
-    setMode("settings"); bridge.setMode("settings");
-  };
-  const close = () => { setMode("greeting"); bridge.setMode("greeting"); scheduleCollapse(); };
-  const send = () => { if (question.trim()) { bridge.ask(question.trim()); setQuestion(""); } };
-  const openConversation = (id: number) => bridge.messages(id, json => setHistoryMessages(JSON.parse(json)));
-  if (mode === "collapsed") return <button className="collapsed" onMouseEnter={open} onClick={open}>Gerald <i /></button>;
-  if (mode === "settings") return <section className="settings window">
-    <aside><div className="eyebrow"><b /> GERALD</div>{settingSections.map(x=><button key={x} className={settingsTab===x?"active":""} onClick={()=>{setSettingsTab(x);setHistoryMessages(null);}}>{x}</button>)}<button className="quit" onClick={()=>bridge.quit()}>Quitter Gerald</button></aside>
-    <main onKeyDown={event=>{if(event.key==="Escape")close();}}><header><button className="back" onClick={close}>←</button><h1>{settingsTab}</h1></header>
-      {settingsTab==="Général"&&<div className="setting-grid"><article><div className="eyebrow"><b/> APERÇU</div><h2>{state.greeting}</h2><p>Maintiens {state.hotkey_label} et demande-moi ce que tu veux.</p></article></div>}
-      {settingsTab==="Documents"&&<div className="setting-grid"><article><div className="eyebrow"><b/> DOCUMENTS</div>{state.documents.map(doc=><p className="row" key={doc.id}><i className={`dot ${doc.status}`} /><span>{doc.filename}{doc.error&&<small>{doc.error}</small>}</span><button aria-label={`Supprimer ${doc.filename}`} onClick={()=>bridge.deleteDocument(doc.id)}>×</button></p>)}<button className="pill dark" onClick={()=>bridge.addDocuments()}>Ajouter des documents →</button></article></div>}
-      {settingsTab==="Historique"&&<div className="setting-grid"><article><div className="eyebrow"><b/> HISTORIQUE</div><nav className="filters">{["Toutes","Chat","Agent"].map(x=><button className={historyFilter===x?"active":""} key={x} onClick={()=>setHistoryFilter(x)}>{x}</button>)}</nav>{historyMessages?<><button className="history-back" onClick={()=>setHistoryMessages(null)}>← Retour</button>{historyMessages.map((message,index)=><p className={`history-message ${message.role}`} key={index}>{message.text}</p>)}</>:state.conversations.filter(c=>historyFilter==="Toutes"||c.source.toLowerCase()===historyFilter.toLowerCase()).map(c=><button className="history" key={c.id} onClick={()=>openConversation(c.id)}>{c.title}</button>)}</article></div>}
-      {settingsTab==="Raccourcis"&&<div className="setting-grid"><article><div className="eyebrow"><b/> RACCOURCIS</div><p>Maintenir pour parler</p><kbd>{state.hotkey_label}</kbd></article></div>}
-    </main>
-  </section>;
-  if (mode === "panel") return <section className="panel window" onKeyDown={event=>{if(event.key==="Escape")close();}} onBlur={event=>{if(!event.currentTarget.contains(event.relatedTarget as Node))close();}}>
-    <header><div className="eyebrow"><b/> GERALD</div><button className="gear" onClick={settings} aria-label="Réglages">⚙</button></header>
-    <h1><Reveal text="Dis bonjour à"/> <em><Reveal text="Gerald."/></em></h1><p className="sub">Tout ce que tu demandes, à la voix ou à l’écrit, se retrouve ici.</p>
-    <div className="messages">{answer && <article className="answer"><Reveal text={answer}/>{sources.length>0&&<div className="sources">{sources.map((s,i)=><span key={i}>{s.document}{s.page?` · p. ${s.page}`:""}</span>)}</div>}</article>}{error&&<article>{error}</article>}</div>
-    <footer>{state.session_open && <button className="pill accent" onClick={()=>bridge.endSession()}>{state.recap_pending?"Fiche de révision en préparation…":"Fin de session"}</button>}{recap&&<button className="pill accent" onClick={()=>bridge.openRecap(recap)}>Ouvrir la fiche →</button>}
-      <button className="pill accent">{`Maintiens ${state.hotkey_label} pour parler`}</button><input value={question} placeholder="Demande à Gerald…" onFocus={()=>bridge.requestFocus(true)} onBlur={()=>bridge.requestFocus(false)} onChange={e=>setQuestion(e.target.value)} onKeyDown={e=>{if(e.key==="Enter"){e.preventDefault();send();}}}/><button className="send" onClick={send}>↑</button></footer>
-  </section>;
-  return <section className="greeting window" onMouseEnter={()=>{pointerInside.current=true;if(idleTimer.current!==null)window.clearTimeout(idleTimer.current);setMode("greeting");}} onMouseLeave={()=>{pointerInside.current=false;scheduleCollapse();}} onClick={open}>
-    <div className="greeter"><h2><Reveal text={state.greeting}/></h2><p>Maintiens {state.hotkey_label} et demande-moi ce que tu veux.</p></div>
-    <button className="pill accent" onClick={event=>{event.stopPropagation();bridge.openBoard("Exercice", "[]");}}>Tableau →</button>
-    {state.session_open && <button className="pill accent session" onClick={event=>{event.stopPropagation();bridge.endSession();}}>{state.recap_pending?"Fiche en préparation…":"Fin de session"}</button>}
-    {recap&&<button className="pill accent session" onClick={event=>{event.stopPropagation();bridge.openRecap(recap);}}>Ouvrir la fiche →</button>}
-    <button className="gear" onClick={event=>{event.stopPropagation();settings();}}>⚙</button>
+  const active = status !== "idle";
+  const pillLabel = active ? statusText[status] ?? status : mode === "greeting" ? state.greeting : `Maintiens ${state.hotkey_label}`;
+  if (mode === "greeting" || mode === "collapsed") return <button className={`notch pill-notch m-${mode} s-${status}`} onClick={()=>{clear();go("panel");}}>
+    {active ? <Wave status={status}/> : <i className="dot-live" />}<span key={pillLabel}><Reveal text={pillLabel}/></span>
+  </button>;
+  return <section className={`notch sheet m-${mode}`} onMouseEnter={clear} onMouseLeave={()=>later("collapsed", 700)} onKeyDown={e=>{if(e.key==="Escape")go("collapsed");}}>
+    <div className="bar">
+      <span className="status">{active ? <Wave status={status}/> : <i className="dot-live" />}<span>{active ? statusText[status] ?? status : state.hotkey_label}</span></span>
+      <NavBar active={mode === "settings" ? tab : ""} onChange={pick}/>
+      {state.session_open ? <button className="end" onClick={()=>bridge.endSession()}>{state.recap_pending ? "Fiche…" : "Fin de session"}</button>
+        : recap ? <button className="end" onClick={()=>bridge.openRecap(recap)}>Fiche →</button>
+        : <button className="quit" onClick={()=>bridge.quit()} aria-label="Quitter">⏻</button>}
+    </div>
+    {mode === "settings" && <div className="content" key={tab}>
+      {tab === "Documents" && <>{state.documents.map(doc=><p className="row" key={doc.id}><i className={`dot ${doc.status}`} /><span>{doc.filename}{doc.error&&<small>{doc.error}</small>}</span><button aria-label={`Supprimer ${doc.filename}`} onClick={()=>bridge.deleteDocument(doc.id)}>×</button></p>)}<button className="add" onClick={()=>bridge.addDocuments()}>+ Ajouter</button></>}
+      {tab === "Historique" && (historyMessages ? <><button className="add" onClick={()=>setHistoryMessages(null)}>← Retour</button>{historyMessages.map((m,i)=><p className={`msg ${m.role}`} key={i}>{m.text}</p>)}</>
+        : state.conversations.map(c=><button className="row link" key={c.id} onClick={()=>bridge.messages(c.id, json=>setHistoryMessages(JSON.parse(json)))}><i className={`tag ${c.source}`}>{c.source === "agent" ? "Voix" : "Écrit"}</i><span>{c.title}</span></button>))}
+      {tab === "Raccourcis" && <p className="row"><span>Maintenir pour parler</span><kbd>{state.hotkey_label}</kbd></p>}
+    </div>}
   </section>;
 }
 createRoot(document.getElementById("root")!).render(<App />);

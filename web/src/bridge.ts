@@ -17,6 +17,7 @@ export type GeraldBridge = {
   answer: Signal<string>;
   answerError: Signal<string>;
   recapReady: Signal<string>;
+  agentStatus?: Signal<string>;
   setMode: (mode: string) => void;
   ask: (question: string) => void;
   messages: (id: number, callback: (json: string) => void) => void;
