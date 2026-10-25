@@ -1,4 +1,6 @@
-export type Document = { id: number; filename: string; status: string; error?: string; folder?: string };
+import { webBridge } from "./webbridge";
+
+export type Document = { id: number; filename: string; status: string; error?: string; folder?: string; mime?: string; created_at?: string; builtin?: boolean };
 export type Conversation = { id: number; title: string; source: string; updated_at: string };
 export type AppState = {
   greeting: string;
@@ -9,6 +11,7 @@ export type AppState = {
   recap_pending: boolean;
   last_exercise: {title: string; lines: string[]} | null;
   recap?: string;
+  upload_error?: string;
 };
 
 type Signal<T> = { connect: (callback: (value: T) => void) => void; disconnect?: (callback: (value: T) => void) => void };
@@ -32,6 +35,7 @@ export type GeraldBridge = {
   openRecap: (path: string) => void;
   requestFocus: (active: boolean) => void;
   quit: () => void;
+  openDocument?: (id: number) => void;
 };
 
 declare global {
@@ -63,6 +67,7 @@ const mock: GeraldBridge = {
 
 export function getBridge(): GeraldBridge {
   if (window.bridge) return window.bridge;
+  if (!window.qt && /(?:^|\/)(?:app|desktop)\.html$/.test(location.pathname)) return webBridge;
   if (window.qt && window.QWebChannel) {
     new window.QWebChannel(window.qt.webChannelTransport, channel => {
       window.bridge = channel.objects.bridge;

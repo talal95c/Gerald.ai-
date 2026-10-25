@@ -90,7 +90,7 @@ def test_session_posts_sdp_and_filtered_realtime_config(monkeypatch, server):
     lines = ["Résous dans ℝ : x² − 5x + 6 = 0"]
     query = urlencode({"title": title, "lines": json.dumps(lines, ensure_ascii=False)})
 
-    status, body, _headers = _request(
+    status, body, response_headers = _request(
         server,
         "POST",
         f"/api/session?{query}",
@@ -171,6 +171,7 @@ def test_session_posts_sdp_and_filtered_realtime_config(monkeypatch, server):
         "vert (intent=valide)",
         "bleu (intent=remarque)",
         "l'écriture normale reste noire",
+        "souligne aussi le terme fautif en rouge (intent=correction) dans le même tour",
     ):
         assert color_intent in session["instructions"]
     assert "une seule underline ou circle (intent=correction)" in session["instructions"]
@@ -189,6 +190,103 @@ def test_session_posts_sdp_and_filtered_realtime_config(monkeypatch, server):
         if tool["name"] in {"underline", "circle", "point", "note", "highlight", "arrow", "tip"}:
             assert "element_id" in str(tool["parameters"])
             assert "target_text" in str(tool["parameters"])
+
+
+def test_live_session_omits_default_exercise_context(monkeypatch, server):
+    captured = []
+    monkeypatch.setenv("OPENAI_API_KEY", "test-key-not-logged")
+
+    def fake_urlopen(request, timeout):
+        assert timeout == 60
+        captured.append(request)
+        return _StubResponse(b"v=0\r\nanswer")
+
+    monkeypatch.setattr(web_voice_board, "urlopen", fake_urlopen)
+    status, _body, _headers = _request(
+        server,
+        "POST",
+        "/api/session?live=1",
+        b"v=0\r\noffer",
+        {"Content-Type": "application/sdp"},
+    )
+
+    assert status == 201
+    request = captured[0]
+    content_type = next(
+        value for key, value in request.headers.items() if key.casefold() == "content-type"
+    )
+    message = BytesParser(policy=default).parsebytes(
+        b"Content-Type: "
+        + content_type.encode("ascii")
+        + b"\r\nMIME-Version: 1.0\r\n\r\n"
+        + request.data
+    )
+    session_part = next(
+        part
+        for part in message.iter_parts()
+        if part.get_param("name", header="content-disposition") == "session"
+    )
+    session = json.loads(session_part.get_content())
+    assert "LIVE BOARD MODE" in session["instructions"]
+    assert "do not answer only with speech" in session["instructions"]
+    assert "x² − 5x + 6" not in session["instructions"]
+    assert "x**2-5*x+6" not in session["instructions"]
+    assert "x**2-5*x+6" not in " ".join(
+        tool["description"] for tool in session["tools"]
+    )
+    assert "open_board" not in {tool["name"] for tool in session["tools"]}
+
+
+def test_document_session_uses_sanitized_title_and_live_tools():
+    config = web_voice_board.build_session_config(
+        "gpt-realtime-2",
+        "Cours\u0000 de Pythagore",
+        [],
+        doc_mode=True,
+    )
+    instructions = config["instructions"]
+    assert "DOCUMENT MODE" in instructions
+    assert "« Cours de Pythagore »" in instructions
+    assert "x² − 5x + 6" not in instructions
+    assert "x**2-5*x+6" not in instructions
+    assert "do not answer only with speech" not in instructions
+    assert "provide a full exercise solution" in instructions
+    tools = {tool["name"]: tool for tool in config["tools"]}
+    assert set(tools) == web_voice_board.WEB_TOOL_NAMES
+    open_board = tools["open_board"]["parameters"]
+    assert open_board["properties"] == {}
+    assert open_board["required"] == []
+
+
+def test_document_title_sanitization_strips_controls_and_limits_length():
+    title = "  A\u0000B\n" + "x" * 130
+    sanitized = web_voice_board.sanitize_document_title(title)
+    assert sanitized == ("AB" + "x" * 118)
+    assert len(sanitized) == 120
+
+
+def test_paint_mode_uses_guidance_and_exact_tool_list():
+    config = web_voice_board.build_session_config("gpt-realtime-2", paint_mode=True)
+    guidance = web_voice_board.PAINT_MODE_GUIDANCE.read_text(encoding="utf-8")
+    assert config["instructions"].startswith(guidance)
+    assert config["instructions"].endswith(web_voice_board.COLOR_GUIDANCE)
+    assert [tool["name"] for tool in config["tools"]] == [
+        "point",
+        "circle",
+        "arrow",
+        "highlight",
+        "note",
+        "tip",
+        "clear_gerald",
+    ]
+    assert "write" not in {tool["name"] for tool in config["tools"]}
+    assert "plot" not in {tool["name"] for tool in config["tools"]}
+    assert "open_board" not in {tool["name"] for tool in config["tools"]}
+
+
+def test_minipaint_index_is_served(server):
+    status, _body, _headers = _request(server, "GET", "/vendor/minipaint/index.html")
+    assert status == 200
 
 
 def test_plot_endpoint_returns_root_and_vertex_points(server):
@@ -249,7 +347,7 @@ def test_foreign_origin_or_host_is_rejected(monkeypatch, server, headers):
         return _StubResponse(b"should not be called")
 
     monkeypatch.setattr(web_voice_board, "urlopen", fake_urlopen)
-    status, body, _headers = _request(
+    status, body, response_headers = _request(
         server,
         "POST",
         "/api/session",
@@ -258,19 +356,30 @@ def test_foreign_origin_or_host_is_rejected(monkeypatch, server, headers):
     )
 
     assert status == 403
+    assert response_headers["Connection"].lower() == "close"
     assert json.loads(body)["error"] == "origin or host not allowed"
     assert not called
 
 
-def test_root_redirects_to_td_and_board_defaults_to_voice(server):
+def test_root_redirects_to_landing_and_td_board_defaults_to_voice(server):
     status, _body, headers = _request(server, "GET", "/")
     assert status == 302
-    assert headers["Location"] == "/td.html?voice=1"
+    assert headers["Location"] == "/landing.html"
+
+    status, _body, _headers = _request(server, "GET", "/landing.html")
+    assert status == 200
+
+    status, _body, _headers = _request(server, "GET", "/app.html")
+    assert status == 200
 
     status, _body, headers = _request(server, "GET", "/td.html?voice=0&from=demo")
     assert status == 302
     assert "voice=1" in headers["Location"]
     assert "from=demo" in headers["Location"]
+
+    status, _body, headers = _request(server, "GET", "/td.html?live=1")
+    assert status == 302
+    assert headers["Location"] == "/td.html?live=1&voice=1"
 
     status, _body, headers = _request(server, "GET", "/board.html?title=Exercice%201")
     assert status == 302
@@ -286,7 +395,7 @@ def test_static_route_rejects_foreign_origin(server):
     status, body, _headers = _request(
         server,
         "GET",
-        "/",
+        "/landing.html",
         headers={"Origin": "http://attacker.example"},
     )
     assert status == 403

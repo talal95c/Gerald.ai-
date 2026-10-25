@@ -44,7 +44,17 @@ def save_recap(
                     stderr=subprocess.DEVNULL,
                 )
         except OSError:
-            logger.warning("Could not open lesson recap %s", path, exc_info=True)
+            if os.name == "nt":
+                try:
+                    subprocess.Popen(
+                        ["notepad.exe", str(path)],
+                        stdout=subprocess.DEVNULL,
+                        stderr=subprocess.DEVNULL,
+                    )
+                except OSError:
+                    logger.warning("Could not open lesson recap %s", path, exc_info=True)
+            else:
+                logger.warning("Could not open lesson recap %s", path, exc_info=True)
     if board_image is not None:
         suffix = 1
         while True:

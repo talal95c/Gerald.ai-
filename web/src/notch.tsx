@@ -101,12 +101,15 @@ function DocView({doc, folder, hotkey, onBack}: {doc: AppState["documents"][numb
   </div>;
 }
 
-function Folders({docs, recaps, hotkey, onDocumentOpen, onBack}: {
+function Folders({docs, recaps, hotkey, uploadError, onDocumentOpen, onBack}: {
   docs: AppState["documents"]; recaps: Recap[]; hotkey: string;
-  onDocumentOpen: () => void; onBack: () => void;
+  uploadError?: string; onDocumentOpen: (id: number) => void; onBack: () => void;
 }) {
   const [doc, setDoc] = useState<AppState["documents"][number] | null>(null);
-  const onOpen = (d: AppState["documents"][number]) => { setDoc(d); onDocumentOpen(); };
+  const onOpen = (d: AppState["documents"][number]) => {
+    if (bridge.openDocument) onDocumentOpen(d.id);
+    else { setDoc(d); onDocumentOpen(d.id); }
+  };
   const [open, setOpen] = useState<string | null>(null);
   const groups = docs.reduce<Record<string, AppState["documents"]>>((acc, d) => { (acc[d.folder || "Mes cours"] ??= []).push(d); return acc; }, {});
   if (doc) return <DocView doc={doc} folder={doc.folder || "Mes cours"} hotkey={hotkey} onBack={()=>{setDoc(null);onBack();}}/>;
@@ -120,9 +123,10 @@ function Folders({docs, recaps, hotkey, onDocumentOpen, onBack}: {
     <button className="add" onClick={()=>setOpen(null)}>← Dossiers</button><span className="folder-title">{open}</span>
     <div className="fan">{groups[open].map((doc,i)=><article className="sheet-card" key={doc.id} onClick={()=>onOpen(doc)} style={{animationDelay:`${i*45}ms`}}>
       <i className={`dot ${doc.status}`} /><b>{doc.filename}</b><small>{doc.status === "ready" ? "Prêt" : doc.error || "Indexation…"}</small>
-      <button aria-label={`Supprimer ${doc.filename}`} onClick={e=>{e.stopPropagation();bridge.deleteDocument(doc.id);}}>×</button></article>)}</div>
+      {doc.id >= 0 && <button aria-label={`Supprimer ${doc.filename}`} onClick={e=>{e.stopPropagation();bridge.deleteDocument(doc.id);}}>×</button>}</article>)}</div>
   </div>;
   return <div className="folders">
+    {uploadError && <p className="upload-error" role="alert">{uploadError}</p>}
     {Object.entries(groups).map(([name, items])=><button className="folder" key={name} onClick={()=>setOpen(name)}>
       <span className="papers">{items.slice(0,3).map((d,i)=><i key={d.id} style={{"--i":i} as React.CSSProperties}/>)}</span>
       <span className="pocket"/><span className="folder-name">{name}</span><span className="folder-count">{items.length} fichier{items.length>1?"s":""}</span>
@@ -132,7 +136,7 @@ function Folders({docs, recaps, hotkey, onDocumentOpen, onBack}: {
   </div>;
 }
 
-function App() {
+function App({onTalk}: {onTalk?: (pressed: boolean) => void}) {
   const [mode, setMode] = useState(window.qt || !/(td|board|fiche)\.html$/.test(location.pathname) ? "greeting" : "collapsed");
   const [state, setState] = useState<NotchState>(emptyState);
   const [status, setStatus] = useState("idle");
@@ -181,12 +185,30 @@ function App() {
   };
   const active = status !== "idle";
   const pillLabel = active ? statusText[status] ?? status : mode === "greeting" ? state.greeting : `Maintiens ${state.hotkey_label}`;
-  if (mode === "greeting" || mode === "collapsed") return <button className={`notch pill-notch m-${mode} s-${status}`} onClick={()=>{clear();go("panel");}}>
-    <Orb status={status} size={24}/><span key={pillLabel}><Reveal text={pillLabel}/></span>
-  </button>;
+  if (mode === "greeting" || mode === "collapsed") return onTalk
+    ? <div className={`notch pill-notch notch-pill-controls m-${mode} s-${status}`} role="button" tabIndex={0}
+      onClick={()=>{clear();go("panel");}}
+      onKeyDown={event=>{if(event.key==="Enter"||event.key===" "){event.preventDefault();clear();go("panel");}}}>
+        <Orb status={status} size={24}/><span key={pillLabel}><Reveal text={pillLabel}/></span>
+      <button className="notch-talk notch-talk-pill" type="button" aria-label="Maintenir pour parler"
+        onClick={event=>event.stopPropagation()}
+        onPointerDown={event=>{event.preventDefault();onTalk(true);event.currentTarget.setPointerCapture(event.pointerId);}}
+        onPointerUp={()=>onTalk(false)} onPointerCancel={()=>onTalk(false)} onLostPointerCapture={()=>onTalk(false)}>
+        <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3a3 3 0 0 0-3 3v5a3 3 0 0 0 6 0V6a3 3 0 0 0-3-3ZM6 11a6 6 0 0 0 12 0M12 17v4m-3 0h6" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round"/></svg>
+      </button>
+    </div>
+    : <button className={`notch pill-notch m-${mode} s-${status}`} onClick={()=>{clear();go("panel");}}>
+      <Orb status={status} size={24}/><span key={pillLabel}><Reveal text={pillLabel}/></span>
+    </button>;
   return <section className={`notch sheet m-${mode}`} onMouseEnter={clear} onMouseLeave={()=>{ if (mode !== "document" && document.activeElement?.tagName !== "INPUT") later("collapsed", 700); }} onKeyDown={e=>{if(e.key==="Escape")go("collapsed");}}>
     <div className="bar">
-      <span className="status"><Orb status={status} size={28}/><span>{active ? statusText[status] ?? status : state.hotkey_label}</span></span>
+      <span className="status"><Orb status={status} size={28}/><span>{active ? statusText[status] ?? status : state.hotkey_label}</span>
+        {onTalk && <button className="notch-talk" type="button" aria-label="Maintenir pour parler"
+          onPointerDown={event=>{event.preventDefault();onTalk(true);event.currentTarget.setPointerCapture(event.pointerId);}}
+          onPointerUp={()=>onTalk(false)} onPointerCancel={()=>onTalk(false)} onLostPointerCapture={()=>onTalk(false)}>
+          <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 15a3 3 0 0 0 3-3V6a3 3 0 1 0-6 0v6a3 3 0 0 0 3 3Zm6-3a6 6 0 0 1-12 0M12 18v3m-4 0h8" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round"/></svg>
+        </button>}
+      </span>
       <NavBar active={mode === "settings" ? tab : mode === "document" ? "Documents" : ""} onChange={pick}/>
       {state.session_open ? <button className="end" title={state.recap_error || undefined} onClick={()=>bridge.endSession()}>{state.recap_pending ? "Fiche…" : state.recap_error ? "Réessayer la fiche" : "Fin de session"}</button>
         : recap ? <button className="end" onClick={()=>bridge.openRecap(recap)}>Fiche →</button>
@@ -195,8 +217,11 @@ function App() {
     {state.session_open && state.recap_error && !state.recap_pending && <p className="recap-error" role="status">{state.recap_error}</p>}
     {(mode === "settings" || mode === "document") && <div className={`content ${mode === "document" ? "document-content" : ""}`} key={tab}>
       {(mode === "document" || tab === "Documents") && <Folders
-        docs={state.documents} recaps={state.recaps ?? []} hotkey={state.hotkey_label}
-        onDocumentOpen={()=>go("document")} onBack={()=>go("settings")}
+        docs={state.documents} recaps={state.recaps ?? []} hotkey={state.hotkey_label} uploadError={state.upload_error}
+        onDocumentOpen={id=>{
+          if (bridge.openDocument) { bridge.openDocument(id); go("collapsed"); }
+          else go("document");
+        }} onBack={()=>go("settings")}
       />}
       {mode === "settings" && tab === "Historique" && (historyMessages
         ? <><button className="add" onClick={()=>setHistoryMessages(null)}>← Retour</button>{historyMessages.map((m,i)=><p className={`msg ${m.role}`} key={i}><span>{m.text}</span>{m.created_at && <time>{localTime(m.created_at)}</time>}</p>)}</>
@@ -211,6 +236,6 @@ function App() {
   </section>;
 }
 
-export function mountNotch(el: HTMLElement) {
-  createRoot(el).render(<App />);
+export function mountNotch(el: HTMLElement, onTalk?: (pressed: boolean) => void) {
+  createRoot(el).render(<App onTalk={onTalk}/>);
 }

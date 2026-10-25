@@ -125,8 +125,11 @@ const normalizedMatch = (source: string, wanted: string) => {
   return index < 0 || !query ? null : {index: actual.starts[index], end: actual.ends[index + query.length - 1]};
 };
 const params = new URLSearchParams(location.search);
-const title = params.get("title") || "Exercice 1";
-const lines: string[] = (() => {
+const liveMode = params.get("live") === "1";
+const embedded = window.parent !== window;
+const TOOL_RAIL_SAFE_X = 128;
+const title = liveMode ? "" : params.get("title") || "Exercice 1";
+const lines: string[] = liveMode ? [] : (() => {
   try {
     const value = JSON.parse(params.get("lines") || "[]");
     return Array.isArray(value) && value.every((line) => typeof line === "string") && value.length
@@ -362,20 +365,54 @@ function Board() {
   const canvas = useRef<HTMLCanvasElement>(null);
   const exerciseCard = useRef<HTMLElement>(null);
   const strokes = useRef<Stroke[]>([]);
+  const toolRailRect = (): AnnotationRect | null => {
+    if (!embedded) return null;
+    const rail = document.querySelector<HTMLElement>(".board-tools")?.getBoundingClientRect();
+    return rail ? {x: rail.x, y: rail.y, w: rail.width, h: rail.height} : null;
+  };
+  const minBoardContentX = () => {
+    const rail = toolRailRect();
+    return embedded ? Math.max(TOOL_RAIL_SAFE_X, rail ? rail.x + rail.w + 16 : 0) : 0;
+  };
   const [tool, setTool] = useState("pen");
   const [penColor, setPenColor] = useState(penColors[0].value);
   const [plotData, setPlotData] = useState<PlotData | null>(null);
-  const [plotBox, setPlotBox] = useState<Win>({x: 24, y: 140, w: 520, h: 360});
+  const [plotBox, setPlotBox] = useState<Win>({x: embedded ? TOOL_RAIL_SAFE_X : 24, y: 140, w: 520, h: 360});
   const [plotVisible, setPlotVisible] = useState(false);
   const [plotRevision, setPlotRevision] = useState(0);
   const [marks, setMarks] = useState<BoardMark[]>([]);
-  const cursorRest = {x: innerWidth / 2, y: innerHeight - 90};
+  const cursorRest = {x: Math.max(innerWidth / 2, minBoardContentX()), y: innerHeight - 90};
   const [cursor, setCursor] = useState<CursorVisual>({...cursorRest, visible: false});
   const cursorMotion = useRef<ReturnType<typeof createCursorMotion> | null>(null);
   if (!cursorMotion.current) cursorMotion.current = createCursorMotion(cursorRest, setCursor);
   const pendingAnnotations = useRef(new Map<string, AnnotationRect>());
   const [geraldTexts, setGeraldTexts] = useState<GeraldText[]>([]);
   const [, tick] = useState(0);
+  useEffect(() => {
+    if (!embedded) return;
+    let held = false;
+    const send = (pressed: boolean) => window.parent.postMessage({type: "gerald-hotkey", pressed}, location.origin);
+    const down = (event: KeyboardEvent) => {
+      if (!event.ctrlKey || !event.shiftKey || event.repeat || held) return;
+      event.preventDefault();
+      held = true;
+      send(true);
+    };
+    const up = (event: KeyboardEvent) => {
+      if ((event.key !== "Control" && event.key !== "Shift") || !held) return;
+      held = false;
+      send(false);
+    };
+    const blur = () => { if (held) { held = false; send(false); } };
+    window.addEventListener("keydown", down);
+    window.addEventListener("keyup", up);
+    window.addEventListener("blur", blur);
+    return () => {
+      window.removeEventListener("keydown", down);
+      window.removeEventListener("keyup", up);
+      window.removeEventListener("blur", blur);
+    };
+  }, []);
   const snapshotState = useRef<BoardSnapshot>({
     plotData: null,
     plotBox,
@@ -432,6 +469,7 @@ function Board() {
   }, [plotData, plotBox, marks, geraldTexts, plotVisible]);
   const occupiedBoxes = () => {
     const boxes: number[][] = [];
+    if (embedded) boxes.push([0, 0, minBoardContentX(), innerHeight]);
     const card = exerciseCard.current?.getBoundingClientRect();
     if (card) boxes.push([card.x, card.y, card.width, card.height]);
     for (const mark of marks) {
@@ -643,11 +681,14 @@ function Board() {
       ...(target ? [target] : []),
       ...extra,
     ];
+  const safeRail = () => embedded ? [{x: 0, y: 0, w: minBoardContentX(), h: innerHeight}] : [];
   const viewport = () => ({w: innerWidth, h: innerHeight});
+  const occupiedForAnnotations = (target?: AnnotationRect, extra: AnnotationRect[] = []) =>
+    [...annotationOccupants(target, extra), ...safeRail()];
   const placeBeside = (target: AnnotationRect, text: string, kind: "note" | "tip") =>
-    placeAnnotation(target, annotationSize(text, kind), annotationOccupants(target), viewport());
+    placeAnnotation(target, annotationSize(text, kind), occupiedForAnnotations(target), viewport());
   const restBeside = (bounds: AnnotationRect, extra: AnnotationRect[] = []) =>
-    cursorRestBeside(bounds, annotationOccupants(bounds, extra), viewport());
+    cursorRestBeside(bounds, occupiedForAnnotations(bounds, extra), viewport());
   const waitForPaint = () => new Promise<void>((resolve) => requestAnimationFrame(() => requestAnimationFrame(() => resolve())));
   const addMark = (mark: BoardMark) => setMarks((items) => [...items, mark]);
   const updateMarkProgress = (id: string, progress: number) =>
@@ -730,10 +771,12 @@ function Board() {
           ? {...part, html: katex.renderToString(mathToLatex(part.value), {throwOnError: false, output: "htmlAndMathml"})}
           : part)
         : undefined;
+      const x = Math.max(Number(args.x), minBoardContentX());
+      const y = Number(args.y);
       motion.enqueue(async (queue) => {
-        await queue.moveTo({x: Number(args.x), y: Number(args.y)});
-        setGeraldTexts((items) => [...items, {id, text, x: Number(args.x), y: Number(args.y), size, color: color ?? "#111", html, parts}]);
-        const bounds = {x: Number(args.x), y: Number(args.y) - size, w: Math.max(size, text.length * size * 0.65), h: size * 1.25};
+        await queue.moveTo({x, y});
+        setGeraldTexts((items) => [...items, {id, text, x, y, size, color: color ?? "#111", html, parts}]);
+        const bounds = {x, y: y - size, w: Math.max(size, text.length * size * 0.65), h: size * 1.25};
         await moveToRest(queue, restBeside(bounds));
       });
       return {ok: true};
@@ -877,9 +920,9 @@ function Board() {
     onClick={() => act(item.id)} title={item.label} aria-label={item.label}>
     <svg viewBox="0 0 20 20"><path d={item.d}/></svg>
   </button>;
-  return <main className="board">
+  return <main className={embedded ? "board embedded" : "board"}>
     <canvas ref={canvas} className={tool} onPointerDown={down} onPointerMove={move}/>
-    <aside className="ex-card" ref={exerciseCard} data-gerald-id="100"><div className="ex-label"><i/>{title.toUpperCase()}</div>{lines.map((line, index) => <p key={index} data-gerald-id={101 + index}>{line}</p>)}</aside>
+    {!liveMode&&<aside className="ex-card" ref={exerciseCard} data-gerald-id="100"><div className="ex-label"><i/>{title.toUpperCase()}</div>{lines.map((line, index) => <p key={index} data-gerald-id={101 + index}>{line}</p>)}</aside>}
     <div className="gerald-text-layer">
       {geraldTexts.map((item,index) => <div key={item.id} className="gerald-write" data-gerald-id={300+index} style={{left: item.x, top: item.y, fontSize: item.size, color: item.color}}>
         {item.html ? <span dangerouslySetInnerHTML={{__html: item.html}}/> : item.parts
@@ -937,8 +980,7 @@ function Board() {
         aria-pressed={penColor === color.value}/>)}
       <span className="sep"/>
       {tools.slice(2).map(renderTool)}
-      <span className="sep"/>
-      <button className="close" onClick={() => window.parent !== window && window.parent.geraldTD?.close ? window.parent.geraldTD.close() : history.length > 1 ? history.back() : window.close()} aria-label="Fermer le tableau">Fermer</button>
+      {!liveMode&&<><span className="sep"/><button className="close" onClick={() => window.parent !== window && window.parent.geraldTD?.close ? window.parent.geraldTD.close() : history.length > 1 ? history.back() : window.close()} aria-label="Fermer le tableau">Fermer</button></>}
     </nav>
   </main>;
 }

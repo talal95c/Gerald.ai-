@@ -51,13 +51,19 @@ export function arrowEndpoints(
     };
   }
 
-  const corner = {x: to.x - gap, y: to.y - gap};
   const bounds = viewport ?? (typeof window === "undefined" ? undefined : {w: window.innerWidth, h: window.innerHeight});
-  const start = {
-    x: Math.max(0, Math.min(bounds?.w ?? Infinity, corner.x - 70)),
-    y: Math.max(0, Math.min(bounds?.h ?? Infinity, corner.y - 70)),
+  const aboveSpace = to.y;
+  const belowSpace = (bounds?.h ?? to.y + to.h + 80) - (to.y + to.h);
+  const direction = aboveSpace >= belowSpace ? -1 : 1;
+  const edgeY = direction < 0 ? to.y : to.y + to.h;
+  const centerX = to.x + to.w / 2;
+  const clampY = (value: number) => Math.max(0, Math.min(bounds?.h ?? Infinity, value));
+  return {
+    x1: centerX,
+    y1: clampY(edgeY + direction * 70),
+    x2: centerX,
+    y2: clampY(edgeY + direction * gap),
   };
-  return {x1: start.x, y1: start.y, x2: corner.x, y2: corner.y};
 }
 
 export function animateCursor(

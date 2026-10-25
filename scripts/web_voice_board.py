@@ -11,6 +11,7 @@ from urllib.error import HTTPError, URLError
 from urllib.parse import parse_qs, urlencode, urlsplit
 from urllib.request import Request, urlopen
 from uuid import uuid4
+import unicodedata
 
 from gerald.tools.plot import build_plot
 from gerald.tools.registry import TOOL_SCHEMAS
@@ -19,6 +20,7 @@ from gerald.tools.registry import TOOL_SCHEMAS
 ROOT = Path(__file__).resolve().parents[1]
 WEB_ROOT = ROOT / "gerald" / "home" / "webui"
 SYSTEM_PROMPT = ROOT / "gerald" / "prompts" / "system_prompt.md"
+PAINT_MODE_GUIDANCE = ROOT / "scripts" / "paint_mode_guidance.txt"
 DEFAULT_TITLE = "Exercice 1"
 DEFAULT_LINES = ["Résous dans ℝ : x² − 5x + 6 = 0"]
 WEB_TOOL_NAMES = {
@@ -47,10 +49,12 @@ INTENT_TOOL_NAMES = {
     "tip",
 }
 INTENT_VALUES = ["correction", "valide", "remarque"]
+PAINT_TOOL_ORDER = ("point", "circle", "arrow", "highlight", "note", "tip", "clear_gerald")
 COLOR_GUIDANCE = (
     "Code couleur : rouge (intent=correction) pour signaler une erreur ou la correction, "
     "vert (intent=valide) pour ce qui est juste, bleu (intent=remarque) pour une remarque "
-    "ou un rappel de méthode ; l'écriture normale reste noire."
+    "ou un rappel de méthode ; l'écriture normale reste noire. Si tu montres une erreur "
+    "avec une flèche, souligne aussi le terme fautif en rouge (intent=correction) dans le même tour."
 )
 TD_EXERCISES = [
     ("exercice-1", "Exercice 1", ["Résous dans ℝ : x² − 5x + 6 = 0"]),
@@ -63,7 +67,11 @@ MAX_BODY_BYTES = 1_000_000
 logger = logging.getLogger("web_voice_board")
 
 
-def _web_tools() -> list[dict]:
+def _web_tools(
+    live_mode: bool = False,
+    doc_mode: bool = False,
+    paint_mode: bool = False,
+) -> list[dict]:
     def preserve_targets(schema: dict) -> None:
         properties = schema.get("properties")
         if isinstance(properties, dict):
@@ -83,6 +91,8 @@ def _web_tools() -> list[dict]:
     for tool in TOOL_SCHEMAS:
         if tool["name"] not in WEB_TOOL_NAMES or tool["name"] == "tip":
             continue
+        if paint_mode and tool["name"] not in PAINT_TOOL_ORDER:
+            continue
         schema = deepcopy(tool["parameters"])
         preserve_targets(schema)
         description = tool["description"]
@@ -94,11 +104,18 @@ def _web_tools() -> list[dict]:
             }
             description += f" {COLOR_GUIDANCE}"
         if tool["name"] == "plot":
-            description += (
-                " Pour toute demande de courbe ou de graphe, appelle plot avec l'expression; "
-                "ne dessine jamais une courbe à la main; utilise une multiplication explicite, par exemple "
-                "x**2-5*x+6, et ajoute les racines et le sommet connus dans points."
-            )
+            if live_mode:
+                description += (
+                    " Pour toute demande de courbe ou de graphe, appelle plot avec l'expression; "
+                    "ne dessine jamais une courbe à la main; utilise une multiplication explicite, "
+                    "par exemple x**2+1, et ajoute les points remarquables connus dans points."
+                )
+            else:
+                description += (
+                    " Pour toute demande de courbe ou de graphe, appelle plot avec l'expression; "
+                    "ne dessine jamais une courbe à la main; utilise une multiplication explicite, par exemple "
+                    "x**2-5*x+6, et ajoute les racines et le sommet connus dans points."
+                )
         elif tool["name"] == "write":
             description += (
                 " Réserve write aux mots ou courtes expressions françaises; pour toute formule mathématique, "
@@ -121,30 +138,48 @@ def _web_tools() -> list[dict]:
                 "parameters": schema,
             }
         )
-    tools.extend(
-        [
+    tools.append(
+        {
+            "type": "function",
+            "name": "tip",
+            "description": f"Show a short spoken hint in a bubble next to Gerald's pointer. {COLOR_GUIDANCE}",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "text": {"type": "string"},
+                    "x": {"type": "number"},
+                    "y": {"type": "number"},
+                    "element_id": {"type": "integer"},
+                    "target_text": {"type": "string"},
+                    "intent": {
+                        "type": "string",
+                        "enum": INTENT_VALUES,
+                        "description": "Optional semantic color intent; omit to keep the default color.",
+                    },
+                },
+                "required": ["text"],
+                "additionalProperties": False,
+            },
+        }
+    )
+    if paint_mode:
+        tools.sort(key=lambda tool: PAINT_TOOL_ORDER.index(tool["name"]))
+    elif doc_mode:
+        tools.append(
             {
                 "type": "function",
-                "name": "tip",
-                "description": f"Show a short spoken hint in a bubble next to Gerald's pointer. {COLOR_GUIDANCE}",
+                "name": "open_board",
+                "description": "Open an empty board over the current document without ending the voice session.",
                 "parameters": {
                     "type": "object",
-                    "properties": {
-                        "text": {"type": "string"},
-                        "x": {"type": "number"},
-                        "y": {"type": "number"},
-                        "element_id": {"type": "integer"},
-                        "target_text": {"type": "string"},
-                        "intent": {
-                            "type": "string",
-                            "enum": INTENT_VALUES,
-                            "description": "Optional semantic color intent; omit to keep the default color.",
-                        },
-                    },
-                    "required": ["text"],
+                    "properties": {},
+                    "required": [],
                     "additionalProperties": False,
                 },
-            },
+            }
+        )
+    elif not live_mode:
+        tools.append(
             {
                 "type": "function",
                 "name": "open_board",
@@ -155,22 +190,64 @@ def _web_tools() -> list[dict]:
                         "exercise_id": {
                             "type": "string",
                             "enum": [item[0] for item in TD_EXERCISES],
-                        }
+                        },
                     },
                     "required": ["exercise_id"],
                     "additionalProperties": False,
                 },
-            },
-        ]
-    )
+            }
+        )
     return tools
 
 
 WEB_TOOLS = _web_tools()
 
 
-def session_instructions(title: str = DEFAULT_TITLE, lines: list[str] | None = None) -> str:
+def sanitize_document_title(title: str) -> str:
+    sanitized = "".join(character for character in title if unicodedata.category(character) != "Cc")
+    return sanitized.strip()[:120] or "document sans titre"
+
+
+def session_instructions(
+    title: str = DEFAULT_TITLE,
+    lines: list[str] | None = None,
+    live_mode: bool = False,
+    doc_mode: bool = False,
+    paint_mode: bool = False,
+) -> str:
     prompt = SYSTEM_PROMPT.read_text(encoding="utf-8")
+    if paint_mode:
+        paint_guidance = PAINT_MODE_GUIDANCE.read_text(encoding="utf-8")
+        return f"{paint_guidance}{COLOR_GUIDANCE}"
+    board_guidance = (
+        "Pour cibler une écriture manuscrite, choisis l'element_id de sa boîte « encre élève #n » "
+        "plutôt que des coordonnées devinées. Sur le tableau, utilise write_math avec du LaTeX "
+        "(par exemple \\Delta = b^2 - 4ac) pour les formules; réserve write aux mots français courts. "
+    )
+    if live_mode:
+        prompt = prompt.partition("\n## Board mode\n")[0]
+        live_guidance = (
+            "LIVE BOARD MODE — no TD or exercise document is loaded. The empty board is already open. "
+            "Answer the learner's requested topic, using concise writing or marks on the board. "
+            "For each explanation request, demonstrate at least one useful formula or diagram on the board; "
+            "do not answer only with speech. "
+            "Do not call open_board. "
+        )
+        return f"{prompt.rstrip()}\n{live_guidance}{board_guidance}{COLOR_GUIDANCE}"
+
+    if doc_mode:
+        prompt = prompt.partition("\n## Board mode\n")[0]
+        document_title = sanitize_document_title(title)
+        document_guidance = (
+            f"DOCUMENT MODE — the learner opened « {document_title} ». Work directly on this visible document: "
+            "explain its content, point to relevant passages, and use element_id for underline, circle, highlight, "
+            "arrow, or other marks. The learner's visible document elements are supplied with each turn. "
+            "Never invent document content or provide a full exercise solution; guide the learner one step at a time. "
+            "If the learner asks to use the board, call parameterless open_board to open an empty board overlay; "
+            "the document remains open underneath. Do not include or assume any TD exercise list. "
+        )
+        return f"{prompt.rstrip()}\n{document_guidance}{board_guidance}{COLOR_GUIDANCE}"
+
     exercise_lines = lines if lines is not None else DEFAULT_LINES
     td_context = "\n".join(
         ["TD MODE — exercises and stable exercise_id values:"]
@@ -180,11 +257,6 @@ def session_instructions(title: str = DEFAULT_TITLE, lines: list[str] | None = N
         ]
     )
     board_context = "\n".join(["BOARD MODE", f"Exercise: {title}", *exercise_lines])
-    board_guidance = (
-        "Pour cibler une écriture manuscrite, choisis l'element_id de sa boîte « encre élève #n » "
-        "plutôt que des coordonnées devinées. Sur le tableau, utilise write_math avec du LaTeX "
-        "(par exemple \\Delta = b^2 - 4ac) pour les formules; réserve write aux mots français courts. "
-    )
     td_guidance = (
         "Sur le TD, commence par expliquer oralement et pointer les éléments du document sans quitter la page. "
         "Propose « Viens, on va au tableau » et n'appelle open_board avec l'exercise_id correspondant "
@@ -217,11 +289,21 @@ def build_session_config(
     model: str,
     title: str = DEFAULT_TITLE,
     lines: list[str] | None = None,
+    live_mode: bool = False,
+    doc_mode: bool = False,
+    paint_mode: bool = False,
 ) -> dict:
+    tools = (
+        _web_tools(paint_mode=True)
+        if paint_mode
+        else _web_tools(live_mode, doc_mode)
+        if live_mode or doc_mode
+        else deepcopy(WEB_TOOLS)
+    )
     return {
         "type": "realtime",
         "model": model,
-        "instructions": session_instructions(title, lines),
+        "instructions": session_instructions(title, lines, live_mode, doc_mode, paint_mode),
         "audio": {
             "output": {"voice": os.getenv("GERALD_VOICE", "marin")},
             "input": {
@@ -232,7 +314,7 @@ def build_session_config(
                 },
             },
         },
-        "tools": deepcopy(WEB_TOOLS),
+        "tools": tools,
     }
 
 
@@ -330,6 +412,28 @@ class WebVoiceHandler(SimpleHTTPRequestHandler):
             "application/json; charset=utf-8",
         )
 
+    def _reject_post(self) -> None:
+        self.close_connection = True
+        try:
+            length = int(self.headers.get("Content-Length", ""))
+            if 0 <= length <= MAX_BODY_BYTES:
+                remaining = length
+                while remaining:
+                    chunk = self.rfile.read(min(65536, remaining))
+                    if not chunk:
+                        break
+                    remaining -= len(chunk)
+        except (ValueError, OSError):
+            pass
+        body = json.dumps({"ok": False, "error": "origin or host not allowed"}).encode("utf-8")
+        self.send_response(403)
+        self.send_header("Content-Type", "application/json; charset=utf-8")
+        self.send_header("Content-Length", str(len(body)))
+        self.send_header("Connection", "close")
+        self.send_header("Cache-Control", "no-store")
+        self.end_headers()
+        self.wfile.write(body)
+
     def _read_body(self, limit: int = MAX_BODY_BYTES) -> bytes:
         try:
             length = int(self.headers.get("Content-Length", ""))
@@ -365,18 +469,20 @@ class WebVoiceHandler(SimpleHTTPRequestHandler):
             self._send_json(403, {"ok": False, "error": "origin or host not allowed"})
             return
         parsed = urlsplit(self.path)
-        if parsed.path in {"/", "/td.html", "/board.html"}:
+        if parsed.path == "/":
+            self.send_response(302)
+            self.send_header("Location", "/landing.html")
+            self.send_header("Content-Length", "0")
+            self.end_headers()
+            return
+        if parsed.path in {"/td.html", "/board.html"}:
             query = parse_qs(parsed.query, keep_blank_values=True)
-            destination = "/td.html" if parsed.path == "/" else parsed.path
             query["voice"] = ["1"]
             encoded = urlencode(
                 [(key, value) for key, values in query.items() for value in values]
             )
-            location = destination + (f"?{encoded}" if encoded else "")
-            if (
-                parsed.path != "/"
-                and query == parse_qs(parsed.query, keep_blank_values=True)
-            ):
+            location = parsed.path + (f"?{encoded}" if encoded else "")
+            if query == parse_qs(parsed.query, keep_blank_values=True):
                 super().do_GET()
                 return
             self.send_response(302)
@@ -388,7 +494,7 @@ class WebVoiceHandler(SimpleHTTPRequestHandler):
 
     def do_POST(self) -> None:
         if not self._valid_origin():
-            self._send_json(403, {"ok": False, "error": "origin or host not allowed"})
+            self._reject_post()
             return
         parsed = urlsplit(self.path)
         if parsed.path == "/api/session":
@@ -407,7 +513,16 @@ class WebVoiceHandler(SimpleHTTPRequestHandler):
             sdp = self._read_body().decode("utf-8")
             if not sdp.strip():
                 raise ValueError("SDP offer is empty")
-            title, lines = _parse_exercise(query)
+            query_values = parse_qs(query)
+            live_mode = query_values.get("live", ["0"])[-1] == "1"
+            doc_mode = query_values.get("mode", [""])[-1] == "doc"
+            paint_mode = query_values.get("mode", [""])[-1] == "paint"
+            if paint_mode:
+                title, lines = "", []
+            elif doc_mode:
+                title, lines = sanitize_document_title(query_values.get("title", [""])[-1]), []
+            else:
+                title, lines = ("", []) if live_mode else _parse_exercise(query)
         except OverflowError as error:
             self._send_json(413, {"ok": False, "error": str(error)})
             return
@@ -416,7 +531,7 @@ class WebVoiceHandler(SimpleHTTPRequestHandler):
             return
 
         model = os.getenv("GERALD_MODEL", "gpt-realtime-2").strip() or "gpt-realtime-2"
-        session = build_session_config(model, title, lines)
+        session = build_session_config(model, title, lines, live_mode, doc_mode, paint_mode)
         body, content_type = build_multipart(sdp, session)
         request = Request(
             OPENAI_REALTIME_CALLS,
