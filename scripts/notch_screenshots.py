@@ -40,7 +40,7 @@ MOCK_BRIDGE = """
     session_open: false, recap_pending: false
   };
   const signals = {
-    stateChanged: signal(), modeChanged: signal(), answer: signal(),
+    stateChanged: signal(), modeChanged: signal(), agentStatus: signal(), answer: signal(),
     answerError: signal(), recapReady: signal(), agentStatus: signal()
   };
   window.__mockSignals = signals;
@@ -95,8 +95,8 @@ def capture_web_screenshots() -> None:
         emit = "window.__mockSignals.{}.emit('{}')".format
         notch("notch-greeting", (240, 36))
         notch("notch-listening", (240, 36), emit("modeChanged", "collapsed"), emit("agentStatus", "listening"))
-        notch("notch-panel", (660, 64), emit("modeChanged", "panel"))
-        notch("notch-settings-documents", (660, 300), emit("modeChanged", "settings"))
+        notch("notch-panel", (760, 72), emit("modeChanged", "panel"))
+        notch("notch-settings-documents", (760, 440), emit("modeChanged", "settings"))
         page = browser.new_page(viewport={"width": 1280, "height": 900}, device_scale_factor=2, color_scheme="light")
         page.add_init_script(MOCK_BRIDGE)
         page.goto((WEBUI / "td.html").as_uri(), wait_until="networkidle")

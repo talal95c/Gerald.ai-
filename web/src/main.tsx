@@ -2,6 +2,7 @@ import React, { useEffect, useRef, useState } from "react";
 import { createRoot } from "react-dom/client";
 import { AppState, getBridge } from "./bridge";
 import "./style.css";
+import { Orb } from "./orb";
 
 const bridge = getBridge();
 const tabs = ["Tableau", "Documents", "Historique", "Raccourcis"];
@@ -45,9 +46,6 @@ function Reveal({text}: {text: string}) {
   return <>{words.map((word,index)=>/^\s+$/.test(word)?word:<span className="reveal-word" style={{animationDelay:`${index*40}ms`}} key={`${word}-${index}`}>{word}</span>)}</>;
 }
 
-function Wave({status}: {status: string}) {
-  return <span className={`wave ${status}`} aria-hidden="true">{[0,1,2,3,4].map(i=><i key={i} style={{animationDelay:`${i*90}ms`}}/>)}</span>;
-}
 
 function DocView({doc, folder, hotkey, onBack}: {doc: AppState["documents"][number]; folder: string; hotkey: string; onBack: () => void}) {
   const [text, setText] = useState("");
@@ -130,11 +128,11 @@ function App() {
   const active = status !== "idle";
   const pillLabel = active ? statusText[status] ?? status : mode === "greeting" ? state.greeting : `Maintiens ${state.hotkey_label}`;
   if (mode === "greeting" || mode === "collapsed") return <button className={`notch pill-notch m-${mode} s-${status}`} onClick={()=>{clear();go("panel");}}>
-    {active ? <Wave status={status}/> : <i className="dot-live" />}<span key={pillLabel}><Reveal text={pillLabel}/></span>
+    <Orb status={status} size={24}/><span key={pillLabel}><Reveal text={pillLabel}/></span>
   </button>;
   return <section className={`notch sheet m-${mode}`} onMouseEnter={clear} onMouseLeave={()=>{ if (document.activeElement?.tagName !== "INPUT") later("collapsed", 700); }} onKeyDown={e=>{if(e.key==="Escape")go("collapsed");}}>
     <div className="bar">
-      <span className="status">{active ? <Wave status={status}/> : <i className="dot-live" />}<span>{active ? statusText[status] ?? status : state.hotkey_label}</span></span>
+      <span className="status"><Orb status={status} size={28}/><span>{active ? statusText[status] ?? status : state.hotkey_label}</span></span>
       <NavBar active={mode === "settings" ? tab : ""} onChange={pick}/>
       {state.session_open ? <button className="end" onClick={()=>bridge.endSession()}>{state.recap_pending ? "Fiche…" : "Fin de session"}</button>
         : recap ? <button className="end" onClick={()=>bridge.openRecap(recap)}>Fiche →</button>
