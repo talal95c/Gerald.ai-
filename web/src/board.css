@@ -94,3 +94,10 @@ html,body,#root{margin:0;height:100%;overflow:hidden}
 @keyframes gp-breathe{0%,100%{transform:scale(1)}50%{transform:scale(1.14)}}
 @keyframes gp-ripple{0%{opacity:.45;transform:scale(.55)}100%{opacity:0;transform:scale(2.3)}}
 @media(prefers-reduced-motion:reduce){.guide-point .gp-ripple{display:none}.guide-point .gp-halo{animation:gp-in .2s both}}
+||||||| 49d5715
+.td-mic,.td-stop{box-sizing:border-box;width:44px;min-width:44px;height:44px;padding:0;display:grid;place-items:center;border-radius:999px;transition:background-color 150ms ease,transform 150ms cubic-bezier(.2,.8,.2,1)}
+.td-mic.is-connecting{width:auto;padding:0 16px}
+.td-mic svg,.td-stop svg{display:block}
+.td-mic[aria-pressed="false"] svg{color:rgba(255,170,170,.9)}
+.td-mic:hover:not(:disabled),.td-stop:hover{background:#202023;transform:scale(1.04)}
+.td-mic:focus-visible,.td-stop:focus-visible{outline:2px solid rgba(255,255,255,.8);outline-offset:2px}
