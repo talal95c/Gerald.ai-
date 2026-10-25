@@ -2,20 +2,58 @@ import type {ReactNode} from "react";
 
 export type DesktopApp = "Photoshop" | "Notes" | "Mail" | "Musique" | "Photos";
 
+const squircle = "M50 0C77.5 0 89 0 94.5 5.5S100 22.5 100 50s0 39-5.5 44.5S77.5 100 50 100s-39 0-44.5-5.5S0 77.5 0 50 0 11 5.5 5.5 22.5 0 50 0Z";
+const tileTransform = "translate(9 9) scale(.82)";
+const artworkTransform = "translate(9 9) scale(1.28125)";
+const petals = ["#ff9500", "#ffcc00", "#a8d600", "#34c759", "#00b7a8", "#1689ff", "#8e5bdb", "#f05b9b"];
+
 export function DesktopIcon({app, className = ""}: {app: DesktopApp; className?: string}) {
-  const svg: Record<DesktopApp, ReactNode> = {
-    Photoshop: <><rect width="64" height="64" rx="16" fill="#001E36"/><text x="8" y="41" fill="#31A8FF" fontSize="27" fontWeight="700" letterSpacing="-2">Ps</text></>,
-    Notes: <><rect width="64" height="64" rx="16" fill="url(#note)"/><path d="M0 16Q0 0 16 0h32q16 0 16 16v4H0z" fill="#F4D35E"/><path d="M13 31h38M13 40h38M13 49h28" stroke="#9B9B9B" strokeWidth="2" strokeLinecap="round"/></>,
-    Mail: <><rect width="64" height="64" rx="16" fill="url(#mail)"/><path d="M12 20h40v28H12z" fill="#fff" opacity=".96"/><path d="m13 22 19 16 19-16" fill="none" stroke="#70B8FF" strokeWidth="3" strokeLinejoin="round"/><path d="M13 47 27 35m24 12L37 35" stroke="#D9ECFF" strokeWidth="2"/></>,
-    Musique: <><rect width="64" height="64" rx="16" fill="url(#music)"/><path d="M39 13v28a8 8 0 1 1-5-7V20l18-4v23a8 8 0 1 1-5-7V11z" fill="#fff"/></>,
-    Photos: <><rect width="64" height="64" rx="16" fill="#fff"/>{["#EA4335","#FBBC05","#34A853","#4285F4","#9C5DE5","#F06292"].map((color,i)=><ellipse key={color} cx="32" cy="18" rx="7" ry="12" fill={color} transform={`rotate(${i*60} 32 32)`}/>)}<circle cx="32" cy="32" r="5" fill="#fff"/></>,
+  const key = app.toLowerCase();
+  const artwork: Record<DesktopApp, ReactNode> = {
+    Photoshop: <g>
+      <rect x="9" y="9" width="46" height="46" rx="8" fill="#00121F" stroke="#31A8FF" strokeWidth="2"/>
+      <text x="13" y="40" fill="#31A8FF" fontSize="25" fontWeight="700" letterSpacing="-2">Ps</text>
+    </g>,
+    Notes: <g>
+      <path d="M2 4Q2 2 5 2H59Q62 2 62 5V20H2Z" fill="url(#notes-band)"/>
+      <path d="M8 23v3m6-3v3m6-3v3m6-3v3m6-3v3m6-3v3m6-3v3m6-3v3m6-3v3" stroke="#c7c7c7" strokeWidth="1" strokeDasharray="1 2"/>
+      <path d="M12 34h40M12 43h40M12 52h30" stroke="#d7dce2" strokeWidth="1.6" strokeLinecap="round"/>
+    </g>,
+    Mail: <g filter="url(#mail-shadow)">
+      <path d="M10 19h44v31H10z" fill="#fff"/>
+      <path d="M11 21 32 38 53 21" fill="none" stroke="#68b7ff" strokeWidth="3" strokeLinejoin="round"/>
+      <path d="m11 48 15-13m27 13L38 35" fill="none" stroke="#d9ebff" strokeWidth="2"/>
+    </g>,
+    Musique: <g fill="#fff">
+      <ellipse cx="20" cy="47" rx="7" ry="5" transform="rotate(-20 20 47)"/>
+      <ellipse cx="43" cy="39" rx="7" ry="5" transform="rotate(-20 43 39)"/>
+      <path d="M25 17v27M48 13v25" fill="none" stroke="#fff" strokeWidth="3.5" strokeLinecap="round"/>
+      <path d="M25 17 48 12v6l-23 5z"/>
+    </g>,
+    Photos: <g style={{mixBlendMode: "multiply"}}>
+      {petals.map((color, index) => <ellipse key={color} cx="32" cy="17" rx="6.5" ry="10.5" fill={color} opacity=".72" transform={`rotate(${index * 45} 32 32)`}/>)}
+    </g>,
   };
-  const defs = app === "Notes"
-    ? <defs><linearGradient id="note" x2="0" y2="1"><stop stopColor="#fff"/><stop offset="1" stopColor="#FFF7CC"/></linearGradient></defs>
-    : app === "Mail"
-      ? <defs><linearGradient id="mail" x2="1" y2="1"><stop stopColor="#5DBBFF"/><stop offset="1" stopColor="#1673D1"/></linearGradient></defs>
-      : app === "Musique"
-        ? <defs><linearGradient id="music" x2="1" y2="1"><stop stopColor="#F76DA5"/><stop offset="1" stopColor="#D92756"/></linearGradient></defs>
-        : null;
-  return <svg className={`desktop-icon-svg ${className}`} viewBox="0 0 64 64" aria-hidden="true">{defs}{svg[app]}</svg>;
+  return <svg className={`desktop-icon-svg ${className}`} viewBox="0 0 100 100" aria-hidden="true">
+    <defs>
+      <linearGradient id={`${key}-base`} x1="0" y1="0" x2="0" y2="1">
+        {app === "Photoshop" ? <><stop stopColor="#001E36"/><stop offset="1" stopColor="#00121F"/></>
+          : app === "Mail" ? <><stop stopColor="#1E90FF"/><stop offset="1" stopColor="#0A6CF0"/></>
+          : app === "Musique" ? <><stop stopColor="#FF5E7A"/><stop offset="1" stopColor="#FA233B"/></>
+          : <><stop stopColor="#fff"/><stop offset="1" stopColor={app === "Notes" ? "#f4f4f4" : "#fff"}/></>}
+      </linearGradient>
+      <linearGradient id="notes-band" x1="0" y1="0" x2="0" y2="1"><stop stopColor="#FFD84D"/><stop offset="1" stopColor="#FFC72C"/></linearGradient>
+      <linearGradient id="base-shade" x1="0" y1="0" x2="0" y2="1"><stop offset=".55" stopColor="#fff" stopOpacity="0"/><stop offset="1" stopColor="#000" stopOpacity=".11"/></linearGradient>
+      <linearGradient id="base-gloss" x1="0" y1="0" x2="0" y2="1"><stop stopColor="#fff" stopOpacity=".12"/><stop offset=".5" stopColor="#fff" stopOpacity="0"/><stop offset="1" stopColor="#fff" stopOpacity="0"/></linearGradient>
+      <filter id="mail-shadow" x="-10%" y="-10%" width="120%" height="130%"><feDropShadow dx="0" dy="1" stdDeviation="1" floodColor="#003b85" floodOpacity=".28"/></filter>
+      <clipPath id={`${key}-clip`}><path d={squircle} transform={tileTransform}/></clipPath>
+    </defs>
+    <path d={squircle} transform={tileTransform} fill={`url(#${key}-base)`}/>
+    <g clipPath={`url(#${key}-clip)`}>
+      <g transform={artworkTransform}>{artwork[app]}</g>
+      <path d={squircle} transform={tileTransform} fill="url(#base-shade)"/>
+      <path d={squircle} transform={tileTransform} fill="url(#base-gloss)"/>
+      <path d={squircle} transform={tileTransform} fill="none" stroke="rgba(255,255,255,.18)" strokeWidth="1.8"/>
+    </g>
+  </svg>;
 }

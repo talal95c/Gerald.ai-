@@ -186,10 +186,10 @@ function App({onTalk}: {onTalk?: (pressed: boolean) => void}) {
   const active = status !== "idle";
   const pillLabel = active ? statusText[status] ?? status : mode === "greeting" ? state.greeting : `Maintiens ${state.hotkey_label}`;
   if (mode === "greeting" || mode === "collapsed") return onTalk
-    ? <div className="notch-pill-controls">
-      <button className={`notch pill-notch m-${mode} s-${status}`} onClick={()=>{clear();go("panel");}}>
+    ? <div className={`notch pill-notch notch-pill-controls m-${mode} s-${status}`} role="button" tabIndex={0}
+      onClick={()=>{clear();go("panel");}}
+      onKeyDown={event=>{if(event.key==="Enter"||event.key===" "){event.preventDefault();clear();go("panel");}}}>
         <Orb status={status} size={24}/><span key={pillLabel}><Reveal text={pillLabel}/></span>
-      </button>
       <button className="notch-talk notch-talk-pill" type="button" aria-label="Maintenir pour parler"
         onClick={event=>event.stopPropagation()}
         onPointerDown={event=>{event.preventDefault();onTalk(true);event.currentTarget.setPointerCapture(event.pointerId);}}
