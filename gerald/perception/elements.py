@@ -28,14 +28,28 @@ def _split_ocr_words(words: list[WordBox]) -> list[list[WordBox]]:
     ordered = sorted(words, key=lambda item: item[1][0])
     if not ordered:
         return []
-    gap_limit = 1.2 * median(max(1, rect[3]) for _word, rect in ordered)
-    groups: list[list[WordBox]] = [[ordered[0]]]
-    for word, rect in ordered[1:]:
-        previous = groups[-1][-1][1]
-        gap = rect[0] - (previous[0] + previous[2])
-        if gap > gap_limit:
-            groups.append([])
-        groups[-1].append((word, rect))
+    separators = {"|", "·", "•", "›", "»", "/", "–"}
+    heights = [max(1, rect[3]) for word, rect in ordered if word.strip() not in separators]
+    if not heights:
+        return []
+    gap_limit = 1.2 * median(heights)
+    groups: list[list[WordBox]] = []
+    current: list[WordBox] = []
+    for word, rect in ordered:
+        if word.strip() in separators:
+            if current:
+                groups.append(current)
+                current = []
+            continue
+        if current:
+            previous = current[-1][1]
+            gap = rect[0] - (previous[0] + previous[2])
+            if gap > gap_limit:
+                groups.append(current)
+                current = []
+        current.append((word, rect))
+    if current:
+        groups.append(current)
     return groups
 
 

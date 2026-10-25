@@ -97,6 +97,22 @@ def test_ocr_splits_a_line_at_large_horizontal_word_gaps():
     ]
 
 
+@pytest.mark.parametrize("separator", ["|", "·", "•", "›", "»", "/", "–"])
+def test_ocr_splits_lines_at_separator_tokens(separator):
+    words = [
+        ("past", (0, 10, 25, 12)),
+        (separator, (27, 10, 5, 12)),
+        ("comments", (34, 10, 45, 12)),
+    ]
+
+    groups = _split_ocr_words(words)
+
+    assert [[word for word, _rect in group] for group in groups] == [
+        ["past"],
+        ["comments"],
+    ]
+
+
 def test_ocr_tiles_overlap_by_48_pixels_and_deduplicate_by_confidence():
     bounds = _tile_bounds(900)
     assert len(bounds) == 4
