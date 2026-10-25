@@ -241,6 +241,25 @@ def _native_windows_monitors() -> list[tuple[str, Rect]]:
     return found
 
 
+def _screen_mappings() -> list[_ScreenMapping]:
+    screens = [
+        (
+            screen.name(),
+            (screen.geometry().x(), screen.geometry().y(), screen.geometry().width(), screen.geometry().height()),
+            screen.devicePixelRatio(),
+        )
+        for screen in QApplication.screens()
+    ]
+    native = _native_windows_monitors() if os.name == "nt" else None
+    return _build_screen_mappings(screens, native)
+
+
+def screen_mapping_for_qscreen(screen) -> _ScreenMapping | None:
+    geometry = screen.geometry()
+    logical = (geometry.x(), geometry.y(), geometry.width(), geometry.height())
+    return next((mapping for mapping in _screen_mappings() if mapping.logical == logical), None)
+
+
 @dataclass
 class _Mark:
     command: object
@@ -641,16 +660,7 @@ class OverlayWindow(QWidget):
         self.update()
 
     def _screen_mappings(self) -> list[_ScreenMapping]:
-        screens = [
-            (
-                screen.name(),
-                (screen.geometry().x(), screen.geometry().y(), screen.geometry().width(), screen.geometry().height()),
-                screen.devicePixelRatio(),
-            )
-            for screen in QApplication.screens()
-        ]
-        native = _native_windows_monitors() if os.name == "nt" else None
-        return _build_screen_mappings(screens, native)
+        return _screen_mappings()
 
     def _global_physical_to_logical(self, x: float, y: float) -> tuple[float, float, float] | None:
         return _physical_to_logical(x, y, self._screen_mappings())

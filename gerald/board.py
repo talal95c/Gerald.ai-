@@ -9,7 +9,7 @@ from PyQt6.QtGui import QColor, QFont, QFontMetricsF, QImage, QPainter, QPainter
 from PyQt6.QtWidgets import QFrame, QHBoxLayout, QPushButton, QWidget
 
 from gerald.capture.screen import Capture, MonitorRect, capture_from_image
-from gerald.overlay.window import ACCENT
+from gerald.overlay.window import ACCENT, screen_mapping_for_qscreen
 from gerald.tools.registry import (
     ArrowCommand,
     CircleCommand,
@@ -258,14 +258,19 @@ class BoardWindow(QWidget):
         raw = image.bits().asstring(image.sizeInBytes())
         pil = Image.frombytes("RGB", (width, height), raw, "raw", "RGB", image.bytesPerLine())
         screen = self.screen()
-        ratio = screen.devicePixelRatio() if screen else 1.0
-        geometry = screen.geometry() if screen else self.geometry()
-        monitor = MonitorRect(
-            round(geometry.x() * ratio),
-            round(geometry.y() * ratio),
-            width,
-            height,
-        )
+        mapping = screen_mapping_for_qscreen(screen) if screen else None
+        if mapping is not None:
+            monitor = MonitorRect(*mapping.physical)
+            ratio = mapping.ratio
+        else:
+            ratio = screen.devicePixelRatio() if screen else 1.0
+            geometry = screen.geometry() if screen else self.geometry()
+            monitor = MonitorRect(
+                round(geometry.x() * ratio),
+                round(geometry.y() * ratio),
+                width,
+                height,
+            )
         capture = capture_from_image(pil, monitor, max_width=width)
         groups = group_strokes(self.user_strokes, 24 / ratio)
         rects = [
@@ -314,8 +319,11 @@ class BoardWindow(QWidget):
 
     def tabletEvent(self, event) -> None:
         if event.type() == event.Type.TabletPress:
-            self._current = [(event.position().x(), event.position().y(), max(0.15, event.pressure()))]
-            self.user_strokes.append(self._current)
+            if self._tool == "eraser":
+                self._append_point(event.position(), event.pressure())
+            else:
+                self._current = [(event.position().x(), event.position().y(), max(0.15, event.pressure()))]
+                self.user_strokes.append(self._current)
         elif event.type() == event.Type.TabletMove:
             self._append_point(event.position(), event.pressure())
         elif event.type() == event.Type.TabletRelease:

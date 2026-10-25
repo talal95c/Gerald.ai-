@@ -9,6 +9,7 @@ import threading
 import time
 from pathlib import Path
 
+from gerald.capture.screen import Capture
 from gerald.config import load_settings, set_physical_dpi_awareness
 
 logger = logging.getLogger(__name__)
@@ -58,6 +59,35 @@ def _key_name(key: object) -> str:
     return value.removeprefix("key.").removeprefix("key.")
 
 
+def _include_board_ink(elements, capture: Capture, board_rects: list[tuple[int, int, int, int]]):
+    from gerald.perception.elements import Element
+
+    result = list(elements)
+    next_id = max((element.id for element in result), default=-1) + 1
+    for index, rect in enumerate(board_rects):
+        result.append(
+            Element(
+                next_id + index,
+                "ink",
+                f"ink {index + 1}",
+                capture.rect_to_image(rect),
+                "board",
+            )
+        )
+    return result
+
+
+def _finalize_board_collection(
+    elements,
+    capture: Capture,
+    board_rects: list[tuple[int, int, int, int]],
+    partial_capture: dict[str, object],
+):
+    final_elements = _include_board_ink(elements, capture, board_rects)
+    partial_capture["elements"] = final_elements
+    return final_elements
+
+
 def main() -> int:
     set_physical_dpi_awareness()
     from PyQt6.QtCore import QObject, pyqtSignal, pyqtSlot
@@ -77,7 +107,7 @@ def main() -> int:
     from gerald.capture.session import CaptureRequest
     from gerald.capture.screen import capture_screen
     from gerald.overlay.window import OverlayWindow
-    from gerald.perception.elements import Element, collect_elements_detailed, serialize_context
+    from gerald.perception.elements import collect_elements_detailed, serialize_context
 
     settings = load_settings()
     app = QApplication(sys.argv)
@@ -245,16 +275,9 @@ def main() -> int:
         with partial_capture_lock:
             partial_capture.update(capture=capture, elements=[], board_mode=board_snapshot is not None)
 
-        def include_ink(elements):
-            result = list(elements)
-            next_id = max((element.id for element in result), default=-1) + 1
-            for index, rect in enumerate(board_rects):
-                result.append(Element(next_id + index, "ink", f"ink {index + 1}", rect, "board"))
-            return result
-
         def publish_elements(elements) -> None:
             with partial_capture_lock:
-                partial_capture["elements"] = include_ink(elements)
+                partial_capture["elements"] = _include_board_ink(elements, capture, board_rects)
 
         collection = collect_elements_detailed(
             capture,
@@ -262,8 +285,13 @@ def main() -> int:
             started_at=started_at,
             on_update=publish_elements,
         )
-        elements = include_ink(collection.elements)
-        publish_elements(elements)
+        with partial_capture_lock:
+            elements = _finalize_board_collection(
+                collection.elements,
+                capture,
+                board_rects,
+                partial_capture,
+            )
         if not collection.complete:
             logger.warning(
                 "OCR collection incomplete; using %d collected screen elements",

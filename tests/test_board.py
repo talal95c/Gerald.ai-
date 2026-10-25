@@ -100,3 +100,79 @@ def test_toolbar_is_visible_and_centered_at_top():
     ]
     board.close()
     app.processEvents()
+
+
+def test_tablet_eraser_press_uses_eraser_path_without_creating_stroke(monkeypatch):
+    from PyQt6.QtCore import QPointF
+
+    class EventType:
+        TabletPress = 1
+
+    class Event:
+        Type = EventType
+
+        def __init__(self):
+            self.accepted = False
+
+        def type(self):
+            return self.Type.TabletPress
+
+        def position(self):
+            return QPointF(30, 40)
+
+        def pressure(self):
+            return 0.7
+
+        def accept(self):
+            self.accepted = True
+
+    app = QApplication.instance() or QApplication([])
+    board = BoardWindow()
+    board.set_tool("eraser")
+    board.user_strokes = [[(1, 2, 1.0), (3, 4, 1.0)]]
+    calls = []
+    monkeypatch.setattr(board, "_append_point", lambda point, pressure: calls.append((point, pressure)))
+    event = Event()
+
+    board.tabletEvent(event)
+
+    assert calls == [(QPointF(30, 40), 0.7)]
+    assert board._current is None
+    assert len(board.user_strokes) == 1
+    assert event.accepted
+    board.close()
+    app.processEvents()
+
+
+def test_board_capture_uses_native_rect_for_mixed_dpi_secondary(monkeypatch):
+    from types import SimpleNamespace
+
+    from PyQt6.QtCore import QRect
+    from PyQt6.QtGui import QPixmap
+    from gerald.overlay import window as overlay_window
+    from gerald.capture.screen import MonitorRect
+
+    app = QApplication.instance() or QApplication([])
+    logical_screens = [
+        ("DISPLAY1", (0, 0, 1920, 1080), 2.0),
+        ("DISPLAY2", (1920, 0, 1920, 1080), 1.0),
+    ]
+    native_monitors = [
+        ("DISPLAY1", (0, 0, 3840, 2160)),
+        ("DISPLAY2", (3840, 0, 1920, 1080)),
+    ]
+    mappings = overlay_window._build_screen_mappings(logical_screens, native_monitors)
+    monkeypatch.setattr(overlay_window, "_screen_mappings", lambda: mappings)
+    screen = SimpleNamespace(geometry=lambda: QRect(1920, 0, 1920, 1080))
+
+    board = BoardWindow()
+    board.screen = lambda: screen
+    pixmap = QPixmap(1920, 1080)
+    pixmap.fill(Qt.GlobalColor.white)
+    board.grab = lambda: pixmap
+
+    capture, _rects = board.capture()
+
+    assert capture.monitor == MonitorRect(3840, 0, 1920, 1080)
+    board.close()
+    app.processEvents()
