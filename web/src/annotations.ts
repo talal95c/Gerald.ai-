@@ -209,8 +209,8 @@ export function segmentBoardText(value: string): BoardTextPart[] {
 }
 
 export function annotationSize(text: string, kind: AnnotationKind): {w: number; h: number} {
-  const w = Math.min(280, Math.max(120, text.length * 7 + 24));
-  const lineCount = Math.max(1, Math.ceil(text.length * 7 / Math.max(1, w - 24)));
+  const w = Math.min(360, Math.max(140, text.length * 7.6 + 64));
+  const lineCount = Math.max(1, Math.ceil(text.length * 7.6 / Math.max(1, w - 64)));
   return {w, h: Math.min(160, Math.max(kind === "note" ? 42 : 52, lineCount * 19 + (kind === "note" ? 16 : 24)))};
 }
 

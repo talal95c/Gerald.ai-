@@ -389,10 +389,9 @@ function TD(){
       {voiceMode&&caption&&<div className={`td-caption${captionFading?" fade":""}`}><Reveal text={caption}/></div>}
       <form className="td-ask" onSubmit={onSubmit}><div className="voice-status"><Orb status={status} size={30} level={audioLevel}/>{voiceError&&<span className="td-voice-error" role="status">{voiceError}</span>}</div>
         <input data-gerald-id="30" value={question} onChange={e=>setQuestion(e.target.value)} onFocus={()=>bridge.requestFocus(true)} onBlur={()=>bridge.requestFocus(false)} placeholder="Une question sur le TD ? Je t’explique."/>
-        {voiceMode&&<kbd>CTRL + SHIFT</kbd>}
+        <span className="td-hold">Maintiens <kbd>Ctrl</kbd> + <kbd>Shift</kbd></span><span className={`td-wave${status==="speaking"||status==="listening"?" on":""}`} aria-hidden="true">{Array.from({length:12},(_,i)=><i key={i} style={{animationDelay:`${i*70}ms`}}/>)}</span>
         {voiceMode&&<button type="button" className="td-mic" aria-label={sessionOpen?(micEnabled?"Couper le micro":"Activer le micro"):"Parler à Gerald"} aria-pressed={sessionOpen?micEnabled:undefined} disabled={connecting&&!sessionOpen} onClick={toggleMicrophone}>{sessionOpen?(micEnabled?"Couper le micro":"Activer le micro"):connecting?"Connexion…":"Parler à Gerald"}</button>}
         {voiceMode&&sessionOpen&&<button type="button" className="td-stop" onClick={stop}>Arrêter</button>}
-        {!voiceMode&&<kbd>CTRL + SHIFT</kbd>}
       </form>
     </div>
     {voiceMode&&<div className={`td-board-overlay ${boardOpen?"open":""}`}><button className="td-board-close" onClick={()=>{boardOpenRef.current=false;setBoardOpen(false);}}>Retour au TD</button>{boardSrc&&<iframe ref={frame} title="Tableau" src={boardSrc} />}</div>}
