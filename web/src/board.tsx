@@ -1,4 +1,4 @@
-import React, { useEffect, useRef, useState } from "react";
+import React, { type CSSProperties, useEffect, useRef, useState } from "react";
 import { createRoot } from "react-dom/client";
 import katex from "katex";
 import "katex/dist/katex.min.css";
@@ -943,7 +943,7 @@ function Board() {
       {marks.filter((mark) => mark.kind === "underline").map((mark) =>
         <line key={mark.id} data-gerald-mark-kind="underline" x1={mark.x - mark.w / 2} x2={mark.x - mark.w / 2 + mark.w * (mark.progress ?? 1)} y1={mark.y + mark.h / 2} y2={mark.y + mark.h / 2} style={{stroke: mark.color ?? undefined}}/>)}
       {marks.filter((mark) => mark.kind === "point").map((mark) =>
-        <g key={mark.id} data-gerald-mark-kind="point"><circle cx={mark.x} cy={mark.y} r="5" style={{fill: mark.color ?? undefined}}/><text x={mark.x + 8} y={mark.y - 8} style={{fill: mark.color ?? undefined}}>{mark.text}</text></g>)}
+        <g key={mark.id} data-gerald-mark-kind="point"><g className="guide-point" transform={`translate(${mark.x} ${mark.y})`} style={mark.color ? {"--gp": mark.color} as CSSProperties : undefined}><circle className="gp-halo" r="20"/><circle className="gp-ripple" r="12"/><circle className="gp-ripple gp-late" r="12"/><circle className="gp-core" r="4"/></g><text x={mark.x + 16} y={mark.y - 14} style={{fill: mark.color ?? undefined}}>{mark.text}</text></g>)}
       {marks.filter((mark) => mark.kind === "highlight").map((mark) =>
         <rect key={mark.id} data-gerald-mark-kind="highlight" x={mark.x - mark.w / 2} y={mark.y - mark.h / 2} width={mark.w * (mark.progress ?? 1)} height={mark.h} style={{fill: mark.fill ?? undefined, stroke: mark.color ?? undefined}}/>)}
       {marks.filter((mark) => mark.kind === "arrow").map((mark) => {

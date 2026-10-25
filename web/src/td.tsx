@@ -1,4 +1,4 @@
-import React, {useEffect, useMemo, useRef, useState} from "react";
+import React, {type CSSProperties, useEffect, useMemo, useRef, useState} from "react";
 import {createRoot} from "react-dom/client";
 import katex from "katex";
 import "katex/dist/katex.min.css";
@@ -822,7 +822,7 @@ function TD(){
           </g>;
         })}
         {marks.filter(m=>m.kind==="underline").map(m=><line key={m.id} data-gerald-mark-kind="underline" x1={m.rect.x-m.rect.w/2} x2={m.rect.x-m.rect.w/2+m.rect.w*(m.progress??1)} y1={m.rect.y+m.rect.h/2} y2={m.rect.y+m.rect.h/2} style={{stroke:m.color??undefined}}/>)}
-        {marks.filter(m=>m.kind==="point").map(m=><circle key={m.id} data-gerald-mark-kind="point" cx={m.rect.x} cy={m.rect.y} r="5" style={{fill:m.color??undefined}}/> )}
+        {marks.filter(m=>m.kind==="point").map(m=><g key={m.id} data-gerald-mark-kind="point" className="guide-point" transform={`translate(${m.rect.x} ${m.rect.y})`} style={m.color?{"--gp":m.color} as CSSProperties:undefined}><circle className="gp-halo" r="20"/><circle className="gp-ripple" r="12"/><circle className="gp-ripple gp-late" r="12"/><circle className="gp-core" r="4"/></g>)}
         {marks.filter(m=>m.kind==="highlight").map(m=><rect key={m.id} data-gerald-mark-kind="highlight" x={m.rect.x-m.rect.w/2} y={m.rect.y-m.rect.h/2} width={m.rect.w*(m.progress??1)} height={m.rect.h} style={{fill:m.fill??undefined,stroke:m.color??undefined}}/>)}
         {marks.filter(m=>m.kind==="arrow"&&m.headPoints).map(m=>{
           const [wingA,tip,wingB]=m.headPoints!;
