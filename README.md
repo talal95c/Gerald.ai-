@@ -27,8 +27,9 @@ disponibles; la reconnaissance UIA et l'OCR Windows sont optionnels.
 - `Ctrl+Shift+Enter` ou l'icône de zone de notification : saisir une question.
 - `Échap` : interrompre Gerald et effacer les dessins.
 
-Modifiez `GERALD_HOTKEY`, `GERALD_MODEL`, `GERALD_VOICE` et
-`GERALD_MAX_IMAGE_W` dans `.env`. Sur Linux et macOS, l'application démarre
+Modifiez `GERALD_HOTKEY`, `GERALD_MODEL`, `GERALD_VOICE`,
+`GERALD_MAX_IMAGE_W` et `GERALD_OCR_BUDGET` (2,5 secondes par défaut) dans
+`.env`. Sur Linux et macOS, l'application démarre
 aussi; les fournisseurs d'éléments et les raccourcis globaux dépendent des
 capacités du système. Pour les détails techniques, voir
 [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md).

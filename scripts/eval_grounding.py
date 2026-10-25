@@ -16,8 +16,8 @@ from PIL import Image
 from gerald.brain.realtime import RealtimeClient
 from gerald.capture.screen import MonitorRect, capture_from_image
 from gerald.config import load_settings
-from gerald.perception.eval_metrics import center_distance, prediction_hit, scale_box
-from gerald.perception.elements import collect_elements, serialize_context
+from gerald.perception.eval_metrics import annotate_screenshot, center_distance, prediction_hit, scale_box
+from gerald.perception.elements import collect_elements_detailed, serialize_context
 from gerald.tools.registry import (
     ArrowCommand,
     CircleCommand,
@@ -87,6 +87,7 @@ async def _run_realtime(
     dict[str, float | None],
     dict | None,
     dict | None,
+    str | None,
     str | None,
 ]:
     instructions = PROMPT_PATH.read_text(encoding="utf-8")
@@ -172,6 +173,7 @@ async def _run_realtime(
         await asyncio.wait_for(completed.wait(), timeout=120)
         grounding = None
         grounding_note = None
+        first_mark_error = None
         for call in tool_calls:
             if call["name"] not in {"point", "circle", "highlight", "underline", "arrow", "link"}:
                 continue
@@ -182,7 +184,11 @@ async def _run_realtime(
                 parsed = json.loads(output)
             except json.JSONDecodeError:
                 continue
-            if not parsed.get("ok") or "grounding" not in parsed:
+            if not parsed.get("ok"):
+                if first_mark_error is None:
+                    first_mark_error = parsed.get("error")
+                continue
+            if "grounding" not in parsed:
                 continue
             grounding = parsed["grounding"]
             if isinstance(grounding, dict):
@@ -191,7 +197,7 @@ async def _run_realtime(
                     grounding = grounding.get(endpoint)
             grounding_note = parsed.get("note")
             break
-        return commands, tool_calls, timings, usage, grounding, grounding_note
+        return commands, tool_calls, timings, usage, grounding, grounding_note, first_mark_error
     finally:
         if runner is not None:
             runner.cancel()
@@ -246,6 +252,9 @@ async def _evaluate(args: argparse.Namespace) -> int:
     from playwright.async_api import async_playwright
 
     results: list[dict[str, Any]] = []
+    run_ts = datetime.now().strftime("%Y%m%d-%H%M%S-%f")
+    run_dir = RESULTS_DIR / run_ts
+    run_dir.mkdir(parents=True, exist_ok=True)
     async with async_playwright() as playwright:
         browser = await playwright.chromium.connect_over_cdp("http://localhost:29229")
         context = await browser.new_context(viewport=data["viewport"])
@@ -257,6 +266,11 @@ async def _evaluate(args: argparse.Namespace) -> int:
                     reason = None
                     dpr = 1.0
                     screenshot = None
+                    image = None
+                    prediction = None
+                    elements = []
+                    ocr_seconds = 0.0
+                    first_mark_error = None
                     try:
                         await page.goto(case["url"], wait_until="domcontentloaded", timeout=60000)
                         await page.wait_for_timeout(1500)
@@ -268,6 +282,25 @@ async def _evaluate(args: argparse.Namespace) -> int:
                         screenshot = await page.screenshot()
                     except Exception as error:
                         reason = reason or f"screenshot failed: {error}"
+                    if screenshot is not None:
+                        try:
+                            image = Image.open(io.BytesIO(screenshot)).convert("RGB")
+                        except Exception as error:
+                            reason = reason or f"screenshot decode failed: {error}"
+                    if image is not None:
+                        capture = capture_from_image(
+                            image,
+                            MonitorRect(0, 0, image.width, image.height),
+                            settings.max_image_width,
+                        )
+                        collection = collect_elements_detailed(capture)
+                        elements = collection.elements
+                        ocr_seconds = collection.ocr_seconds
+                    image_size = (
+                        {"width": image.width, "height": image.height}
+                        if image is not None
+                        else None
+                    )
                     row: dict[str, Any] = {
                         "id": case["id"],
                         "kind": case["kind"],
@@ -276,6 +309,7 @@ async def _evaluate(args: argparse.Namespace) -> int:
                         "hit": None,
                         "distance": None,
                         "grounding_layer": None,
+                        "layer": None,
                         "grounding_note": None,
                         "tool_args": [],
                         "latencies": {
@@ -286,26 +320,33 @@ async def _evaluate(args: argparse.Namespace) -> int:
                         },
                         "usage": None,
                         "dpr": dpr,
+                        "gt": gt,
                         "ground_truth": gt,
+                        "prediction": None,
+                        "image_size": image_size,
+                        "elements_count": len(elements),
+                        "ocr_seconds": round(ocr_seconds, 3),
+                        "tool_error": None,
                         "reason": reason,
                     }
-                    if gt is not None and screenshot is None:
+                    if gt is not None and image is None:
                         row["status"] = "SCREENSHOT_ERROR"
-                    if gt is not None and screenshot is not None and not args.dry_gt:
-                        image = Image.open(io.BytesIO(screenshot)).convert("RGB")
-                        capture = capture_from_image(
-                            image,
-                            MonitorRect(0, 0, image.width, image.height),
-                            settings.max_image_width,
-                        )
-                        elements = collect_elements(capture)
+                    if gt is not None and image is not None and not args.dry_gt:
                         context_text = serialize_context(
                             elements,
                             capture.image_width,
                             capture.image_height,
                         )
                         try:
-                            commands, tool_args, latencies, usage, layer, grounding_note = await _run_realtime(
+                            (
+                                commands,
+                                tool_args,
+                                latencies,
+                                usage,
+                                layer,
+                                grounding_note,
+                                first_mark_error,
+                            ) = await _run_realtime(
                                 capture,
                                 elements,
                                 context_text,
@@ -317,15 +358,25 @@ async def _evaluate(args: argparse.Namespace) -> int:
                             row["latencies"] = latencies
                             row["usage"] = usage
                             row["grounding_layer"] = layer
+                            row["layer"] = layer
                             row["grounding_note"] = grounding_note
+                            row["tool_error"] = first_mark_error
                             row["status"] = "NO_MARK" if prediction is None else "OK"
                             if prediction is not None:
+                                row["prediction"] = prediction
                                 margin = data["hit_margin_px"] * dpr
                                 row["hit"] = prediction_hit(prediction, gt, margin)
                                 row["distance"] = center_distance(prediction, gt)
                         except Exception as error:
                             row["status"] = "API_ERROR"
                             row["reason"] = str(error)
+                    if image is not None:
+                        repeated_suffix = f"-repeat-{repeat_index}" if args.repeat > 1 else ""
+                        image_name = f"{case['id']}{repeated_suffix}.png"
+                        annotate_screenshot(image, gt, prediction).save(run_dir / image_name)
+                        row["screenshot_path"] = str(
+                            Path("evals") / "results" / run_ts / image_name
+                        )
                     results.append(row)
                     if args.dry_gt:
                         suffix = (
@@ -338,8 +389,7 @@ async def _evaluate(args: argparse.Namespace) -> int:
         finally:
             await context.close()
 
-    RESULTS_DIR.mkdir(parents=True, exist_ok=True)
-    output_path = RESULTS_DIR / f"{datetime.now().strftime('%Y%m%d-%H%M%S-%f')}.jsonl"
+    output_path = RESULTS_DIR / f"{run_ts}.jsonl"
     output_path.write_text(
         "".join(json.dumps(result, ensure_ascii=False) + "\n" for result in results),
         encoding="utf-8",

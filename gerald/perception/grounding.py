@@ -187,7 +187,7 @@ def _visual_snap(
     screen_x, screen_y = capture.img_to_screen(args_x, args_y)
     center_x = round((screen_x - capture.monitor.left) * scale_x)
     center_y = round((screen_y - capture.monitor.top) * scale_y)
-    radius = max(1, round(64 / capture.scale))
+    radius = max(1, round(64 * max(scale_x, scale_y)))
     left = max(0, center_x - radius)
     top = max(0, center_y - radius)
     right = min(image_width, center_x + radius)
@@ -268,6 +268,7 @@ def resolve_target(
 
     coordinate_note = None
     force_coordinates = False
+    force_visual_coordinates = False
     if "element_id" in args:
         element_id = args["element_id"]
         if not isinstance(element_id, int) or isinstance(element_id, bool):
@@ -342,6 +343,8 @@ def resolve_target(
             return resolved(_screen_rect(capture, rect), _element_layer(element))
         if "x" not in args or "y" not in args:
             raise ValueError(f"text not found on screen: {query}")
+        coordinate_note = "text not found, used x,y"
+        force_visual_coordinates = True
 
     if "x" not in args or "y" not in args:
         if isinstance(query, str):
@@ -357,13 +360,15 @@ def resolve_target(
         if element.rect[0] <= image_x <= element.rect[0] + element.rect[2]
         and element.rect[1] <= image_y <= element.rect[1] + element.rect[3]
     ]
-    if containing:
+    if containing and not force_visual_coordinates:
         element = min(containing, key=lambda value: value.rect[2] * value.rect[3])
         return resolved(_screen_rect(capture, element.rect), _element_layer(element), coordinate_note)
     if image_array is not None:
         snapped = _visual_snap(image_x, image_y, capture, image_array)
         if snapped is not None:
             return resolved(snapped, "snap", coordinate_note)
+        return resolved(_raw_rect(capture, image_x, image_y), "raw", coordinate_note)
+    if force_visual_coordinates:
         return resolved(_raw_rect(capture, image_x, image_y), "raw", coordinate_note)
 
     nearest = None

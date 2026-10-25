@@ -13,7 +13,7 @@ from gerald.audio.player import AudioPlayer
 from gerald.brain.realtime import RealtimeClient
 from gerald.capture.screen import MonitorRect, capture_from_image, capture_screen
 from gerald.config import load_settings, set_physical_dpi_awareness
-from gerald.perception.elements import collect_elements, serialize_context
+from gerald.perception.elements import collect_elements_detailed, serialize_context
 from gerald.tools.registry import CircleCommand, PointCommand
 
 
@@ -53,7 +53,8 @@ async def run() -> int:
     else:
         set_physical_dpi_awareness()
         capture = capture_screen(settings.max_image_width)
-    elements = collect_elements(capture)
+    collection = collect_elements_detailed(capture)
+    elements = collection.elements
     context = serialize_context(elements, capture.image_width, capture.image_height)
     instructions = (Path(__file__).parents[1] / "gerald" / "prompts" / "system_prompt.md").read_text(encoding="utf-8")
     completed = asyncio.Event()
@@ -166,6 +167,8 @@ async def run() -> int:
             "tool_results": tool_results,
             "usage": usage,
             "expect_error_px": error,
+            "elements_count": len(elements),
+            "ocr_seconds": round(collection.ocr_seconds, 3),
         }))
     else:
         print(
@@ -176,6 +179,7 @@ async def run() -> int:
             )
         )
         print(f"Token usage: {json.dumps(usage) if usage else 'not reported'}")
+        print(f"OCR: {len(elements)} elements in {collection.ocr_seconds:.3f}s")
         for result in tool_results:
             print(f"tool result: {json.dumps(result)}")
         if error is not None:

@@ -49,7 +49,7 @@ def main() -> int:
     from gerald.capture.session import CaptureRequest
     from gerald.capture.screen import capture_screen
     from gerald.overlay.window import OverlayWindow
-    from gerald.perception.elements import collect_elements, serialize_context
+    from gerald.perception.elements import collect_elements_detailed, serialize_context
 
     settings = load_settings()
     app = QApplication(sys.argv)
@@ -127,12 +127,36 @@ def main() -> int:
         return 1
     typed_hotkey = required | {"enter"}
     capture_executor = ThreadPoolExecutor(max_workers=1, thread_name_prefix="gerald-capture")
+    partial_capture_lock = threading.Lock()
+    partial_capture: dict[str, object] = {"capture": None, "elements": []}
 
-    def collect_capture():
+    def collect_capture(started_at: float | None):
         capture = capture_screen(settings.max_image_width)
-        elements = collect_elements(capture)
-        context = serialize_context(elements, capture.image_width, capture.image_height)
-        return capture, elements, context
+        with partial_capture_lock:
+            partial_capture.update(capture=capture, elements=[])
+
+        def publish_elements(elements) -> None:
+            with partial_capture_lock:
+                partial_capture["elements"] = list(elements)
+
+        collection = collect_elements_detailed(
+            capture,
+            budget=settings.ocr_budget,
+            started_at=started_at,
+            on_update=publish_elements,
+        )
+        publish_elements(collection.elements)
+        if not collection.complete:
+            logger.warning(
+                "OCR collection incomplete; using %d collected screen elements",
+                len(collection.elements),
+            )
+        context = serialize_context(
+            collection.elements,
+            capture.image_width,
+            capture.image_height,
+        )
+        return capture, collection.elements, context
 
     def on_microphone_audio(audio: bytes, level: float) -> None:
         bridge.mic_level.emit(level)
@@ -159,6 +183,8 @@ def main() -> int:
         app_state["question"] = question
         app_state["released"] = False
         app_state["capture"] = None
+        with partial_capture_lock:
+            partial_capture.update(capture=None, elements=[])
         previous_request = app_state.get("capture_request")
         if previous_request is not None:
             previous_request.cancel()
@@ -167,7 +193,7 @@ def main() -> int:
         overlay.clear()
         overlay.hide()
         app.processEvents()
-        request = CaptureRequest(capture_executor, collect_capture)
+        request = CaptureRequest(capture_executor, lambda: collect_capture(request.started_at))
         request.start_on_press()
         app_state["capture_request"] = request
         app_state["capture_generation_for_request"] = generation
@@ -180,9 +206,28 @@ def main() -> int:
 
         async def wait_for_capture() -> None:
             try:
-                captured = await request.wait_on_release()
+                started_at = request.started_at or time.monotonic()
+                remaining = max(0.0, settings.ocr_budget - (time.monotonic() - started_at))
+                captured = await request.wait_on_release(timeout=remaining)
             except asyncio.CancelledError:
                 return
+            except TimeoutError:
+                with partial_capture_lock:
+                    capture = partial_capture["capture"]
+                    elements = list(partial_capture["elements"])
+                if capture is None:
+                    bridge.capture_failed.emit("Capture d'écran indisponible après expiration du budget OCR.")
+                    return
+                logger.warning(
+                    "OCR collection exceeded the remaining budget; using %d completed elements",
+                    len(elements),
+                )
+                context = serialize_context(
+                    elements,
+                    capture.image_width,
+                    capture.image_height,
+                )
+                captured = capture, elements, context
             except Exception as error:
                 bridge.capture_failed.emit(str(error))
                 return

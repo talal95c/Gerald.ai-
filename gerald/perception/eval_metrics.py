@@ -2,6 +2,8 @@ from __future__ import annotations
 
 import math
 
+from PIL import Image, ImageDraw
+
 
 def scale_box(
     box: dict[str, float],
@@ -28,3 +30,22 @@ def center_distance(
     x, y, width, height = prediction
     gx, gy, gw, gh = ground_truth
     return math.hypot(x + width / 2 - gx - gw / 2, y + height / 2 - gy - gh / 2)
+
+
+def annotate_screenshot(
+    image: Image.Image,
+    gt: tuple[float, float, float, float] | None,
+    prediction: tuple[float, float, float, float] | None,
+) -> Image.Image:
+    annotated = image.copy()
+    draw = ImageDraw.Draw(annotated)
+    if gt is not None:
+        x, y, width, height = (round(value) for value in gt)
+        draw.rectangle((x, y, x + width, y + height), outline="#22C55E", width=3)
+    if prediction is not None:
+        x, y, width, height = (round(value) for value in prediction)
+        if width <= 0 or height <= 0:
+            draw.rectangle((x - 5, y - 5, x + 5, y + 5), outline="#FF9F0A", width=3)
+        else:
+            draw.rectangle((x, y, x + width, y + height), outline="#FF9F0A", width=3)
+    return annotated
