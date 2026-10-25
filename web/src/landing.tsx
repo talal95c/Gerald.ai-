@@ -68,44 +68,36 @@ function Nav() {
 }
 
 function HeroBoard() {
-  const [step, setStep] = useState(0);
+  const [k, setK] = useState(0);
   useEffect(() => {
-    const id = setInterval(() => setStep(s => (s + 1) % 5), 2200);
+    const id = setInterval(() => setK(v => (v + 1) % 8), 1700);
     return () => clearInterval(id);
   }, []);
-  return <div className="board-card">
-    <div className="ex">
-      <span className="ex-tag">TD 4 · Exercise 1</span>
-      <div className="ex-eq">Solve <b>x² − 5x + 6 = 0</b></div>
+  const on = (n: number) => k >= n ? " on" : "";
+  return <div className="board">
+    <div className="board-tools" aria-hidden="true">
+      <i className="sw" style={{background: "#111"}}/><i className="sw" style={{background: "#2563eb"}}/><i className="sw" style={{background: "#e11d48"}}/><i className="tool er"/>
     </div>
-    <div className="ink">
-      <div className="ink-line">Δ = <span className={`mk${step >= 1 ? " on" : ""}`}>b²</span> − <span className={`mk${step >= 1 ? " on" : ""}`}>4ac</span></div>
-      <div className={`ink-line hand${step >= 2 ? " on" : ""}`}>Δ = 25 − 24 = 1</div>
-      <div className={`ink-line hand${step >= 3 ? " on" : ""}`}>x₁ = 2 &nbsp;·&nbsp; x₂ = 3</div>
+    <div className="board-ex"><span>TD 4 · Exercise 1</span><b>Solve x² − 5x + 6 = 0</b></div>
+    <div className="board-ink">
+      <div className={`hw${on(1)}`}>a = 1, b = −5, c = 6</div>
+      <div className={`hw${on(2)}`}>Δ = b² − 4ac</div>
+      <div className={`hw${on(3)}`}>Δ = 25 <span className="err">+ 24<svg className={`circ${on(4)}`} viewBox="0 0 100 50" preserveAspectRatio="none" aria-hidden="true"><ellipse cx="50" cy="25" rx="46" ry="21" pathLength="1"/></svg></span> = 49</div>
+      <div className={`fix${on(5)}`}>− 24 → Δ = 1</div>
+      <div className={`hw${on(6)}`}>x₁ = 2 &nbsp; x₂ = 3 <span className={`tick${on(7)}`}>✓</span></div>
     </div>
-    <div className="think"><Check/> Looked at your attempt</div>
-    <div className={`say${step >= 4 ? " on" : ""}`}>
-      <Orb size={20}/>
-      <span>{step >= 4 ? "Bravo! Both roots are right. Want a revision sheet?" : "Look at b² first. What is (−5)²?"}</span>
-    </div>
-    <div className="chips">
-      <span className="chip">Give me a hint</span>
-      <span className="chip">Why Δ?</span>
-      <span className="chip">Show the parabola</span>
-    </div>
-    <div className="talk">
-      <Orb size={22}/>
-      <span className="talk-t">Hold <kbd>Ctrl</kbd> + <kbd>Shift</kbd> to talk</span>
-      <span className="wave" aria-hidden="true">{Array.from({length: 14}, (_, i) => <i key={i} style={{animationDelay: `${i * 70}ms`}}/>)}</span>
-    </div>
+    <span className={`gcur${k >= 4 && k < 6 ? " at-err" : k >= 6 ? " at-end" : ""}`}><Orb size={14}/> Gerald</span>
+    <div className={`gbub${k >= 4 && k < 7 ? " on" : ""}`}><Orb size={16}/><span>Careful: it’s <b>minus</b> 4ac. 4 × 1 × 6 = 24.</span></div>
+    <div className={`gbub ok${on(7)}`}><Orb size={16}/><span>Bravo! Both roots are right.</span></div>
+    <div className="board-talk"><Orb size={18}/><span>Hold <kbd>Ctrl</kbd> + <kbd>Shift</kbd> to ask</span><span className="wave" aria-hidden="true">{Array.from({length: 12}, (_, i) => <i key={i} style={{animationDelay: `${i * 70}ms`}}/>)}</span></div>
   </div>;
 }
 
 function Hero() {
   return <section className="hero" id="top">
     <span className="badge pop"><span className="badge-i dot" aria-hidden="true"/>Voice tutor for students · Beta</span>
-    <h1 className="pop d1">A tutor that explains<br/>it at your board</h1>
-    <p className="lead pop d2">Gerald sees your exercise, talks you through the method<br className="br"/> and draws on your screen — without giving away the answer.</p>
+    <h1 className="pop d1">You write on the board.<br/>Gerald corrects you.</h1>
+    <p className="lead pop d2">Work your exercise by hand on Gerald’s board. It follows every line,<br className="br"/> circles the mistake and explains it out loud — you still find the answer.</p>
     <div className="cta pop d3">
       <a className="btn ghost" href={DEMO_HREF}>Try the demo</a>
       <a className="btn primary" href={LIVE_HREF}>Learn live <Arrow/></a>
