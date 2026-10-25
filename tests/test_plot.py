@@ -5,12 +5,13 @@ import os
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
 import pytest
-from PyQt6.QtGui import QColor
+from PyQt6.QtCore import Qt
+from PyQt6.QtGui import QColor, QFontMetricsF, QImage, QPainter
 from PyQt6.QtWidgets import QApplication
 
-from gerald.board import BoardWindow
+from gerald.board import BoardWindow, PLOT_PALETTE
 from gerald.tools.plot import PLOT_INSETS, build_plot, parse_expression
-from gerald.tools.plot_render import _font_at_local_size
+from gerald.tools.plot_render import _font_at_local_size, _text_flags, draw_plot
 from gerald.tools.registry import BOARD_TOOL_NAMES, TOOL_SCHEMAS
 
 
@@ -32,6 +33,46 @@ def test_plot_fonts_compensate_for_image_to_local_scale(
     font = _font_at_local_size("Google Sans Flex", local_size, image_to_local_scale)
 
     assert font.pixelSize() == expected_size
+
+
+def test_scaled_y_tick_labels_do_not_clip_in_the_left_gutter(monkeypatch):
+    app = QApplication.instance() or QApplication([])
+    assert app is not None
+    args = {
+        **_base_args(),
+        "y_min": -100,
+        "y_max": 100,
+        "x": 100,
+        "y": 100,
+        "w": 420,
+        "h": 300,
+    }
+    plot, _result = build_plot(args, (800, 600))
+    image = QImage(800, 600, QImage.Format.Format_ARGB32_Premultiplied)
+    image.fill(QColor("#FFFFFF"))
+    observed_flags = []
+    original_text_flags = _text_flags
+
+    def record_text_flags(alignment):
+        flags = original_text_flags(alignment)
+        observed_flags.append(flags)
+        return flags
+
+    monkeypatch.setattr("gerald.tools.plot_render._text_flags", record_text_flags)
+    painter = QPainter(image)
+    painter.scale(0.5, 0.5)
+    painter.translate(plot.box[0], plot.box[1])
+    draw_plot(painter, plot, 1.0, "Google Sans Flex", PLOT_PALETTE, 0.5)
+    painter.end()
+
+    tick_font = _font_at_local_size("Google Sans Flex", 13, 0.5)
+    assert QFontMetricsF(tick_font).horizontalAdvance("-100") > PLOT_INSETS[0] - 12
+    assert any(
+        flags & int(Qt.AlignmentFlag.AlignRight)
+        and flags & int(Qt.TextFlag.TextDontClip)
+        for flags in observed_flags
+    )
+    assert not image.isNull()
 
 
 def test_expression_parser_accepts_allowed_math_forms():
