@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from io import BytesIO
 import math
+import time
 
 from PIL import Image
 from PyQt6.QtCore import QPointF, QRectF, Qt, QTimer
@@ -9,7 +10,9 @@ from PyQt6.QtGui import QColor, QFont, QFontMetricsF, QImage, QPainter, QPainter
 from PyQt6.QtWidgets import QFrame, QHBoxLayout, QPushButton, QWidget
 
 from gerald.capture.screen import Capture, MonitorRect, capture_from_image
-from gerald.overlay.window import ACCENT, screen_mapping_for_qscreen
+from gerald.overlay.window import ACCENT, _system_font_family, screen_mapping_for_qscreen
+from gerald.tools.diagram import DiagramCommand
+from gerald.tools.diagram_render import draw_diagram
 from gerald.tools.registry import (
     ArrowCommand,
     CircleCommand,
@@ -147,6 +150,34 @@ class BoardWindow(QWidget):
         for command in commands:
             if isinstance(command, ClearCommand):
                 self.clear_gerald()
+            elif isinstance(command, DiagramCommand):
+                scale = max(0.85, min(1.0, (self.width() - 48) / max(1, command.layout.width), (self.height() - 100) / max(1, command.layout.height)))
+                if command.x is not None and command.y is not None:
+                    x, y = self._image_to_local(command.x, command.y)
+                else:
+                    bottom = max(
+                        [point[1] for stroke in self.user_strokes for point in stroke]
+                        + [item.get("y", 0) + item.get("layout", command.layout).height * item.get("scale", 1)
+                           for item in self._gerald if item.get("kind") == "diagram"]
+                        + [item.get("y", 0) for item in self._gerald]
+                        + [32]
+                    )
+                    x, y = 32.0, bottom + 24.0
+                    if y + command.layout.height * scale > self.height() - 24:
+                        x, y = max(24.0, self.width() - command.layout.width * scale - 24), 48.0
+                panel_width = command.layout.width * scale
+                panel_height = command.layout.height * scale
+                x = min(max(0.0, self.width() - panel_width), max(0.0, x))
+                y = min(max(0.0, self.height() - panel_height), max(0.0, y))
+                self._gerald.append({
+                    "kind": "diagram",
+                    "layout": command.layout,
+                    "x": x,
+                    "y": y,
+                    "scale": scale,
+                    "created": time.monotonic(),
+                })
+                self._reveal_timer.start()
             else:
                 self._gerald.append({"kind": "command", "command": command, "progress": 1.0})
         self.update()
@@ -245,6 +276,10 @@ class BoardWindow(QWidget):
     def _advance_reveals(self) -> None:
         active = False
         for item in self._gerald:
+            if item.get("kind") == "diagram":
+                if time.monotonic() - item["created"] < len(item["layout"].nodes) * 0.09 + 0.2:
+                    active = True
+                continue
             if item.get("progress", 1) < 1:
                 item["progress"] = min(1.0, item["progress"] + 0.04)
                 active = True
@@ -387,6 +422,16 @@ class BoardWindow(QWidget):
                     )
                 )
                 painter.drawPixmap(round(item["x"]), round(item["y"] - image.height()), image)
+            elif item["kind"] == "diagram":
+                draw_diagram(
+                    painter,
+                    item["layout"],
+                    item["x"],
+                    item["y"],
+                    item["scale"],
+                    time.monotonic() - item["created"],
+                    _system_font_family(),
+                )
             elif item["kind"] == "command":
                 command = item["command"]
                 painter.setPen(QPen(ACCENT, 3, Qt.PenStyle.SolidLine, Qt.PenCapStyle.RoundCap, Qt.PenJoinStyle.RoundJoin))

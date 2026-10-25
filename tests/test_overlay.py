@@ -1,12 +1,14 @@
 import os
 import threading
+import time
 from types import SimpleNamespace
 
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
-from PyQt6.QtCore import Qt
+from PyQt6.QtCore import QPoint, QPointF, QRect, QRectF, Qt
 from PyQt6.QtGui import QImage, QPainter
 from PyQt6.QtWidgets import QApplication
+from PyQt6.QtTest import QTest
 
 from gerald.overlay.window import (
     OverlayWindow,
@@ -16,7 +18,8 @@ from gerald.overlay.window import (
     _try_set_capture_exclusion,
 )
 from gerald.perception.grounding import ScreenRect
-from gerald.tools.registry import ArrowCommand, CircleCommand, NoteCommand
+from gerald.tools.registry import ArrowCommand, CircleCommand, ClearCommand, NoteCommand, PointCommand, TipCommand
+from gerald.tools.diagram import DiagramCommand, layout_diagram
 
 
 def test_display_affinity_failure_is_recorded_and_warned_once(monkeypatch, caplog):
@@ -254,7 +257,7 @@ def test_confirmation_position_avoids_target_and_flips_above_when_needed():
 
 
 def test_expired_confirmation_ignores_late_approval():
-    app = QApplication.instance() or QApplication([])
+    _app = QApplication.instance() or QApplication([])
     overlay = OverlayWindow()
     completion = threading.Event()
     result = {"approved": False, "expired": False}
@@ -268,6 +271,190 @@ def test_expired_confirmation_ignores_late_approval():
     assert completion.is_set()
     assert result == {"approved": False, "expired": True}
     overlay.close()
+
+
+def test_tip_command_opens_bubble_and_choice_click_calls_callback():
+    app = QApplication.instance() or QApplication([])
+    overlay = OverlayWindow()
+    choices = []
+    overlay.add_commands([TipCommand("Astuce : Ctrl+F")])
+    assert overlay.has_bubble()
+    assert overlay._bubble.label.text() == "Astuce : Ctrl+F"
+
+    overlay.show_bubble("Continuer ?", ["Oui", "Non"], choices.append)
+    bubble = overlay._bubble
+    assert bubble is not None
+    assert bubble.windowFlags() & Qt.WindowType.WindowDoesNotAcceptFocus
+    assert len(bubble.buttons) == 2
+    bubble.buttons[0].click()
+    assert choices == ["Oui"]
+    assert not overlay.has_bubble()
+    overlay.close()
+    app.processEvents()
+
+
+def test_bubble_timeout_calls_none():
+    app = QApplication.instance() or QApplication([])
+    overlay = OverlayWindow()
+    choices = []
+    overlay.show_bubble("Astuce", ["Oui", "Non"], choices.append, ttl=0.02)
+    QTest.qWait(260)
+    assert choices == [None]
+    overlay.close()
+    app.processEvents()
+
+
+def test_tip_bubble_avoids_circle_target_and_uses_window_opacity():
+    app = QApplication.instance() or QApplication([])
+    overlay = OverlayWindow(cursor_enabled=True)
+    overlay.setGeometry(0, 0, 640, 400)
+    overlay._screen_mappings = lambda: _build_screen_mappings(
+        [("fake", (0, 0, 640, 400), 1.0)]
+    )
+
+    overlay.add_commands(
+        [CircleCommand(ScreenRect(200, 100, 160, 80)), TipCommand("Astuce : Ctrl+F")]
+    )
+
+    bubble = overlay._bubble
+    assert bubble is not None
+    bubble_rect = QRectF(
+        bubble.geometry().translated(-overlay.geometry().x(), -overlay.geometry().y())
+    )
+    target_rect = overlay._cursor_target_rect.translated(
+        -overlay.geometry().x(), -overlay.geometry().y()
+    )
+    assert not bubble_rect.intersects(target_rect)
+    assert bubble.graphicsEffect() is None
+    assert bubble._fade.propertyName() == b"windowOpacity"
+    bubble.setWindowOpacity(1.0)
+    image = QImage(bubble.width(), bubble.height(), QImage.Format.Format_ARGB32)
+    image.fill(0)
+    painter = QPainter(image)
+    bubble.render(painter)
+    painter.end()
+    assert image.pixelColor(bubble.width() // 2, 10).alpha() >= 248
+    overlay.close()
+    app.processEvents()
+
+
+def test_floating_diagram_never_scales_below_point_eight_five():
+    app = QApplication.instance() or QApplication([])
+    overlay = OverlayWindow(cursor_enabled=True)
+    layout = layout_diagram(
+        title="Grand diagram",
+        layout="flow",
+        nodes=[
+            {"id": str(index), "text": "A very wide label"}
+            for index in range(8)
+        ],
+    )
+
+    state = overlay._diagram_state(DiagramCommand(layout), time.monotonic(), 30)
+
+    assert state["scale"] >= 0.85
+    overlay.close()
+    app.processEvents()
+
+
+def test_cursor_flies_to_mark_and_returns_after_clear():
+    app = QApplication.instance() or QApplication([])
+    overlay = OverlayWindow(cursor_enabled=True)
+    overlay.setGeometry(0, 0, 640, 400)
+    overlay.set_mouse_position(40, 50, physical=False)
+    target_command = PointCommand(ScreenRect(100, 80, 20, 20))
+    target = overlay._cursor_target_for(target_command)
+    overlay.add_commands([target_command])
+    assert overlay._cursor_flight is not None
+    start, end, _started = overlay._cursor_flight
+    assert end == target
+    overlay._cursor_flight = (start, end, time.monotonic() - 0.36)
+    overlay._tick()
+    assert abs(overlay._cursor_position.x() - target.x()) < 0.1
+    assert abs(overlay._cursor_position.y() - target.y()) < 0.1
+
+    overlay.add_commands([ClearCommand()])
+    assert overlay._cursor_flight is not None
+    return_target = overlay._mouse_position + type(overlay._mouse_position)(18, 14)
+    overlay._cursor_flight = (*overlay._cursor_flight[:2], time.monotonic() - 0.36)
+    overlay._tick()
+    assert abs(overlay._cursor_position.x() - return_target.x()) < 0.1
+    assert abs(overlay._cursor_position.y() - return_target.y()) < 0.1
+    overlay.close()
+    app.processEvents()
+
+
+def test_cursor_environment_setting_disables_paint(monkeypatch):
+    app = QApplication.instance() or QApplication([])
+    monkeypatch.setenv("GERALD_CURSOR", "0")
+    overlay = OverlayWindow()
+    overlay.setGeometry(0, 0, 200, 150)
+    image = QImage(200, 150, QImage.Format.Format_ARGB32)
+    image.fill(0)
+    painter = QPainter(image)
+    overlay.render(painter)
+    painter.end()
+    assert not overlay._cursor_enabled
+    assert image.pixelColor(20, 20).alpha() == 0
+    overlay.close()
+    app.processEvents()
+
+
+def test_cursor_poll_keeps_qt_logical_coordinates_at_150_percent_scale(monkeypatch):
+    from gerald.overlay import window as window_module
+
+    app = QApplication.instance() or QApplication([])
+    overlay = OverlayWindow(cursor_enabled=True)
+    overlay._screen_mappings = lambda: _build_screen_mappings(
+        [("fake", (0, 0, 1000, 600), 1.5)]
+    )
+    monkeypatch.setattr(window_module.QCursor, "pos", staticmethod(lambda: QPoint(50, 40)))
+
+    assert _physical_to_logical(75, 60, overlay._screen_mappings()) == (50.0, 40.0, 1.5)
+    overlay._poll_cursor_position()
+    assert overlay._mouse_position == QPointF(50, 40)
+    overlay.close()
+    app.processEvents()
+
+
+def test_cursor_only_motion_requests_a_partial_repaint(monkeypatch):
+    app = QApplication.instance() or QApplication([])
+    overlay = OverlayWindow(cursor_enabled=True)
+    overlay._mouse_position = QPointF(100, 100)
+    overlay._cursor_position = QPointF(100, 100)
+    overlay._status_changed = time.monotonic() - 1
+    calls = []
+    monkeypatch.setattr(overlay, "update", lambda *args: calls.append(args))
+
+    overlay._tick()
+
+    assert len(calls) == 1
+    assert len(calls[0]) == 1
+    assert isinstance(calls[0][0], QRect)
+    assert calls[0][0].width() >= 56
+    overlay.close()
+    app.processEvents()
+
+
+def test_floating_diagram_expires_after_30_seconds_and_clear_removes_it():
+    app = QApplication.instance() or QApplication([])
+    overlay = OverlayWindow()
+    layout = layout_diagram(
+        title="Cycle",
+        layout="cycle",
+        nodes=[{"id": "a", "text": "A"}, {"id": "b", "text": "B"}],
+        edges=[{"from": "a", "to": "b"}, {"from": "b", "to": "a"}],
+    )
+    overlay.add_commands([DiagramCommand(layout)])
+    assert overlay._diagrams[0]["ttl"] == 30.0
+    overlay._diagrams[0]["created"] -= 31
+    overlay._tick()
+    assert overlay._diagrams == []
+    overlay.add_commands([DiagramCommand(layout)])
+    overlay.add_commands([ClearCommand()])
+    assert overlay._diagrams == []
+    overlay.close()
+    app.processEvents()
     app.processEvents()
 
 
