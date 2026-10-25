@@ -118,18 +118,27 @@ MOCK_BRIDGE = """
     quit: () => {}
   };
   let listening = false;
-  window.addEventListener("keydown", event => {
-    if (event.ctrlKey && event.shiftKey && !listening) {
-      listening = true; signals.agentStatus.emit("listening");
-    }
-  });
-  window.addEventListener("keyup", event => {
-    if (listening && ["Control", "Shift"].includes(event.key)) {
-      listening = false; signals.agentStatus.emit("thinking");
-      setTimeout(() => signals.agentStatus.emit("speaking"), 900);
-      setTimeout(() => signals.agentStatus.emit("idle"), 2600);
-    }
-  });
+  let held = false;
+  const start = () => { if (listening) return; listening = true; signals.agentStatus.emit("listening"); };
+  const stop = () => {
+    if (!listening) return;
+    listening = false; signals.agentStatus.emit("thinking");
+    setTimeout(() => signals.agentStatus.emit("speaking"), 900);
+    setTimeout(() => signals.agentStatus.emit("idle"), 2600);
+  };
+  window.addEventListener("load", () => window.focus());
+  window.addEventListener("keydown", event => { if (event.ctrlKey && event.shiftKey) start(); }, true);
+  window.addEventListener("keyup", event => { if (["Control", "Shift"].includes(event.key)) stop(); }, true);
+  window.addEventListener("blur", stop);
+  window.addEventListener("pointerdown", event => {
+    if (!(event.target instanceof Element) || !event.target.closest(".orb-wrap")) return;
+    event.preventDefault(); event.stopPropagation(); held = true; start();
+  }, true);
+  window.addEventListener("pointerup", () => { if (held) { held = false; stop(); } }, true);
+  window.addEventListener("pointercancel", () => { if (held) { held = false; stop(); } }, true);
+  window.addEventListener("click", event => {
+    if (event.target instanceof Element && event.target.closest(".orb-wrap")) { event.preventDefault(); event.stopPropagation(); }
+  }, true);
 })();
 """
 
