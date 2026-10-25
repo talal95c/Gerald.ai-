@@ -1,4 +1,4 @@
-import React, { useEffect, useRef, useState } from "react";
+import React, { type CSSProperties, useEffect, useRef, useState } from "react";
 import { createRoot } from "react-dom/client";
 import katex from "katex";
 import "katex/dist/katex.min.css";
@@ -617,16 +617,20 @@ function Board() {
     if (current.plotVisible && current.plotData) drawPlotSnapshot(ctx, current.plotData, current.plotBox);
     return image.toDataURL("image/jpeg", 0.7);
   };
-  const elements = () => {
+  const visibleDomTargets = () => {
     const visible = [...document.querySelectorAll<HTMLElement>("[data-gerald-id], .gerald-write, .plot-win")];
-    const domElements = visible.filter((element) => element.getClientRects().length).map((element, index) => {
+    return visible.filter((element) => element.getClientRects().length).map((element, index) => {
       const rect = element.getBoundingClientRect();
       return {
         id: Number(element.dataset.geraldId) || 200 + index,
         text: (element.innerText || "").trim(),
         rect: {x: rect.x, y: rect.y, w: rect.width, h: rect.height},
+        element,
       };
     });
+  };
+  const elements = () => {
+    const domElements = visibleDomTargets().map(({id, text, rect}) => ({id, text, rect}));
     const strokeBoxes = strokes.current.flatMap((stroke) => {
       if (stroke.erase || !stroke.pts.length) return [];
       const xs = stroke.pts.map((point) => point.x);
@@ -695,44 +699,138 @@ function Board() {
     setMarks((items) => items.map((mark) => mark.id === id ? {...mark, progress} : mark));
   const updateMarkHead = (id: string, head: number) =>
     setMarks((items) => items.map((mark) => mark.id === id ? {...mark, head} : mark));
+  const sameLine = (left: AnnotationRect, right: AnnotationRect) => {
+    const overlap = Math.min(left.y + left.h, right.y + right.h) - Math.max(left.y, right.y);
+    return overlap >= -Math.min(left.h, right.h) * 0.25;
+  };
+  const horizontalGap = (left: AnnotationRect, right: AnnotationRect) =>
+    Math.max(0, right.x - left.x - left.w, left.x - right.x - right.w);
+  const textRect = (element: HTMLElement, wanted: string): AnnotationRect | null => {
+    const walker = document.createTreeWalker(element, NodeFilter.SHOW_TEXT);
+    const nodes: Text[] = [];
+    let current: Node | null;
+    while ((current = walker.nextNode())) nodes.push(current as Text);
+    if (!nodes.length) return null;
+    const match = normalizedMatch(nodes.map((node) => node.data).join(""), wanted);
+    if (!match) return null;
+    const locate = (offset: number, end: boolean): [Text, number] => {
+      let base = 0;
+      for (const node of nodes) {
+        if (offset < base + node.length || end && offset === base + node.length) return [node, offset - base];
+        base += node.length;
+      }
+      const last = nodes[nodes.length - 1];
+      return [last, last.length];
+    };
+    const [start, startOffset] = locate(match.index, false);
+    const [finish, endOffset] = locate(match.end, true);
+    const range = document.createRange();
+    range.setStart(start, startOffset);
+    range.setEnd(finish, endOffset);
+    const rect = range.getBoundingClientRect();
+    return {x: rect.x, y: rect.y, w: rect.width, h: rect.height};
+  };
+  const adjacentTextRect = (
+    targets: ReturnType<typeof visibleDomTargets>,
+    wanted: string,
+    elementId?: number,
+  ): AnnotationRect | null => {
+    const query = normalizedText(wanted).text;
+    if (!query) return null;
+    const rows: typeof targets[] = [];
+    for (const target of [...targets].sort((left, right) => left.rect.y - right.rect.y || left.rect.x - right.rect.x)) {
+      const row = rows.find((items) => items.some((item) => sameLine(item.rect, target.rect)));
+      if (row) row.push(target);
+      else rows.push([target]);
+    }
+    const matches: Array<{count: number; rect: AnnotationRect}> = [];
+    for (const row of rows) {
+      const ordered = row.sort((left, right) => left.rect.x - right.rect.x);
+      for (let start = 0; start < ordered.length; start += 1) {
+        let combined = "";
+        const span: typeof ordered = [];
+        for (let end = start; end < ordered.length && end < start + 8; end += 1) {
+          if (end > start && horizontalGap(ordered[end - 1].rect, ordered[end].rect)
+            > Math.max(24, Math.min(ordered[end - 1].rect.h, ordered[end].rect.h) * 1.25)) break;
+          span.push(ordered[end]);
+          combined += ordered[end].text;
+          if (span.length < 2 || elementId !== undefined && !span.some((item) => item.id === elementId)) continue;
+          const normalized = normalizedText(combined).text;
+          if (normalized.includes(query) && !span.some((item) => normalizedText(item.text).text.includes(query))) {
+            matches.push({count: span.length, rect: unionBounds(...span.map((item) => item.rect))});
+          }
+        }
+      }
+    }
+    return matches.sort((left, right) => left.count - right.count)[0]?.rect ?? null;
+  };
+  const inkSpanRectByShape = (wanted: string, elementId?: number): AnnotationRect | null => {
+    const tokens = (wanted.match(/[+\-−‐‑‒–—=×*\/]|[^\s+\-−‐‑‒–—=×*\/]+/gu) ?? [])
+      .map((token) => normalizedText(token).text)
+      .filter(Boolean);
+    const operators = new Set(["+", "-", "=", "×", "*", "/", "±", "√", "(", ")"]);
+    const mathToken = (token: string) =>
+      /^\d+(?:\.\d+)?$/u.test(token) || /^[a-zα-ω]$/u.test(token) || operators.has(token);
+    if (tokens.length < 2 || !tokens.some((token) => operators.has(token)) || !tokens.every(mathToken)) return null;
+    const ink = elements().filter((item) => item.id >= 10000);
+    const rows: typeof ink[] = [];
+    for (const item of [...ink].sort((left, right) => left.rect.y - right.rect.y || left.rect.x - right.rect.x)) {
+      const row = rows.find((items) => items.some((candidate) => sameLine(candidate.rect, item.rect)));
+      if (row) row.push(item);
+      else rows.push([item]);
+    }
+    const candidates: Array<{score: number; rect: AnnotationRect; ids: number[]}> = [];
+    for (const row of rows) {
+      const ordered = row.sort((left, right) => left.rect.x - right.rect.x);
+      const lineHeight = ordered.map((item) => item.rect.h).sort((left, right) => left - right)[Math.floor(ordered.length / 2)];
+      for (let start = 0; start <= ordered.length - tokens.length; start += 1) {
+        const span = ordered.slice(start, start + tokens.length);
+        if (span.some((item, index) => index > 0
+          && horizontalGap(span[index - 1].rect, item.rect)
+            > Math.max(24, Math.min(span[index - 1].rect.h, item.rect.h) * 1.25))) continue;
+        const score = span.reduce((total, item, index) => {
+          const token = tokens[index];
+          const operator = /^[+\-−‐‑‒–—=×*\/]$/u.test(token);
+          const expectedWidth = token.length * lineHeight * (operator ? 0.9 : 0.95);
+          const expectedHeight = lineHeight * (token === "=" ? 0.7 : token === "-" || token === "−" ? 0.35 : 1);
+          return total + Math.abs(item.rect.w - expectedWidth) + Math.abs(item.rect.h - expectedHeight) * 0.8;
+        }, 0);
+        candidates.push({score, rect: unionBounds(...span.map((item) => item.rect)), ids: span.map((item) => item.id)});
+      }
+    }
+    const matches = candidates
+      .filter((candidate) => elementId === undefined || candidate.ids.includes(elementId))
+      .sort((left, right) => left.score - right.score);
+    if (!matches.length) return null;
+    if (elementId === undefined && matches[1] && matches[1].score - matches[0].score < 2) return null;
+    return matches[0].rect;
+  };
+  const visibleTargetSummary = () =>
+    elements().slice(0, 40).map((item) => `[${item.id}] ${item.text.slice(0, 100)}`).join("; ");
   const targetRect = (args: Record<string, unknown>) => {
     const wanted = typeof args.target_text === "string" ? args.target_text : "";
     const elementId = Number(args.element_id);
+    const hasElementId = isNumber(args.element_id);
+    const targets = visibleDomTargets();
+    const domById = hasElementId ? targets.find((item) => item.id === elementId) : undefined;
+    if (!wanted && domById) return domById.rect;
+    if (wanted && domById) {
+      return textRect(domById.element, wanted) ?? adjacentTextRect(targets, wanted, elementId);
+    }
+    if (wanted) {
+      for (const target of targets) {
+        const match = textRect(target.element, wanted);
+        if (match) return match;
+      }
+      const adjacent = adjacentTextRect(targets, wanted, hasElementId ? elementId : undefined);
+      if (adjacent) return adjacent;
+      return inkSpanRectByShape(wanted, hasElementId ? elementId : undefined);
+    }
     const ink = elements().find((item) => item.id === elementId && item.id >= 10000);
     if (ink) return ink.rect;
-    const candidates = [...document.querySelectorAll<HTMLElement>("[data-gerald-id]")];
-    const element = candidates.find((item) => item.dataset.geraldId === String(args.element_id))
-      ?? (wanted ? candidates.find((item) => normalizedMatch(item.innerText, wanted)) : undefined);
-    if (element) {
-      let rect = element.getBoundingClientRect();
-      if (wanted) {
-        const walker = document.createTreeWalker(element, NodeFilter.SHOW_TEXT);
-        const nodes: Text[] = [];
-        let current: Node | null;
-        while ((current = walker.nextNode())) nodes.push(current as Text);
-        const raw = nodes.map((node) => node.data).join("");
-        const match = normalizedMatch(raw, wanted);
-        if (match && nodes.length) {
-          const locate = (offset: number, end: boolean): [Text, number] => {
-            let base = 0;
-            for (const node of nodes) {
-              if (offset < base + node.length || end && offset === base + node.length) return [node, offset - base];
-              base += node.length;
-            }
-            const last = nodes[nodes.length - 1];
-            return [last, last.length];
-          };
-          const [start, startOffset] = locate(match.index, false);
-          const [finish, endOffset] = locate(match.end, true);
-          const range = document.createRange();
-          range.setStart(start, startOffset);
-          range.setEnd(finish, endOffset);
-          rect = range.getBoundingClientRect();
-        } else if (!isNumber(args.element_id)) return null;
-      }
-      return {x: rect.x, y: rect.y, w: rect.width, h: rect.height};
+    if (!wanted && isNumber(args.x) && isNumber(args.y)) {
+      return {x: args.x, y: args.y, w: isNumber(args.w) ? args.w : 120, h: isNumber(args.h) ? args.h : 38};
     }
-    if (isNumber(args.x) && isNumber(args.y)) return {x: args.x, y: args.y, w: isNumber(args.w) ? args.w : 120, h: isNumber(args.h) ? args.h : 38};
     return null;
   };
   const executeWebTool = async (name: string, args: Record<string, unknown>) => {
@@ -802,7 +900,7 @@ function Board() {
     if (name === "arrow") {
       const from = targetRect((args.from ?? {}) as Record<string, unknown>);
       const to = targetRect((args.to ?? {}) as Record<string, unknown>);
-      if (!from || !to) return {ok: false, error: "arrow targets were not found"};
+      if (!from || !to) return {ok: false, error: `target not found. Visible targets: ${visibleTargetSummary()}`};
       const endpoints = arrowEndpoints(from, to);
       if (!endpoints) return {ok: false, error: "arrow endpoints could not be calculated"};
       const {x1, y1, x2, y2} = endpoints;
@@ -821,7 +919,7 @@ function Board() {
     }
     if (["underline", "circle", "highlight", "point", "note"].includes(name)) {
       if (!target) {
-        return {ok: false, error: `${name} requires numeric x,y coordinates on the board`};
+        return {ok: false, error: `target not found. Visible targets: ${visibleTargetSummary()}`};
       }
       const text = typeof args.text === "string"
         ? args.text
@@ -943,7 +1041,7 @@ function Board() {
       {marks.filter((mark) => mark.kind === "underline").map((mark) =>
         <line key={mark.id} data-gerald-mark-kind="underline" x1={mark.x - mark.w / 2} x2={mark.x - mark.w / 2 + mark.w * (mark.progress ?? 1)} y1={mark.y + mark.h / 2} y2={mark.y + mark.h / 2} style={{stroke: mark.color ?? undefined}}/>)}
       {marks.filter((mark) => mark.kind === "point").map((mark) =>
-        <g key={mark.id} data-gerald-mark-kind="point"><circle cx={mark.x} cy={mark.y} r="5" style={{fill: mark.color ?? undefined}}/><text x={mark.x + 8} y={mark.y - 8} style={{fill: mark.color ?? undefined}}>{mark.text}</text></g>)}
+        <g key={mark.id} data-gerald-mark-kind="point"><g className="guide-point" transform={`translate(${mark.x} ${mark.y})`} style={mark.color ? {"--gp": mark.color} as CSSProperties : undefined}><circle className="gp-halo" r="20"/><circle className="gp-ripple" r="12"/><circle className="gp-ripple gp-late" r="12"/><circle className="gp-core" r="4"/></g><text x={mark.x + 16} y={mark.y - 14} style={{fill: mark.color ?? undefined}}>{mark.text}</text></g>)}
       {marks.filter((mark) => mark.kind === "highlight").map((mark) =>
         <rect key={mark.id} data-gerald-mark-kind="highlight" x={mark.x - mark.w / 2} y={mark.y - mark.h / 2} width={mark.w * (mark.progress ?? 1)} height={mark.h} style={{fill: mark.fill ?? undefined, stroke: mark.color ?? undefined}}/>)}
       {marks.filter((mark) => mark.kind === "arrow").map((mark) => {

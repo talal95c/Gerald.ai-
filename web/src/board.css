@@ -42,7 +42,7 @@ html,body,#root{margin:0;height:100%;overflow:hidden}
 .gerald-pointer i{width:22px;height:22px;flex:none;border-radius:50%;background:radial-gradient(circle at 35% 30%,#fff 0,#d9c8ff 18%,#8b5cf6 55%,#4c1d95 100%);box-shadow:0 0 0 3px rgba(139,92,246,.15),0 4px 12px rgba(109,40,217,.35)}
 .td-board-overlay{display:none;position:fixed;inset:0;z-index:10;background:#F7F6F3}
 .td-board-overlay.open{display:block}
-.td-board-overlay iframe{position:absolute;inset:0;width:100%;height:100%;border:0}
+.td-board-overlay iframe{position:absolute;inset:0 0 auto;width:100%;height:calc(100% - 132px);border:0}
 .td-board-close{position:absolute;z-index:12;top:16px;left:16px;min-height:44px;padding:0 16px;border:1px solid rgba(38,38,38,.12);border-radius:999px;background:rgba(255,255,255,.94);color:#262626;font:500 13px "Google Sans Flex",sans-serif;box-shadow:0 8px 24px rgba(38,38,38,.12)}
 .td-assist{z-index:20}
 .paint-mode .paint-editor{position:fixed;inset:0;z-index:0;width:100vw;height:100vh;border:0}
@@ -84,6 +84,16 @@ html,body,#root{margin:0;height:100%;overflow:hidden}
 .td-assist .td-ask .orb-wrap.orb-idle::before{content:"";width:26px;height:26px;border-radius:50%;background:radial-gradient(circle at 35% 30%,#fff 0,#d9c8ff 18%,#8b5cf6 55%,#4c1d95 100%);box-shadow:0 0 0 3px rgba(139,92,246,.15),0 4px 12px rgba(109,40,217,.35);animation:td-breathe 3s ease-in-out infinite}
 @keyframes td-breathe{0%,100%{transform:scale(1)}50%{transform:scale(1.06)}}
 .td-wave i:nth-child(3n){transform:scaleY(.55)}.td-wave i:nth-child(3n+1){transform:scaleY(.35)}
+.guide-point{--gp:#7C3AED}
+.gerald-marks .guide-point circle,.td-mark-layer .guide-point circle{stroke:none;transform-box:fill-box;transform-origin:center}
+.guide-point .gp-halo{fill:var(--gp);opacity:.24;filter:blur(7px);animation:gp-in .45s cubic-bezier(.2,.8,.2,1) both,gp-breathe 2.4s ease-in-out .45s infinite}
+.guide-point .gp-core{fill:var(--gp);opacity:.92;filter:blur(.5px);animation:gp-in .35s cubic-bezier(.2,.8,.2,1) both}
+.gerald-marks .guide-point .gp-ripple,.td-mark-layer .guide-point .gp-ripple{fill:none;stroke:var(--gp);stroke-width:1.5;opacity:0;animation:gp-ripple 2.4s cubic-bezier(.2,.7,.3,1) .25s infinite}
+.guide-point .gp-late{animation-delay:1.45s}
+@keyframes gp-in{from{opacity:0;transform:scale(.4)}}
+@keyframes gp-breathe{0%,100%{transform:scale(1)}50%{transform:scale(1.14)}}
+@keyframes gp-ripple{0%{opacity:.45;transform:scale(.55)}100%{opacity:0;transform:scale(2.3)}}
+@media(prefers-reduced-motion:reduce){.guide-point .gp-ripple{display:none}.guide-point .gp-halo{animation:gp-in .2s both}}
 .td-mic,.td-stop{box-sizing:border-box;width:44px;min-width:44px;height:44px;padding:0;display:grid;place-items:center;border-radius:999px;transition:background-color 150ms ease,transform 150ms cubic-bezier(.2,.8,.2,1)}
 .td-mic.is-connecting{width:auto;padding:0 16px}
 .td-mic svg,.td-stop svg{display:block}

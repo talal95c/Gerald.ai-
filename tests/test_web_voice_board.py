@@ -132,6 +132,18 @@ def test_session_posts_sdp_and_filtered_realtime_config(monkeypatch, server):
     assert session["instructions"].startswith(web_voice_board.SYSTEM_PROMPT.read_text(encoding="utf-8"))
     assert "BOARD MODE\nExercise: Exercice 1" in session["instructions"]
     assert "« à toi de jouer »" in session["instructions"]
+    assert (
+        "valeur de Δ ni les racines tant que l’élève ne les a pas trouvées lui-même. Dès qu’il a écrit "
+        "lui-même la bonne valeur de Δ et demande une rédaction ou une solution propre, rédige-la au "
+        "tableau avec write_math, une ligne par étape (Δ = b² − 4ac = …, x = (−b ± √Δ)/2a, "
+        "x₁ = …, x₂ = …), puis félicite-le en une phrase. Pour une erreur de signe, vise le signe et le "
+        "nombre ensemble (target_text « + 24 », pas « 24 ») et donne l’indice en une phrase, par exemple "
+        "« −4ac donne −24 »."
+    ) in session["instructions"]
+    assert (
+        "Si l’élève demande explicitement une flèche, utilise arrow et underline "
+        "(intent=correction) sur le même target_text dans le même tour."
+    ) in session["instructions"]
     assert "encre élève #n" in session["instructions"]
     assert "x**2-5*x+6" in session["instructions"]
     assert "ne l'annonce jamais sans appeler l'outil" in session["instructions"]
@@ -143,7 +155,7 @@ def test_session_posts_sdp_and_filtered_realtime_config(monkeypatch, server):
     assert "write_math" in tools_by_name["write"]["description"]
     assert "LaTeX" in tools_by_name["write_math"]["description"]
     assert r"\Delta = b^2 - 4ac" in tools_by_name["write_math"]["description"]
-    assert "Si l'élève demande explicitement une flèche" in tools_by_name["arrow"]["description"]
+    assert "le target_text de to" in tools_by_name["arrow"]["description"]
     assert "réserve write aux mots français courts" in session["instructions"]
     intent_tool_names = {
         "write",
@@ -171,7 +183,7 @@ def test_session_posts_sdp_and_filtered_realtime_config(monkeypatch, server):
         "vert (intent=valide)",
         "bleu (intent=remarque)",
         "l'écriture normale reste noire",
-        "souligne aussi le terme fautif en rouge (intent=correction) dans le même tour",
+            "souligne aussi le même terme fautif avec underline (intent=correction) dans le même tour",
     ):
         assert color_intent in session["instructions"]
     assert "une seule underline ou circle (intent=correction)" in session["instructions"]
