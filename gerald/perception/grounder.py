@@ -15,10 +15,9 @@ from typing import Protocol
 
 from PIL import Image
 
-from gerald import __version__
+from gerald import USER_AGENT
 
 logger = logging.getLogger(__name__)
-USER_AGENT = f"gerald/{__version__}"
 MOONDREAM_REVISION = "2025-06-21"
 MOONDREAM_ENDPOINT = "https://api.moondream.ai/v1"
 MAX_PIXELS = 16384 * 28 * 28

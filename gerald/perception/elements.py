@@ -17,7 +17,7 @@ from typing import Callable, Literal, Protocol
 
 from PIL import Image, ImageOps, ImageStat
 
-from gerald.capture.screen import Capture
+from gerald.capture.screen import Capture, MonitorRect, capture_from_image
 
 logger = logging.getLogger(__name__)
 _WINDOWS_OCR_EXECUTOR = ThreadPoolExecutor(max_workers=1, thread_name_prefix="gerald-winocr")
@@ -598,6 +598,21 @@ class OCRProvider:
             return await recognize() if timeout is None else await asyncio.wait_for(recognize(), timeout=timeout)
 
         return asyncio.run(recognize_with_timeout())
+
+
+def ocr_image_text(image: Image.Image) -> str:
+    try:
+        rgb = image.convert("RGB")
+        capture = capture_from_image(
+            rgb,
+            MonitorRect(0, 0, rgb.width, rgb.height),
+            max_width=max(1, rgb.width),
+        )
+        elements = OCRProvider().get_elements(capture)
+        return "\n".join(element.name for element in sorted(elements, key=lambda item: (item.rect[1], item.rect[0])))
+    except Exception:
+        logger.debug("OCR image text extraction failed", exc_info=True)
+        return ""
 
 
 def collect_elements(
