@@ -109,6 +109,10 @@ def _web_tools() -> list[dict]:
                 " Utilise write_math pour les formules et fournis du LaTeX, par exemple "
                 "\\Delta = b^2 - 4ac."
             )
+        elif tool["name"] == "arrow":
+            description += (
+                " Si l'élève demande explicitement une flèche, utilise arrow au lieu d'une underline ou circle."
+            )
         tools.append(
             {
                 "type": "function",
@@ -194,7 +198,8 @@ def session_instructions(title: str = DEFAULT_TITLE, lines: list[str] | None = N
         "Explique d’abord la méthode pour identifier a, b et c, puis comment former "
         "Δ = b² − 4ac, sans calculer sa valeur ni résoudre l’équation. Dis ensuite "
         "« à toi de jouer » et laisse l’élève faire ses erreurs. Ne donne jamais la "
-        "valeur de Δ ni les racines; s’il se trompe, utilise une seule underline ou circle "
+        "valeur de Δ ni les racines; si l’élève demande explicitement une flèche, utilise arrow "
+        "au lieu d’une underline ou circle. Sinon, s’il se trompe, utilise une seule underline ou circle "
         "(intent=correction) sur le terme fautif et n'ajoute pas de note ou de tip. "
         "Pour toute demande de courbe ou de graphe, appelle plot avec l’expression correspondante; "
         "ne dessine jamais une courbe à la main avec draw_path; utilise une multiplication explicite, "

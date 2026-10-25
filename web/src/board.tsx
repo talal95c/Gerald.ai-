@@ -3,7 +3,7 @@ import { createRoot } from "react-dom/client";
 import katex from "katex";
 import "katex/dist/katex.min.css";
 import "./board.css";
-import {annotationLeader, annotationSize, intentColor, placeAnnotation, segmentBoardText, type AnnotationRect, type BoardTextPart} from "./annotations";
+import {annotationLeader, annotationSize, arrowEndpoints, createCursorMotion, ellipseCircumference, intentColor, placeAnnotation, segmentBoardText, type AnnotationRect, type BoardTextPart, type CursorVisual} from "./annotations";
 import { mountNotch } from "./notch";
 
 type Pt = {x: number; y: number; p: number};
@@ -20,7 +20,7 @@ type PlotData = {
   title?: string;
 };
 type GeraldText = {id: string; text: string; x: number; y: number; size: number; color: string; html?: string; parts?: Array<BoardTextPart & {html?: string}>};
-type BoardMark = {id: string; kind: string; x: number; y: number; w: number; h: number; text: string; color?: string | null; fill?: string | null; target?: AnnotationRect; leader?: boolean};
+type BoardMark = {id: string; kind: string; x: number; y: number; w: number; h: number; text: string; color?: string | null; fill?: string | null; target?: AnnotationRect; leader?: boolean; progress?: number};
 type BoardSnapshot = {
   plotData: PlotData | null;
   plotBox: Win;
@@ -309,7 +309,11 @@ function Board() {
   const [plotVisible, setPlotVisible] = useState(false);
   const [plotRevision, setPlotRevision] = useState(0);
   const [marks, setMarks] = useState<BoardMark[]>([]);
-  const [cursor, setCursor] = useState<{x:number;y:number;text?:string}|null>(null);
+  const cursorRest = {x: innerWidth / 2, y: innerHeight - 90};
+  const [cursor, setCursor] = useState<CursorVisual>({...cursorRest, visible: false});
+  const cursorMotion = useRef<ReturnType<typeof createCursorMotion> | null>(null);
+  if (!cursorMotion.current) cursorMotion.current = createCursorMotion(cursorRest, setCursor);
+  const pendingAnnotations = useRef(new Map<string, AnnotationRect>());
   const [geraldTexts, setGeraldTexts] = useState<GeraldText[]>([]);
   const [, tick] = useState(0);
   const snapshotState = useRef<BoardSnapshot>({
@@ -425,17 +429,18 @@ function Board() {
       ctx.fillText(text.text, text.x, text.y, Math.max(100, width - text.x));
     }
     for (const mark of current.marks) {
-      ctx.strokeStyle = "#0067D9";
-      ctx.fillStyle = "#0067D9";
+      const progress = mark.progress ?? 1;
+      ctx.strokeStyle = mark.color ?? "#0067D9";
+      ctx.fillStyle = mark.color ?? "#0067D9";
       ctx.lineWidth = 3;
       if (mark.kind === "circle") {
         ctx.beginPath();
-        ctx.ellipse(mark.x, mark.y, mark.w / 2, mark.h / 2, 0, 0, Math.PI * 2);
+        ctx.ellipse(mark.x, mark.y, mark.w / 2, mark.h / 2, 0, 0, Math.PI * 2 * progress);
         ctx.stroke();
       } else if (mark.kind === "underline") {
         ctx.beginPath();
         ctx.moveTo(mark.x - mark.w / 2, mark.y + mark.h / 2);
-        ctx.lineTo(mark.x + mark.w / 2, mark.y + mark.h / 2);
+        ctx.lineTo(mark.x - mark.w / 2 + mark.w * progress, mark.y + mark.h / 2);
         ctx.stroke();
       } else if (mark.kind === "point") {
         ctx.beginPath();
@@ -446,13 +451,13 @@ function Board() {
         ctx.fillText(mark.text, mark.x + 8, mark.y - 8);
       } else if (mark.kind === "highlight") {
         ctx.fillStyle = "rgba(10,132,255,.16)";
-        ctx.fillRect(mark.x - mark.w / 2, mark.y - mark.h / 2, mark.w, mark.h);
+        ctx.fillRect(mark.x - mark.w / 2, mark.y - mark.h / 2, mark.w * progress, mark.h);
         ctx.strokeStyle = "#0067D9";
-        ctx.strokeRect(mark.x - mark.w / 2, mark.y - mark.h / 2, mark.w, mark.h);
+        ctx.strokeRect(mark.x - mark.w / 2, mark.y - mark.h / 2, mark.w * progress, mark.h);
       } else if (mark.kind === "arrow") {
         ctx.beginPath();
         ctx.moveTo(mark.x, mark.y);
-        ctx.lineTo(mark.x + mark.w, mark.y + mark.h);
+        ctx.lineTo(mark.x + mark.w * progress, mark.y + mark.h * progress);
         ctx.stroke();
       } else if (mark.kind === "note") {
         if (mark.leader && mark.target) {
@@ -548,10 +553,15 @@ function Board() {
       ...elements().map((element) => element.rect),
       ...marks.filter((mark) => mark.kind === "note" || mark.kind === "tip")
         .map((mark) => ({x: mark.x, y: mark.y, w: mark.w, h: mark.h})),
+      ...pendingAnnotations.current.values(),
       target,
     ];
     return placeAnnotation(target, annotationSize(text, kind), occupied, {w: innerWidth, h: innerHeight});
   };
+  const waitForPaint = () => new Promise<void>((resolve) => requestAnimationFrame(() => requestAnimationFrame(() => resolve())));
+  const addMark = (mark: BoardMark) => setMarks((items) => [...items, mark]);
+  const updateMarkProgress = (id: string, progress: number) =>
+    setMarks((items) => items.map((mark) => mark.id === id ? {...mark, progress} : mark));
   const targetRect = (args: Record<string, unknown>) => {
     const wanted = typeof args.target_text === "string" ? args.target_text : "";
     const elementId = Number(args.element_id);
@@ -595,19 +605,23 @@ function Board() {
   const executeWebTool = async (name: string, args: Record<string, unknown>) => {
     const id = crypto.randomUUID();
     const target = targetRect(args);
+    const motion = cursorMotion.current!;
     const color = intentColor(args.intent);
     const highlightFill = intentColor(args.intent, null, 0.16);
     if (name === "clear_gerald") {
-      setMarks([]);
-      setGeraldTexts([]);
-      setCursor(null);
-      setPlotData(null);
-      setPlotVisible(false);
+      pendingAnnotations.current.clear();
+      motion.enqueue(() => {
+        setMarks([]);
+        setGeraldTexts([]);
+        motion.clear();
+        setPlotData(null);
+        setPlotVisible(false);
+      });
       return {ok: true};
     }
     if (name === "plot") {
       const data = await requestPlot(args);
-      installPlot(data);
+      motion.enqueue(() => installPlot(data));
       return {ok: true, box: data.box, points: data.points};
     }
     if (name === "write" || name === "write_math") {
@@ -616,7 +630,6 @@ function Board() {
         return {ok: false, error: "write requires text or latex and numeric x,y coordinates"};
       }
       const size = isNumber(args.size) ? args.size : 32;
-      setCursor({x:Number(args.x),y:Number(args.y)});
       const html = name === "write_math"
         ? katex.renderToString(text, {throwOnError: false, output: "htmlAndMathml"})
         : undefined;
@@ -625,7 +638,10 @@ function Board() {
           ? {...part, html: katex.renderToString(mathToLatex(part.value), {throwOnError: false, output: "htmlAndMathml"})}
           : part)
         : undefined;
-      setGeraldTexts((items) => [...items, {id, text, x: Number(args.x), y: Number(args.y), size, color: color ?? "#111", html, parts}]);
+      motion.enqueue(async (queue) => {
+        await queue.moveTo({x: Number(args.x), y: Number(args.y)});
+        setGeraldTexts((items) => [...items, {id, text, x: Number(args.x), y: Number(args.y), size, color: color ?? "#111", html, parts}]);
+      });
       return {ok: true};
     }
     if (name === "tip") {
@@ -633,21 +649,31 @@ function Board() {
       const point = target ?? {x: innerWidth / 2, y: innerHeight - 130, w: 0, h: 0};
       const placement = placeBeside(point, args.text, "tip");
       if (!placement) return {ok: false, error: "no free space to place the tip beside its target"};
-      setCursor({x: point.x + point.w / 2, y: point.y + point.h / 2});
-      setMarks((items) => [...items, {
-        id, kind: "tip", x: placement.rect.x, y: placement.rect.y, ...annotationSize(args.text as string, "tip"),
-        text: args.text as string, color, target: target ? point : undefined, leader: target ? placement.leader : false,
-      }]);
+      pendingAnnotations.current.set(id, placement.rect);
+      motion.enqueue(async (queue) => {
+        await queue.moveTo({x: point.x + point.w / 2, y: point.y + point.h / 2});
+        addMark({
+          id, kind: "tip", x: placement.rect.x, y: placement.rect.y, ...annotationSize(args.text as string, "tip"),
+          text: args.text as string, color, target: target ? point : undefined, leader: target ? placement.leader : false,
+        });
+        pendingAnnotations.current.delete(id);
+      });
       return {ok: true, target: {x: point.x, y: point.y, w: point.w, h: point.h}, annotation: placement.rect};
     }
     if (name === "arrow") {
       const from = targetRect((args.from ?? {}) as Record<string, unknown>);
       const to = targetRect((args.to ?? {}) as Record<string, unknown>);
       if (!from || !to) return {ok: false, error: "arrow targets were not found"};
-      const x = from.x + from.w / 2, y = from.y + from.h / 2;
-      setCursor({x: to.x + to.w / 2, y: to.y + to.h / 2});
-      setMarks((items) => [...items, {id, kind: "arrow", x, y, w: to.x + to.w / 2 - x, h: to.y + to.h / 2 - y, text: "", color}]);
-      return {ok: true, target: {x, y}};
+      const endpoints = arrowEndpoints(from, to);
+      if (!endpoints) return {ok: false, error: "arrow endpoints could not be calculated"};
+      const {x1, y1, x2, y2} = endpoints;
+      motion.enqueue(async (queue) => {
+        await queue.moveTo({x: x1, y: y1});
+        addMark({id, kind: "arrow", x: x1, y: y1, w: x2 - x1, h: y2 - y1, text: "", color, progress: 0});
+        await waitForPaint();
+        await queue.moveTo({x: x2, y: y2}, (progress) => updateMarkProgress(id, progress));
+      });
+      return {ok: true, target: {x: x2, y: y2}, from: {x: x1, y: y1}, to: {x: x2, y: y2}};
     }
     if (["underline", "circle", "highlight", "point", "note"].includes(name)) {
       if (!target) {
@@ -664,8 +690,12 @@ function Board() {
           id, kind: name, x: placement.rect.x, y: placement.rect.y, ...size, text,
           color, target, leader: placement.leader,
         };
-        setCursor({x: target.x + target.w / 2, y: target.y + target.h / 2});
-        setMarks((items) => [...items, mark]);
+        pendingAnnotations.current.set(id, placement.rect);
+        motion.enqueue(async (queue) => {
+          await queue.moveTo({x: target.x + target.w / 2, y: target.y + target.h / 2});
+          addMark(mark);
+          pendingAnnotations.current.delete(id);
+        });
         return {ok: true, target, annotation: placement.rect};
       }
       const x = name === "note" ? target.x : target.x + target.w / 2;
@@ -673,15 +703,40 @@ function Board() {
       const exactText = typeof args.target_text === "string" && args.target_text.length > 0;
       const width = exactText ? target.w : isNumber(args.w) ? args.w : target.w || (name === "point" ? 12 : 120);
       const height = exactText ? target.h : isNumber(args.h) ? args.h : target.h || (name === "point" ? 12 : 38);
-      const mark = {id, kind: name, x, y, w: width, h: height, text, color, fill: name === "highlight" ? highlightFill : null};
-      setCursor({x, y});
-      setMarks((items) => [...items, mark]);
+      const mark: BoardMark = {id, kind: name, x, y, w: width, h: height, text, color, fill: name === "highlight" ? highlightFill : null};
+      if (name === "underline" || name === "highlight") {
+        const start = {x: x - width / 2, y: y + height / 2};
+        const end = {x: x + width / 2, y: y + height / 2};
+        motion.enqueue(async (queue) => {
+          await queue.moveTo(start);
+          addMark({...mark, progress: 0});
+          await waitForPaint();
+          await queue.moveTo(end, (progress) => updateMarkProgress(id, progress));
+        });
+      } else if (name === "circle") {
+        const start = {x: x + width / 2, y};
+        motion.enqueue(async (queue) => {
+          await queue.moveTo(start);
+          addMark({...mark, progress: 0});
+          await waitForPaint();
+          for (let segment = 1; segment <= 4; segment += 1) {
+            const angle = segment * Math.PI / 2;
+            const end = {x: x + width / 2 * Math.cos(angle), y: y + height / 2 * Math.sin(angle)};
+            await queue.moveTo(end, (progress) => updateMarkProgress(id, (segment - 1 + progress) / 4));
+          }
+        });
+      } else {
+        motion.enqueue(async (queue) => {
+          await queue.moveTo({x, y});
+          addMark({...mark, progress: 1});
+        });
+      }
       return {ok: true, target: {x, y}};
     }
     return {ok: false, error: `unknown board tool: ${name}`};
   };
   useEffect(() => {
-    window.geraldBoard = {snapshot, elements, exec: executeWebTool};
+    window.geraldBoard = {snapshot, elements, exec: executeWebTool, waitForAnimations: () => cursorMotion.current!.waitForAnimations()};
     return () => { delete window.geraldBoard; };
   });
   const down = (e: React.PointerEvent<HTMLCanvasElement>) => {
@@ -733,16 +788,20 @@ function Board() {
             <path d="M 0 0 L 10 5 L 0 10 z" style={{fill: mark.color!}}/>
           </marker>)}
       </defs>
-      {marks.filter((mark) => mark.kind === "circle").map((mark) =>
-        <ellipse key={mark.id} data-gerald-mark-kind="circle" cx={mark.x} cy={mark.y} rx={mark.w / 2} ry={mark.h / 2} style={{stroke: mark.color ?? undefined}}/>)}
+      {marks.filter((mark) => mark.kind === "circle").map((mark) => {
+        const length = ellipseCircumference(mark.w / 2, mark.h / 2);
+        const progress = mark.progress ?? 1;
+        return <ellipse key={mark.id} data-gerald-mark-kind="circle" cx={mark.x} cy={mark.y} rx={mark.w / 2} ry={mark.h / 2}
+          strokeDasharray={`${length} ${length}`} strokeDashoffset={length * (1 - progress)} style={{stroke: mark.color ?? undefined}}/>;
+      })}
       {marks.filter((mark) => mark.kind === "underline").map((mark) =>
-        <line key={mark.id} data-gerald-mark-kind="underline" x1={mark.x - mark.w / 2} x2={mark.x + mark.w / 2} y1={mark.y + mark.h / 2} y2={mark.y + mark.h / 2} style={{stroke: mark.color ?? undefined}}/>)}
+        <line key={mark.id} data-gerald-mark-kind="underline" x1={mark.x - mark.w / 2} x2={mark.x - mark.w / 2 + mark.w * (mark.progress ?? 1)} y1={mark.y + mark.h / 2} y2={mark.y + mark.h / 2} style={{stroke: mark.color ?? undefined}}/>)}
       {marks.filter((mark) => mark.kind === "point").map((mark) =>
         <g key={mark.id} data-gerald-mark-kind="point"><circle cx={mark.x} cy={mark.y} r="5" style={{fill: mark.color ?? undefined}}/><text x={mark.x + 8} y={mark.y - 8} style={{fill: mark.color ?? undefined}}>{mark.text}</text></g>)}
       {marks.filter((mark) => mark.kind === "highlight").map((mark) =>
-        <rect key={mark.id} data-gerald-mark-kind="highlight" x={mark.x - mark.w / 2} y={mark.y - mark.h / 2} width={mark.w} height={mark.h} style={{fill: mark.fill ?? undefined, stroke: mark.color ?? undefined}}/>)}
+        <rect key={mark.id} data-gerald-mark-kind="highlight" x={mark.x - mark.w / 2} y={mark.y - mark.h / 2} width={mark.w * (mark.progress ?? 1)} height={mark.h} style={{fill: mark.fill ?? undefined, stroke: mark.color ?? undefined}}/>)}
       {marks.filter((mark) => mark.kind === "arrow").map((mark) =>
-        <line key={mark.id} data-gerald-mark-kind="arrow" x1={mark.x} y1={mark.y} x2={mark.x + mark.w} y2={mark.y + mark.h} markerEnd={mark.color ? `url(#gerald-arrow-${mark.id})` : "url(#gerald-arrow)"} style={{stroke: mark.color ?? undefined}}/>)}
+        <line key={mark.id} data-gerald-mark-kind="arrow" x1={mark.x} y1={mark.y} x2={mark.x + mark.w * (mark.progress ?? 1)} y2={mark.y + mark.h * (mark.progress ?? 1)} markerEnd={mark.color ? `url(#gerald-arrow-${mark.id})` : "url(#gerald-arrow)"} style={{stroke: mark.color ?? undefined}}/>)}
       {marks.filter((mark) => (mark.kind === "note" || mark.kind === "tip") && mark.leader && mark.target).map((mark) => {
         const line = annotationLeader(mark.target!, {x: mark.x, y: mark.y, w: mark.w, h: mark.h});
         return <line key={`${mark.id}-leader`} x1={line.x1} y1={line.y1} x2={line.x2} y2={line.y2} style={{stroke: mark.color ?? undefined}}/>;
@@ -757,7 +816,7 @@ function Board() {
       <div key={mark.id} className="gerald-tip" data-gerald-tip={mark.id}
         data-gerald-mark-kind="tip"
         style={{left: mark.x, top: mark.y, width: mark.w, height: mark.h, color: mark.color ?? undefined, border: mark.color ? `1px solid ${mark.color}` : undefined}}>{mark.text}</div>)}
-    {cursor&&<div className="gerald-pointer" style={{left:cursor.x,top:cursor.y}}>➤{cursor.text&&<span>{cursor.text}</span>}</div>}
+    <div className="gerald-pointer" aria-hidden="true" style={{left:cursor.x,top:cursor.y,opacity:cursor.visible?1:0}}>➤</div>
     {plotVisible && plotData && <PlotWindow key={plotRevision} data={plotData} initialBox={plotBox}
       onClose={() => setPlotVisible(false)} onBoxChange={setPlotBox}/>}
     <nav className="board-tools">
