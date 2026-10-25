@@ -316,7 +316,7 @@ function TD(){
       const inputContainer=input?.closest<HTMLElement>(".item,.row");
       const inputLabelRaw=[...(input?.labels??[])].map(label=>label.innerText.trim()).find(Boolean)
         ||inputContainer?.querySelector<HTMLElement>("label,.label")?.innerText.trim()
-        ||(input?.id==="color_hex"?"Hex":input?.getAttribute("aria-label")||input?.title||input?.placeholder||input?.id.replaceAll("_"," ")||"");
+        ||(/(?:^|_)color_hex$/.test(input?.id??"")?"Hex":input?.getAttribute("aria-label")||input?.title||input?.placeholder||input?.id.replaceAll("_"," ")||"");
       const inputLabel=inputLabelRaw.replace(/[:：]\s*$/,"");
       const inputText=input?(inputValue?`${inputLabel?`${inputLabel} `:""}${inputValue}`:inputLabel):inputValue;
       const checkbox=Boolean(input?.type==="checkbox"||element.getAttribute("role")==="checkbox"
@@ -348,7 +348,7 @@ function TD(){
     const elements=paintElements();
     const label=(elements.find(item=>item.id===Number(args.element_id))
       ??(typeof args.target_text==="string"?elements.find(item=>textPattern(args.target_text).test(item.text)):undefined))?.text.slice(0,80);
-    return label?{shown:label,say:`Ta phrase doit nommer uniquement « ${label} », la commande que tu viens de montrer (ex. « Clique sur ${label} »). Ne parle d'aucune autre commande ni de l'étape suivante.`}:{};
+    return label?{shown:label,say:`Dis en une phrase complète ce que l'élève doit faire avec « ${label} », la commande que tu viens de montrer (ex. « Clique sur ${label} » ou, pour un champ, la valeur exacte à taper). Ne parle d'aucune autre commande ni de l'étape suivante.`}:{};
   };
   const paintTargetRect=(args:Record<string,any>,scroll=true):Rect|null=>{
     const elements=paintElements();
