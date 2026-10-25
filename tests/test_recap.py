@@ -26,3 +26,23 @@ def test_save_recap_uses_an_exclusive_collision_suffix(tmp_path, monkeypatch):
     assert second.name == "2026-10-25_14-07-2.md"
     assert first.read_text(encoding="utf-8") == "Premier\n"
     assert second.read_text(encoding="utf-8") == "Second\n"
+
+
+def test_save_recap_falls_back_to_notepad_when_windows_association_fails(tmp_path, monkeypatch):
+    calls = []
+
+    class WindowsOS:
+        name = "nt"
+
+        @staticmethod
+        def startfile(_path):
+            raise OSError("no markdown association")
+
+    monkeypatch.setattr(recap_module, "os", WindowsOS)
+    monkeypatch.setattr(
+        recap_module.subprocess,
+        "Popen",
+        lambda args, **kwargs: calls.append((args, kwargs)),
+    )
+    path = save_recap("Windows recap", home=tmp_path)
+    assert calls[0][0] == ["notepad.exe", str(path)]

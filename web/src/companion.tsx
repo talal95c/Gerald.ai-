@@ -78,11 +78,15 @@ export function useCompanion({
     };
     const boardOpen = (event: Event) => openBoard((event as CustomEvent<Exercise>).detail ?? null);
     const message = (event: MessageEvent) => {
-      if (event.source !== frame.current?.contentWindow || event.data?.type !== "gerald-last-exercise") return;
-      lastExercise.current = {
-        title: String(event.data.title),
-        lines: Array.isArray(event.data.lines) ? event.data.lines.map(String) : [],
-      };
+      if (event.source !== frame.current?.contentWindow) return;
+      if (event.data?.type === "gerald-last-exercise") {
+        lastExercise.current = {
+          title: String(event.data.title),
+          lines: Array.isArray(event.data.lines) ? event.data.lines.map(String) : [],
+        };
+      } else if (event.data?.type === "gerald-ready" && held.current) {
+        sendHotkey(true);
+      }
     };
     window.addEventListener("gerald-open-document", documentOpen);
     window.addEventListener("gerald-open-board", boardOpen);

@@ -388,6 +388,31 @@ function Board() {
   const pendingAnnotations = useRef(new Map<string, AnnotationRect>());
   const [geraldTexts, setGeraldTexts] = useState<GeraldText[]>([]);
   const [, tick] = useState(0);
+  useEffect(() => {
+    if (!embedded) return;
+    let held = false;
+    const send = (pressed: boolean) => window.parent.postMessage({type: "gerald-hotkey", pressed}, location.origin);
+    const down = (event: KeyboardEvent) => {
+      if (!event.ctrlKey || !event.shiftKey || event.repeat || held) return;
+      event.preventDefault();
+      held = true;
+      send(true);
+    };
+    const up = (event: KeyboardEvent) => {
+      if ((event.key !== "Control" && event.key !== "Shift") || !held) return;
+      held = false;
+      send(false);
+    };
+    const blur = () => { if (held) { held = false; send(false); } };
+    window.addEventListener("keydown", down);
+    window.addEventListener("keyup", up);
+    window.addEventListener("blur", blur);
+    return () => {
+      window.removeEventListener("keydown", down);
+      window.removeEventListener("keyup", up);
+      window.removeEventListener("blur", blur);
+    };
+  }, []);
   const snapshotState = useRef<BoardSnapshot>({
     plotData: null,
     plotBox,

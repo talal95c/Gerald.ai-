@@ -23,6 +23,7 @@ const exercises = [
 ];
 type Rect = {x:number;y:number;w:number;h:number};
 type ViewElement = {id:number;text:string;rect:Rect};
+type PaintElement = ViewElement & {active:boolean;selected:boolean;isColor:boolean;isLayer:boolean;tag:string;value:string};
 type ViewApi = {elements:()=>ViewElement[];exec:(name:string,args:Record<string,any>)=>Promise<Record<string,any>>;close?:()=>void;waitForAnimations:()=>Promise<void>};
 type BoardApi = ViewApi & {snapshot:()=>string};
 type GeraldVoiceState = {turn:number;settledTurn:number;pendingTools:number;settledAt:number;responsesCreated:number;responsesDone:number};
@@ -34,6 +35,7 @@ const docId = params.has("doc") ? Number(params.get("doc")) : null;
 const docMode = docId !== null && Number.isFinite(docId);
 const boardMode = params.get("board") === "1";
 const embedded = params.get("embed") === "1";
+const paintMode = params.get("app") === "paint";
 function boundsOfPoints(points:CursorPoint[],padding=0):AnnotationRect {
   const xs=points.map(({x})=>x),ys=points.map(({y})=>y),left=Math.min(...xs),top=Math.min(...ys);
   return {x:left-padding,y:top-padding,w:Math.max(...xs)-left+padding*2,h:Math.max(...ys)-top+padding*2};
@@ -208,7 +210,8 @@ function TD(){
   const [answer,setAnswer]=useState<{q:string;text:string;ex:typeof exercises[number]}|null>(null);
   const [suggestion,setSuggestion]=useState(false);
   const boardOpenRef=useRef(liveMode||boardMode);
-  const frame=useRef<HTMLIFrameElement>(null), audio=useRef<HTMLAudioElement>(null);
+  const frame=useRef<HTMLIFrameElement>(null), paintFrame=useRef<HTMLIFrameElement>(null), audio=useRef<HTMLAudioElement>(null);
+  const paintIds=useRef(new WeakMap<Element,number>()), nextPaintId=useRef(7000);
   const peer=useRef<RTCPeerConnection|null>(null), channel=useRef<RTCDataChannel|null>(null), stream=useRef<MediaStream|null>(null);
   const audioContext=useRef<AudioContext|null>(null), micAnalyser=useRef<AnalyserNode|null>(null), remoteAnalyser=useRef<AnalyserNode|null>(null);
   const pushToTalk=useRef(false), toggleMic=useRef(false), pttPreviousMic=useRef(false);
@@ -226,6 +229,7 @@ function TD(){
     if(kind==="mic")micAnalyser.current=analyser;else remoteAnalyser.current=analyser;
   };
   const openBoard=(id?:string)=>{
+    if(paintMode)return;
     if(docMode){
       setBoardSrc("/board.html?voice=1&live=1");
       boardOpenRef.current=true;
@@ -237,7 +241,32 @@ function TD(){
     setBoardSrc(`/board.html?${query}`); boardOpenRef.current=true; setBoardOpen(true);
     if(embedded)window.parent.postMessage({type:"gerald-last-exercise",title:ex.title,lines:ex.lines},location.origin);
   };
-  const elements=():ViewElement[]=>[...document.querySelectorAll<HTMLElement>("[data-gerald-id]")].filter(e=>e.getClientRects().length).map(e=>{const r=e.getBoundingClientRect();return {id:Number(e.dataset.geraldId),text:(e instanceof HTMLInputElement?e.value||e.placeholder:e.innerText||"").trim(),rect:{x:r.x,y:r.y,w:r.width,h:r.height}};});
+  const paintElements=():PaintElement[]=>{
+    const iframe=paintFrame.current,doc=iframe?.contentDocument;
+    if(!iframe||!doc)return [];
+    const frameRect=iframe.getBoundingClientRect();
+    const scaleX=frameRect.width/Math.max(1,iframe.clientWidth),scaleY=frameRect.height/Math.max(1,iframe.clientHeight);
+    const candidates=[...doc.querySelectorAll<HTMLElement>("button,a,input,select,[role='button'],[role='menuitem'],[title],[class*='layer']")];
+    return [...new Set(candidates)].flatMap(element=>{
+      const rect=element.getBoundingClientRect(),style=doc.defaultView?.getComputedStyle(element);
+      if(!rect.width||!rect.height||style?.display==="none"||style?.visibility==="hidden"||Number(style?.opacity)===0)return [];
+      let id=paintIds.current.get(element);
+      if(!id){id=nextPaintId.current++;paintIds.current.set(element,id);element.dataset.geraldId=String(id);}
+      const className=typeof element.className==="string"?element.className:String(element.getAttribute("class")??"");
+      const active=/active/i.test(className)||element.getAttribute("aria-pressed")==="true";
+      const selected=/selected/i.test(className)||element.getAttribute("aria-selected")==="true";
+      const input=element instanceof HTMLInputElement?element:null;
+      const text=(element.innerText||element.getAttribute("title")||element.getAttribute("aria-label")||input?.value||"").trim();
+      return [{id,text,active,selected,isColor:input?.type==="color",isLayer:/layers_list|layer-row|layer_row/i.test(className)||element.hasAttribute("data-layer-id"),tag:element.tagName.toLowerCase(),value:input?.value??"",rect:{x:frameRect.x+rect.x*scaleX,y:frameRect.y+rect.y*scaleY,w:rect.width*scaleX,h:rect.height*scaleY}}];
+    });
+  };
+  const paintTargetRect=(args:Record<string,any>):Rect|null=>{
+    const elements=paintElements();
+    const element=elements.find(item=>item.id===Number(args.element_id))
+      ??(typeof args.target_text==="string"?elements.find(item=>textPattern(args.target_text).test(item.text)):undefined);
+    return element?.rect??null;
+  };
+  const elements=():ViewElement[]=>paintMode?paintElements():[...document.querySelectorAll<HTMLElement>("[data-gerald-id]")].filter(e=>e.getClientRects().length).map(e=>{const r=e.getBoundingClientRect();return {id:Number(e.dataset.geraldId),text:(e instanceof HTMLInputElement?e.value||e.placeholder:e.innerText||"").trim(),rect:{x:r.x,y:r.y,w:r.width,h:r.height}};});
   const annotationOccupants=(target?:AnnotationRect,extra:AnnotationRect[]=[]):AnnotationRect[]=>[
       ...elements().map(element=>element.rect),
       ...marks.filter(mark=>mark.kind==="note"||mark.kind==="tip").map(mark=>mark.rect),
@@ -254,7 +283,7 @@ function TD(){
   const updateMarkProgress=(id:string,progress:number)=>setMarks(items=>items.map(mark=>mark.id===id?{...mark,progress}:mark));
   const updateMarkHead=(id:string,head:number)=>setMarks(items=>items.map(mark=>mark.id===id?{...mark,head}:mark));
   const exec=async(name:string,args:Record<string,any>)=>{
-    if(name==="open_board"){openBoard(docMode?undefined:String(args.exercise_id));return {ok:true};}
+    if(name==="open_board"){if(paintMode)return {ok:false,error:"open_board is unavailable in paint mode"};openBoard(docMode?undefined:String(args.exercise_id));return {ok:true};}
     const motion=cursorMotion.current!;
     if(name==="clear_gerald"){
       pendingAnnotations.current.clear();
@@ -263,8 +292,9 @@ function TD(){
     }
     const color=intentColor(args.intent);
     const highlightFill=intentColor(args.intent,null,0.16);
-    const from=name==="arrow"?targetRect(args.from??{}):targetRect(args);
-    const to=name==="arrow"?targetRect(args.to??{}):null;
+    const resolveTarget=(target:Record<string,any>)=>paintMode?paintTargetRect(target):targetRect(target);
+    const from=name==="arrow"?resolveTarget(args.from??{}):resolveTarget(args);
+    const to=name==="arrow"?resolveTarget(args.to??{}):null;
     if(name==="arrow"&&(!from||!to))return {ok:false,error:"arrow targets were not found"};
     const endpoints=name==="arrow"&&from&&to?arrowEndpoints(from,to):null;
     if(name==="arrow"&&!endpoints)return {ok:false,error:"arrow endpoints could not be calculated"};
@@ -386,6 +416,15 @@ function TD(){
     context.drawImage(source,0,0,canvas.width,canvas.height);
     return canvas.toDataURL("image/jpeg",0.8);
   };
+  const paintImage=()=>{
+    const source=paintFrame.current?.contentDocument?.querySelector<HTMLCanvasElement>("#canvas_minipaint");
+    if(!source?.width||!source.height)return undefined;
+    const scale=Math.min(1,1600/Math.max(source.width,source.height));
+    const canvas=document.createElement("canvas");canvas.width=Math.round(source.width*scale);canvas.height=Math.round(source.height*scale);
+    const context=canvas.getContext("2d");if(!context)return undefined;
+    context.drawImage(source,0,0,canvas.width,canvas.height);
+    return canvas.toDataURL("image/jpeg",0.8);
+  };
   const sendContext=async()=>{
     if(channel.current?.readyState!=="open")return;
     const board=boardOpenRef.current?await getBoardApi():null;
@@ -393,6 +432,17 @@ function TD(){
       const image=board.snapshot();
       const text=board.elements().map(e=>`[${e.id}] "${e.text}" (${Math.round(e.rect.x)},${Math.round(e.rect.y)},${Math.round(e.rect.w)},${Math.round(e.rect.h)})`).join("\n");
       sendEvent({type:"conversation.item.create",item:{type:"message",role:"user",content:[{type:"input_text",text:`Board visible elements in CSS pixels:\n${text}`},{type:"input_image",image_url:image}]}});
+    }
+    else if(paintMode){
+      const items=paintElements();
+      const active=items.find(item=>item.active||item.selected)?.text||"unknown";
+      const color=items.find(item=>item.isColor)?.value||"unknown";
+      const layerCount=items.filter(item=>item.isLayer).length;
+      const rows=items.map(item=>`[${item.id}] "${item.text}" (${Math.round(item.rect.x)},${Math.round(item.rect.y)},${Math.round(item.rect.w)},${Math.round(item.rect.h)})${item.active?" active":""}${item.selected?" selected":""}`).join("\n");
+      const content:Array<Record<string,string>>=[{type:"input_text",text:`Paint editor visible elements in top-document CSS pixels:\n${rows}\nPaint state: active tool=${active}; current color=${color}; layer count=${layerCount}.`}];
+      const image=paintImage();
+      if(image)content.push({type:"input_image",image_url:image});
+      sendEvent({type:"conversation.item.create",item:{type:"message",role:"user",content}});
     }
     else if(docMode){
       const text=elements().map(e=>`[${e.id}] "${e.text}" (${Math.round(e.rect.x)},${Math.round(e.rect.y)},${Math.round(e.rect.w)},${Math.round(e.rect.h)})`).join("\n");
@@ -478,7 +528,9 @@ function TD(){
       };
       const offer=await pc.createOffer();await pc.setLocalDescription(offer);
       if(pc.iceGatheringState!=="complete")await new Promise<void>(resolve=>{const timer=setTimeout(resolve,5000);pc.addEventListener("icegatheringstatechange",()=>{if(pc.iceGatheringState==="complete"){clearTimeout(timer);resolve();}},{once:true});});
-      const sessionUrl=docMode
+      const sessionUrl=paintMode
+        ? "/api/session?mode=paint"
+        : docMode
         ? `/api/session?mode=doc&title=${encodeURIComponent(docFile?.filename??`document-${docId}`)}`
         : liveMode?"/api/session?live=1":"/api/session";
       const response=await fetch(sessionUrl,{method:"POST",headers:{"Content-Type":"application/sdp"},body:pc.localDescription?.sdp??""});
@@ -530,9 +582,14 @@ function TD(){
     const down=(event:KeyboardEvent)=>{if(event.ctrlKey&&event.shiftKey&&!event.repeat){event.preventDefault();beginPushToTalk();}};
     const up=(event:KeyboardEvent)=>{if(event.key==="Control"||event.key==="Shift")endPushToTalk();};
     const blur=()=>endPushToTalk();
-    const message=(event:MessageEvent)=>{if(event.source!==window.parent||event.data?.type!=="gerald-hotkey")return;if(event.data.pressed)beginPushToTalk();else endPushToTalk();};
+    const message=(event:MessageEvent)=>{
+      if(event.origin!==location.origin||event.data?.type!=="gerald-hotkey")return;
+      if(event.source!==window.parent&&event.source!==frame.current?.contentWindow)return;
+      if(event.data.pressed)beginPushToTalk();else endPushToTalk();
+    };
     window.addEventListener("keydown",down);window.addEventListener("keyup",up);window.addEventListener("blur",blur);
     window.addEventListener("message",message);
+    if(embedded)window.parent.postMessage({type:"gerald-ready"},location.origin);
     return()=>{window.removeEventListener("keydown",down);window.removeEventListener("keyup",up);window.removeEventListener("blur",blur);window.removeEventListener("message",message);};
   },[]);
   useEffect(()=>{
@@ -552,7 +609,7 @@ function TD(){
   const onSubmit=(event:React.FormEvent)=>{event.preventDefault();if(voiceMode)void sendQuestion(question);else sendMock();};
   const clickExercise=(ex:typeof exercises[number])=>{setActiveExercise(ex);if(voiceMode)openBoard(ex.id);else bridge.openBoard(ex.title,JSON.stringify(ex.lines));};
   const sessionOpen=channel.current?.readyState==="open";
-  return <main className={`td-root${docMode?" document-mode":""}`}>{!liveMode&&!docMode&&<article className="paper"><header className="td-head" data-gerald-id="1"><div className="td-meta"><span>Lycée — Mathématiques</span><span>TD 4</span></div><h1 data-gerald-id="2">Polynômes du second degré</h1><div className="td-student"><span>Nom : __________________</span><span>Date : ________________</span></div></header>
+  return <main className={`td-root${docMode?" document-mode":""}${paintMode?" paint-mode":""}`}>{paintMode&&<iframe ref={paintFrame} className="paint-editor" title="miniPaint" src="/vendor/minipaint/index.html"/>}{!liveMode&&!docMode&&!paintMode&&<article className="paper"><header className="td-head" data-gerald-id="1"><div className="td-meta"><span>Lycée — Mathématiques</span><span>TD 4</span></div><h1 data-gerald-id="2">Polynômes du second degré</h1><div className="td-student"><span>Nom : __________________</span><span>Date : ________________</span></div></header>
     <section className="reminder" data-gerald-id="3"><h2 data-gerald-id="4">Rappel de cours</h2><p data-gerald-id="5">Pour <span dangerouslySetInnerHTML={{__html:katex.renderToString("ax^2+bx+c=0")}} />, le discriminant vaut <span dangerouslySetInnerHTML={{__html:katex.renderToString("\\Delta=b^2-4ac")}} />. Si <span dangerouslySetInnerHTML={{__html:katex.renderToString("\\Delta>0")}} />, l’équation possède deux racines réelles.</p></section>
     {exercises.map((ex,i)=><section className="exercise" data-gerald-id={10+i*3} key={ex.id} onClick={()=>clickExercise(ex)}><p className="exercise-lead" data-gerald-id={11+i*3}><strong>{ex.title}.</strong><span dangerouslySetInnerHTML={{__html:katex.renderToString(ex.math)}}/></p><p data-gerald-id={12+i*3}>{ex.instruction}</p><button className="open-ex">Ouvrir au tableau →</button></section>)}
   </article>}
@@ -588,7 +645,7 @@ function TD(){
       </svg>
       <div className="gerald-pointer" aria-hidden="true" style={{left:Math.round(cursor.x),top:Math.round(cursor.y),opacity:cursor.visible?1:0}}><i/>Gerald</div>
     </div>
-    <div className={`td-assist${liveMode||docMode?" live":""}`}>
+    <div className={`td-assist${liveMode||docMode?" live":""}${boardOpen?" board-open":""}`}>
       {!voiceMode&&answer&&<div className="td-answer" key={answer.q}><span className="td-q">{answer.q}</span><p>{answer.text||"…"}</p><button className="td-go" onClick={()=>clickExercise(answer.ex)}>Viens, on va au tableau · {answer.ex.title} →</button></div>}
       {voiceMode&&!liveMode&&suggestion&&<button className="td-go" onClick={()=>openBoard(activeExercise.id)}>Viens, on va au tableau · {activeExercise.title} →</button>}
       {voiceMode&&caption&&<div className={`td-caption${captionFading?" fade":""}`}><Reveal text={caption}/></div>}

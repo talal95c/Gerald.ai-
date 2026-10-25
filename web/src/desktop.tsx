@@ -143,6 +143,22 @@ function Desktop() {
   }, [stableTalk]);
 
   useEffect(() => {
+    const ready = (event: MessageEvent) => {
+      if (event.data?.type !== "gerald-ready" || !hotkeyHeld.current || (focused !== "Notes" && focused !== "Photoshop")) return;
+      const target = focused;
+      const frame = target === "Notes" ? notesFrame.current : paintFrame.current;
+      if (event.source !== frame?.contentWindow) return;
+      if (hotkeyTarget.current !== target) {
+        if (hotkeyTarget.current) postHotkey(hotkeyTarget.current, false);
+        hotkeyTarget.current = target;
+      }
+      postHotkey(target, true);
+    };
+    window.addEventListener("message", ready);
+    return () => window.removeEventListener("message", ready);
+  }, [focused, postHotkey]);
+
+  useEffect(() => {
     const reclamp = () => {
       const area = usableArea();
       setWindows(previous => {

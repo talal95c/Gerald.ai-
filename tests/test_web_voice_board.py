@@ -90,7 +90,7 @@ def test_session_posts_sdp_and_filtered_realtime_config(monkeypatch, server):
     lines = ["Résous dans ℝ : x² − 5x + 6 = 0"]
     query = urlencode({"title": title, "lines": json.dumps(lines, ensure_ascii=False)})
 
-    status, body, _headers = _request(
+    status, body, response_headers = _request(
         server,
         "POST",
         f"/api/session?{query}",
@@ -171,6 +171,7 @@ def test_session_posts_sdp_and_filtered_realtime_config(monkeypatch, server):
         "vert (intent=valide)",
         "bleu (intent=remarque)",
         "l'écriture normale reste noire",
+        "souligne aussi le terme fautif en rouge (intent=correction) dans le même tour",
     ):
         assert color_intent in session["instructions"]
     assert "une seule underline ou circle (intent=correction)" in session["instructions"]
@@ -264,6 +265,30 @@ def test_document_title_sanitization_strips_controls_and_limits_length():
     assert len(sanitized) == 120
 
 
+def test_paint_mode_uses_guidance_and_exact_tool_list():
+    config = web_voice_board.build_session_config("gpt-realtime-2", paint_mode=True)
+    guidance = web_voice_board.PAINT_MODE_GUIDANCE.read_text(encoding="utf-8")
+    assert config["instructions"].startswith(guidance)
+    assert config["instructions"].endswith(web_voice_board.COLOR_GUIDANCE)
+    assert [tool["name"] for tool in config["tools"]] == [
+        "point",
+        "circle",
+        "arrow",
+        "highlight",
+        "note",
+        "tip",
+        "clear_gerald",
+    ]
+    assert "write" not in {tool["name"] for tool in config["tools"]}
+    assert "plot" not in {tool["name"] for tool in config["tools"]}
+    assert "open_board" not in {tool["name"] for tool in config["tools"]}
+
+
+def test_minipaint_index_is_served(server):
+    status, _body, _headers = _request(server, "GET", "/vendor/minipaint/index.html")
+    assert status == 200
+
+
 def test_plot_endpoint_returns_root_and_vertex_points(server):
     payload = {
         "functions": [{"expr": "x**2-5*x+6", "label": "f(x)"}],
@@ -322,7 +347,7 @@ def test_foreign_origin_or_host_is_rejected(monkeypatch, server, headers):
         return _StubResponse(b"should not be called")
 
     monkeypatch.setattr(web_voice_board, "urlopen", fake_urlopen)
-    status, body, _headers = _request(
+    status, body, response_headers = _request(
         server,
         "POST",
         "/api/session",
@@ -331,6 +356,7 @@ def test_foreign_origin_or_host_is_rejected(monkeypatch, server, headers):
     )
 
     assert status == 403
+    assert response_headers["Connection"].lower() == "close"
     assert json.loads(body)["error"] == "origin or host not allowed"
     assert not called
 
