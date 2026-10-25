@@ -7,7 +7,8 @@ import { Reveal } from "./reveal";
 
 const bridge = getBridge();
 const tabs = ["Tableau", "Documents", "Historique", "Raccourcis"];
-const emptyState: AppState = {
+type NotchState = AppState & {recap_error?: string | null};
+const emptyState: NotchState = {
   greeting: "Bonjour.", hotkey_label: "CTRL + SHIFT", documents: [],
   conversations: [], session_open: false, recap_pending: false, last_exercise: null
 };
@@ -106,7 +107,7 @@ function App() {
   useEffect(() => {
     const connect = () => {
       const applyState = (json: string) => {
-        const next = JSON.parse(json) as AppState;
+        const next = JSON.parse(json) as NotchState;
         setState(next);
         if (typeof next.recap === "string") setRecap(next.recap);
       };
@@ -143,7 +144,7 @@ function App() {
     <div className="bar">
       <span className="status"><Orb status={status} size={28}/><span>{active ? statusText[status] ?? status : state.hotkey_label}</span></span>
       <NavBar active={mode === "settings" ? tab : ""} onChange={pick}/>
-      {state.session_open ? <button className="end" onClick={()=>bridge.endSession()}>{state.recap_pending ? "Fiche…" : "Fin de session"}</button>
+      {state.session_open ? <button className="end" title={state.recap_error || undefined} onClick={()=>bridge.endSession()}>{state.recap_pending ? "Fiche…" : state.recap_error ? "Réessayer la fiche" : "Fin de session"}</button>
         : recap ? <button className="end" onClick={()=>bridge.openRecap(recap)}>Fiche →</button>
         : <button className="quit" onClick={()=>bridge.quit()} aria-label="Quitter">⏻</button>}
     </div>

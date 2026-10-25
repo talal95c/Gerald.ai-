@@ -4,6 +4,7 @@ from datetime import datetime
 import json
 from pathlib import Path
 import threading
+import time
 
 from PyQt6.QtCore import QTimer, QUrl, QObject, pyqtSignal, pyqtSlot
 from PyQt6.QtGui import QDesktopServices
@@ -42,6 +43,8 @@ def json_sources(sources) -> list[dict]:
 
 
 class Bridge(QObject):
+    RECAP_TIMEOUT_S = 60.0
+
     stateChanged = pyqtSignal(str)
     modeChanged = pyqtSignal(str)
     answer = pyqtSignal(str)
@@ -67,6 +70,8 @@ class Bridge(QObject):
         self._session_open = False
         self._last_exercise: tuple[str, list[str]] | None = None
         self._recap_requested_at: float | None = None
+        self._recap_error: str | None = None
+        self._clock = time.time
         self._recap_dir = Path.home() / "Gerald" / "lessons"
         self._fallback_board = None
         self._recap_timer = QTimer(self)
@@ -107,6 +112,7 @@ class Bridge(QObject):
                 "conversations": conversations,
                 "session_open": self._session_open,
                 "recap_pending": self._recap_requested_at is not None,
+                "recap_error": self._recap_error,
                 "last_exercise": (
                     {"title": self._last_exercise[0], "lines": self._last_exercise[1]}
                     if self._last_exercise is not None
@@ -225,10 +231,22 @@ class Bridge(QObject):
     def endSession(self) -> None:
         if not self._session_open:
             return
-        self._recap_requested_at = datetime.now().timestamp()
+        if self.end_session is None:
+            self._recap_timer.stop()
+            self._recap_requested_at = None
+            self._recap_error = "La fiche n'est pas disponible pour le moment."
+            self.stateChanged.emit(self.state())
+            return
+        result = self.end_session()
+        if result is False:
+            self._recap_timer.stop()
+            self._recap_requested_at = None
+            self._recap_error = "Hors ligne : la fiche sera possible une fois Gerald reconnecté."
+            self.stateChanged.emit(self.state())
+            return
+        self._recap_error = None
+        self._recap_requested_at = self._clock()
         self._recap_timer.start()
-        if self.end_session is not None:
-            self.end_session()
         self.stateChanged.emit(self.state())
 
     def _find_recap(self) -> None:
@@ -242,9 +260,15 @@ class Bridge(QObject):
         if candidates:
             self._recap_timer.stop()
             self._recap_requested_at = None
+            self._recap_error = None
             self._session_open = False
             self.sessionOpenChanged.emit(False)
             self.recapReady.emit(str(max(candidates, key=lambda path: path.stat().st_mtime)))
+            self.stateChanged.emit(self.state())
+        elif self._clock() - self._recap_requested_at > self.RECAP_TIMEOUT_S:
+            self._recap_timer.stop()
+            self._recap_requested_at = None
+            self._recap_error = "La fiche n'a pas pu être générée. Réessaie."
             self.stateChanged.emit(self.state())
 
     @pyqtSlot(str)

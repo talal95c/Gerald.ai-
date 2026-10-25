@@ -392,7 +392,7 @@ def main() -> int:
 
     threading.Thread(target=run_loop, name="gerald-realtime", daemon=True).start()
 
-    def schedule(coroutine) -> None:
+    def schedule(coroutine, *, on_error=None) -> None:
         future = asyncio.run_coroutine_threadsafe(coroutine, loop)
 
         def report(error_future) -> None:
@@ -400,6 +400,8 @@ def main() -> int:
                 error_future.result()
             except Exception as error:
                 logger.warning("Realtime action failed: %s", error)
+                if on_error is not None:
+                    on_error()
                 bridge.capture_failed.emit(str(error))
 
         future.add_done_callback(report)
@@ -820,9 +822,12 @@ def main() -> int:
     proactive_timer.start(1000)
     app.aboutToQuit.connect(watcher.close)
 
-    def open_lesson_recap() -> None:
+    def open_lesson_recap() -> bool:
+        if not app_state["connected"]:
+            overlay.show_timed_error("Hors ligne : la fiche sera possible une fois Gerald reconnecté.")
+            return False
         if app_state["recap_pending"]:
-            return
+            return False
         mic.stop()
         request = app_state.get("capture_request")
         if request is not None:
@@ -838,7 +843,8 @@ def main() -> int:
             response_active=False,
         )
         overlay.close_text_input()
-        schedule(client.send_recap())
+        schedule(client.send_recap(), on_error=lambda: app_state.update(recap_pending=False))
+        return True
 
     def toggle_board() -> None:
         if app_state["active"]:
