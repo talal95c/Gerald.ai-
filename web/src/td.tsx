@@ -379,7 +379,7 @@ function TD(){
   const updateMarkProgress=(id:string,progress:number)=>setMarks(items=>items.map(mark=>mark.id===id?{...mark,progress}:mark));
   const updateMarkHead=(id:string,head:number)=>setMarks(items=>items.map(mark=>mark.id===id?{...mark,head}:mark));
   const exec=async(name:string,args:Record<string,any>)=>{
-    if(name==="open_board"){if(paintMode)return {ok:false,error:"open_board is unavailable in paint mode"};openBoard(docMode?undefined:String(args.exercise_id));return {ok:true};}
+    if(name==="open_board"){if(paintMode)return {ok:false,error:"open_board n'existe pas dans l'éditeur d'images"};openBoard(docMode?undefined:String(args.exercise_id));return {ok:true};}
     const motion=cursorMotion.current!;
     if(name==="clear_gerald"){
       pendingAnnotations.current.clear();
@@ -389,6 +389,38 @@ function TD(){
     const color=intentColor(args.intent);
     const highlightFill=intentColor(args.intent,null,0.16);
     const resolveTarget=(target:Record<string,any>)=>paintMode?paintTargetRect(target):targetRect(target);
+    if(name==="erase"){
+      const kind=typeof args.kind==="string"?args.kind:"";
+      if(kind==="ink")return {ok:false,error:"il n'y a pas d'encre élève sur cette vue"};
+      const hasTarget=typeof args.element_id==="number"
+        ||(typeof args.target_text==="string"&&args.target_text.length>0);
+      const target=hasTarget?resolveTarget(args):null;
+      const scope=args.scope==="all"?"all":"last";
+      const matches=(mark:typeof marks[number])=>{
+        const kindMatches=kind==="write"||kind==="write_math"
+          ?mark.kind==="write"||mark.kind==="write_math"
+          :mark.kind===kind;
+        const bounds=mark.annotationTarget??mark.rect;
+        const intersects=target&&bounds
+          &&bounds.x<target.x+target.w&&bounds.x+bounds.w>target.x
+          &&bounds.y<target.y+target.h&&bounds.y+bounds.h>target.y;
+        return kindMatches&&(!hasTarget||Boolean(intersects));
+      };
+      const matched=marks.filter(matches);
+      const eraseError=()=>{
+        const counts=new Map<string,number>();
+        for(const mark of marks)counts.set(mark.kind,(counts.get(mark.kind)??0)+1);
+        const present=[...counts].map(([name,count])=>`${name} (${count})`).join(", ")||"aucune";
+        return {ok:false,error:`rien à effacer pour kind=${kind}. Marques présentes : ${present}`};
+      };
+      if(!matched.length)return eraseError();
+      const removed=scope==="all"||hasTarget?matched:matched.slice(-1);
+      const ids=new Set(removed.map(mark=>mark.id));
+      setMarks(items=>items.filter(mark=>!ids.has(mark.id)));
+      await motion.waitForAnimations();
+      await new Promise<void>(resolve=>requestAnimationFrame(()=>resolve()));
+      return {ok:true,removed:removed.length};
+    }
     const fromArgs=name==="arrow"?args.from??{}:{};
     const fromIsPoint=name==="arrow"&&typeof fromArgs.x==="number"&&typeof fromArgs.y==="number"
       &&typeof fromArgs.w!=="number"&&typeof fromArgs.h!=="number"
@@ -401,7 +433,7 @@ function TD(){
     if(paintMode&&name==="arrow"&&from&&!fromIsPoint)from=paintTargetRect(args.from??{},false);
     if(name==="arrow"&&!to){
       const visible=elements().slice(0,40).map(e=>`[${e.id}] ${e.text.slice(0,100)}`).join("; ");
-      return {ok:false,error:`arrow target was not found. Visible targets: ${visible}${boardClosedHint}`};
+      return {ok:false,error:`cible introuvable. Cibles visibles : ${visible}${boardClosedHint}`};
     }
     const containsTarget=!!(from&&to&&(
       to.x>=from.x-2&&to.y>=from.y-2&&to.x+to.w<=from.x+from.w+2&&to.y+to.h<=from.y+from.h+2
@@ -416,13 +448,13 @@ function TD(){
         ? arrowEndpointsAroundTarget(to,elements().map(e=>e.rect),viewport())
         : arrowEndpointsFromSource(arrowFrom,to,elements().map(e=>e.rect),viewport())
       : null;
-    if(name==="arrow"&&!endpoints)return {ok:false,error:"arrow endpoints could not be calculated"};
+    if(name==="arrow"&&!endpoints)return {ok:false,error:"impossible de tracer la flèche sans traverser un autre élément ; vise la cible avec underline ou circle"};
     const r=name==="arrow"?to:from??(typeof args.target_text!=="string"&&typeof args.x==="number"&&typeof args.y==="number"?{x:args.x,y:args.y,w:Number(args.w)||120,h:Number(args.h)||38}:null);
     if(name==="tip"){
-      if(typeof args.text!=="string")return {ok:false,error:"tip requires text"};
+      if(typeof args.text!=="string")return {ok:false,error:"tip demande un texte"};
       const pos=r??{x:innerWidth/2,y:innerHeight-130,w:0,h:0};
       const placement=placeBeside(pos,args.text,"tip");
-      if(!placement)return {ok:false,error:"no free space to place the tip beside its target"};
+      if(!placement)return {ok:false,error:"pas de place libre à côté de la cible pour cette bulle ; choisis une autre cible ou efface d'abord une note"};
       const id=crypto.randomUUID();
       pendingAnnotations.current.set(id,placement.rect);
       motion.enqueue(async queue=>{
@@ -447,13 +479,13 @@ function TD(){
     }
     if(!r){
       const visible=elements().slice(0,40).map(e=>`[${e.id}] ${e.text.slice(0,100)}`).join("; ");
-      return {ok:false,error:`target not found. Visible targets: ${visible}${boardClosedHint}`};
+      return {ok:false,error:`cible introuvable. Cibles visibles : ${visible}${boardClosedHint}`};
     }
-    if(!["circle","underline","point","highlight","arrow","note"].includes(name))return {ok:false,error:`unknown TD tool: ${name}`};
+    if(!["circle","underline","point","highlight","arrow","note"].includes(name))return {ok:false,error:`outil indisponible ici : ${name}`};
     const text=String(args.text??args.label??"");
     if(name==="note"){
       const placement=placeBeside(r,text,"note");
-      if(!placement)return {ok:false,error:"no free space to place the note beside its target"};
+      if(!placement)return {ok:false,error:"pas de place libre à côté de la cible pour cette bulle ; choisis une autre cible ou efface d'abord une note"};
       const id=crypto.randomUUID();
       pendingAnnotations.current.set(id,placement.rect);
       motion.enqueue(async queue=>{
@@ -553,33 +585,33 @@ function TD(){
     if(board){
       const image=board.snapshot();
       const text=board.elements().map(e=>`[${e.id}] "${e.text}" (${Math.round(e.rect.x)},${Math.round(e.rect.y)},${Math.round(e.rect.w)},${Math.round(e.rect.h)})`).join("\n");
-      sendEvent({type:"conversation.item.create",item:{type:"message",role:"user",content:[{type:"input_text",text:`Board visible elements in CSS pixels:\n${text}`},{type:"input_image",image_url:image}]}});
+      sendEvent({type:"conversation.item.create",item:{type:"message",role:"user",content:[{type:"input_text",text:`Éléments visibles du tableau (pixels CSS) :\n${text}`},{type:"input_image",image_url:image}]}});
     }
     else if(paintMode){
       const items=paintElements();
-      const active=items.find(item=>item.active||item.selected)?.text||"unknown";
+      const active=items.find(item=>item.active||item.selected)?.text||"inconnu";
       const paintDoc=paintFrame.current?.contentDocument;
       const mainColor=paintDoc?.querySelector<HTMLInputElement>("#color_hex")?.value
-        ||paintDoc?.querySelector<HTMLInputElement>("input[type='color']")?.value||"unknown";
+        ||paintDoc?.querySelector<HTMLInputElement>("input[type='color']")?.value||"inconnu";
       const color=mainColor.trim().toLowerCase();
       const layerCount=items.filter(item=>item.isLayer).length;
       const dialog=items.find(item=>item.in_dialog)?.dialog||"";
       voiceLog().push({type:"paint_collector",turn:responseTurn.current||voiceState().turn,count:items.length,dialog:dialog||null,colour:color});
       const rows=items.map(item=>`[${item.id}] "${item.text}" (${Math.round(item.rect.x)},${Math.round(item.rect.y)},${Math.round(item.rect.w)},${Math.round(item.rect.h)})${item.active?" active":""}${item.selected?" selected":""}${item.in_dialog?" in_dialog:true":""}`).join("\n");
       const dialogState=dialog?`; dialog: ${JSON.stringify(dialog)}`:"";
-      const content:Array<Record<string,string>>=[{type:"input_text",text:`Paint editor visible elements in top-document CSS pixels:\n${rows}\nPaint state: active tool=${active}; colour: ${color}; layer count=${layerCount}${dialogState}.`}];
+      const content:Array<Record<string,string>>=[{type:"input_text",text:`Éléments visibles de l'éditeur d'images (pixels CSS) :\n${rows}\nÉtat de l'éditeur : outil actif=${active}; couleur : ${color}; calques=${layerCount}${dialogState}.`}];
       const image=paintImage();
       if(image)content.push({type:"input_image",image_url:image});
       sendEvent({type:"conversation.item.create",item:{type:"message",role:"user",content}});
     }
     else if(docMode){
       const text=elements().map(e=>`[${e.id}] "${e.text}" (${Math.round(e.rect.x)},${Math.round(e.rect.y)},${Math.round(e.rect.w)},${Math.round(e.rect.h)})`).join("\n");
-      const content:Array<Record<string,string>>=[{type:"input_text",text:`Document visible elements in CSS pixels:\n${text}`}];
+      const content:Array<Record<string,string>>=[{type:"input_text",text:`Éléments visibles du document (pixels CSS) :\n${text}`}];
       const image=await documentImage();
       if(image)content.push({type:"input_image",image_url:image});
       sendEvent({type:"conversation.item.create",item:{type:"message",role:"user",content}});
     }
-    else {const text=elements().map(e=>`[${e.id}] "${e.text}" (${Math.round(e.rect.x)},${Math.round(e.rect.y)},${Math.round(e.rect.w)},${Math.round(e.rect.h)})`).join("\n");sendEvent({type:"conversation.item.create",item:{type:"message",role:"user",content:[{type:"input_text",text:`Vue active : ${liveMode?"cours live":"TD"}\nTD visible elements in CSS pixels:\n${text}`} ]}});}
+    else {const text=elements().map(e=>`[${e.id}] "${e.text}" (${Math.round(e.rect.x)},${Math.round(e.rect.y)},${Math.round(e.rect.w)},${Math.round(e.rect.h)})`).join("\n");sendEvent({type:"conversation.item.create",item:{type:"message",role:"user",content:[{type:"input_text",text:`Vue active : ${liveMode?"cours live":"TD"}\nÉléments visibles du TD (pixels CSS) :\n${text}`} ]}});}
   };
   const pumpResponses=async()=>{
     if(!sessionReady.current||activeResponse.current||responseStartPending.current||processingTools.current||dispatchingResponse.current||channel.current?.readyState!=="open")return;
@@ -746,7 +778,7 @@ function TD(){
                       output={ok:false,error:"Tu as déjà montré une commande ce tour-ci. Ne rappelle plus d'outil : dis en une phrase ce que l'élève doit faire, puis attends."};
                     }else{
                       const api=call.name==="open_board"?window.geraldTD:boardOpenRef.current?await getBoardApi():window.geraldTD;
-                      output=await api?.exec(call.name,args)??{ok:false,error:"view unavailable"};
+                      output=await api?.exec(call.name,args)??{ok:false,error:"vue indisponible"};
                     }
                   }catch(error){
                     console.error("Voice tool failed",error);
