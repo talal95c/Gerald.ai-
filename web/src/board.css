@@ -84,3 +84,9 @@ html,body,#root{margin:0;height:100%;overflow:hidden}
 .td-assist .td-ask .orb-wrap.orb-idle::before{content:"";width:26px;height:26px;border-radius:50%;background:radial-gradient(circle at 35% 30%,#fff 0,#d9c8ff 18%,#8b5cf6 55%,#4c1d95 100%);box-shadow:0 0 0 3px rgba(139,92,246,.15),0 4px 12px rgba(109,40,217,.35);animation:td-breathe 3s ease-in-out infinite}
 @keyframes td-breathe{0%,100%{transform:scale(1)}50%{transform:scale(1.06)}}
 .td-wave i:nth-child(3n){transform:scaleY(.55)}.td-wave i:nth-child(3n+1){transform:scaleY(.35)}
+.td-mic,.td-stop{box-sizing:border-box;width:44px;min-width:44px;height:44px;padding:0;display:grid;place-items:center;border-radius:999px;transition:background-color 150ms ease,transform 150ms cubic-bezier(.2,.8,.2,1)}
+.td-mic.is-connecting{width:auto;padding:0 16px}
+.td-mic svg,.td-stop svg{display:block}
+.td-mic[aria-pressed="false"] svg{color:rgba(255,170,170,.9)}
+.td-mic:hover:not(:disabled),.td-stop:hover{background:#202023;transform:scale(1.04)}
+.td-mic:focus-visible,.td-stop:focus-visible{outline:2px solid rgba(255,255,255,.8);outline-offset:2px}

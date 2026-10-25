@@ -852,8 +852,8 @@ function TD(){
         {voiceMode
           ? <><span className="td-hold">Maintiens <kbd>Ctrl</kbd> + <kbd>Shift</kbd></span><span className={`td-wave${status==="speaking"||status==="listening"?" on":""}`} aria-hidden="true">{Array.from({length:12},(_,i)=><i key={i} style={{animationDelay:`${i*70}ms`}}/>)}</span></>
           : <kbd>CTRL + SHIFT</kbd>}
-        {voiceMode&&<button type="button" className="td-mic" aria-label={sessionOpen?(micEnabled?"Couper le micro":"Activer le micro"):"Parler à Gerald"} aria-pressed={sessionOpen?micEnabled:undefined} disabled={connecting&&!sessionOpen} onClick={toggleMicrophone}>{sessionOpen?(micEnabled?"Couper le micro":"Activer le micro"):connecting?"Connexion…":"Parler à Gerald"}</button>}
-        {voiceMode&&sessionOpen&&<button type="button" className="td-stop" onClick={stop}>Arrêter</button>}
+        {voiceMode&&<button type="button" className={`td-mic${connecting&&!sessionOpen?" is-connecting":""}`} aria-label={sessionOpen?(micEnabled?"Couper le micro":"Activer le micro"):"Parler à Gerald"} title={sessionOpen?(micEnabled?"Couper le micro":"Activer le micro"):"Parler à Gerald"} aria-pressed={sessionOpen?micEnabled:undefined} disabled={connecting&&!sessionOpen} onClick={toggleMicrophone}>{connecting&&!sessionOpen?"Connexion…":<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">{sessionOpen&&!micEnabled?<><path d="M9 9v3a3 3 0 0 0 5.12 2.12M15 9.34V5a3 3 0 0 0-5.56-1.56"/><path d="M17 16.95A7 7 0 0 1 5 12v-2"/><path d="M12 19v3M8 22h8"/><path d="m2 2 20 20"/></>:<><rect x="9" y="2" width="6" height="12" rx="3"/><path d="M5 10a7 7 0 0 0 14 0M12 19v3M8 22h8"/></>}</svg>}</button>}
+        {voiceMode&&sessionOpen&&<button type="button" className="td-stop" title="Arrêter" aria-label="Arrêter" onClick={stop}><svg width="12" height="12" viewBox="0 0 12 12" aria-hidden="true"><rect x="1" y="1" width="10" height="10" rx="2.5" fill="currentColor"/></svg></button>}
       </form>
     </div>
     {voiceMode&&<div className={`td-board-overlay ${boardOpen?"open":""}`}>{docMode
