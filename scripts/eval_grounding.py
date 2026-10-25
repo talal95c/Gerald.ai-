@@ -244,7 +244,9 @@ def _summary(results: list[dict[str, Any]]) -> None:
 
 
 async def _evaluate(args: argparse.Namespace) -> int:
-    data = json.loads(CASES_PATH.read_text(encoding="utf-8"))
+    cases_path = Path(args.cases) if args.cases else CASES_PATH
+    data = json.loads(cases_path.read_text(encoding="utf-8"))
+    base_dir = cases_path.resolve().parent
     cases = data["cases"]
     if args.only:
         selected = {value.strip() for value in args.only.split(",") if value.strip()}
@@ -267,7 +269,10 @@ async def _evaluate(args: argparse.Namespace) -> int:
     run_dir = RESULTS_DIR / run_ts
     run_dir.mkdir(parents=True, exist_ok=True)
     async with async_playwright() as playwright:
-        browser = await playwright.chromium.connect_over_cdp("http://localhost:29229")
+        if args.headless:
+            browser = await playwright.chromium.launch()
+        else:
+            browser = await playwright.chromium.connect_over_cdp("http://localhost:29229")
         context = await browser.new_context(viewport=data["viewport"])
         try:
             for repeat_index in range(1, args.repeat + 1):
@@ -283,7 +288,10 @@ async def _evaluate(args: argparse.Namespace) -> int:
                     ocr_seconds = 0.0
                     first_mark_error = None
                     try:
-                        await page.goto(case["url"], wait_until="domcontentloaded", timeout=60000)
+                        url = case["url"]
+                        if "://" not in url:
+                            url = (base_dir / url).resolve().as_uri()
+                        await page.goto(url, wait_until="domcontentloaded", timeout=60000)
                         await page.wait_for_timeout(1500)
                         dpr = float(await page.evaluate("() => window.devicePixelRatio"))
                         gt, reason = await _first_visible_box(page, case["target"], dpr)
@@ -450,6 +458,8 @@ def _parse_args() -> argparse.Namespace:
     )
     parser.add_argument("--only", help="comma-separated case IDs")
     parser.add_argument("--repeat", type=int, default=1)
+    parser.add_argument("--cases", help="cases JSON (default: evals/grounding_cases.json); relative urls resolve from its folder")
+    parser.add_argument("--headless", action="store_true", help="launch a private headless Chromium instead of the CDP browser")
     args = parser.parse_args()
     if args.dry_gt and args.grounder_only:
         parser.error("--dry-gt and --grounder-only cannot be used together")

@@ -37,6 +37,8 @@ def test_tool_schemas_use_plain_objects_without_conditional_keywords():
     for tool in TOOL_SCHEMAS:
         if tool["name"] in {"point", "circle", "underline", "highlight", "note"}:
             assert tool["parameters"]["properties"]["text"]["type"] == "string"
+        if tool["name"] in {"circle", "underline"}:
+            assert tool["parameters"]["properties"]["target_text"]["type"] == "string"
         if tool["name"] in {"arrow", "link"}:
             target_keys = {"from", "to"} if tool["name"] == "arrow" else {"a", "b"}
             for key in target_keys:

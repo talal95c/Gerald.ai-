@@ -6,7 +6,7 @@ from dataclasses import dataclass
 from PyQt6.QtCore import QPointF, QRectF, Qt
 from PyQt6.QtGui import QColor, QFont, QFontMetricsF, QPainter, QPainterPath, QPen
 
-from gerald.tools.plot import PLOT_INSETS, PlotCommand
+from gerald.tools.plot import PLOT_INSETS, PlotCommand, PlotCurve
 
 
 @dataclass(frozen=True)
@@ -61,6 +61,29 @@ def _format_tick(value: float) -> str:
     if "e" in text:
         text = f"{value:.2f}".rstrip("0").rstrip(".")
     return text.replace(".", ",")
+
+
+def _curve_path(
+    plot: PlotCommand,
+    curve: PlotCurve,
+    graph: QRectF,
+    visible_count: int,
+) -> QPainterPath:
+    path = QPainterPath()
+    active = False
+    for sample in curve.samples[:visible_count]:
+        if sample is None:
+            active = False
+            continue
+        x_value, y_value = sample
+        x = graph.left() + (x_value - plot.x_min) / (plot.x_max - plot.x_min) * graph.width()
+        y = graph.top() + (plot.y_max - y_value) / (plot.y_max - plot.y_min) * graph.height()
+        if active:
+            path.lineTo(x, y)
+        else:
+            path.moveTo(x, y)
+            active = True
+    return path
 
 
 def draw_plot(
@@ -152,21 +175,7 @@ def draw_plot(
     visible_count = max(1, math.ceil(len(plot.curves[0].samples) * min(1.0, max(0.0, progress))))
     for curve_index, curve in enumerate(plot.curves):
         color = _curve_color(curve_index, palette)
-        path = QPainterPath()
-        active = False
-        for sample in curve.samples[:visible_count]:
-            if sample is None:
-                active = False
-                continue
-            x_value, y_value = sample
-            x = graph.left() + (x_value - plot.x_min) / (plot.x_max - plot.x_min) * graph.width()
-            clamped_y = min(plot.y_max, max(plot.y_min, y_value))
-            y = graph.top() + (plot.y_max - clamped_y) / (plot.y_max - plot.y_min) * graph.height()
-            if active:
-                path.lineTo(x, y)
-            else:
-                path.moveTo(x, y)
-                active = True
+        path = _curve_path(plot, curve, graph, visible_count)
         painter.setPen(QPen(color, 2.5, Qt.PenStyle.SolidLine, Qt.PenCapStyle.RoundCap, Qt.PenJoinStyle.RoundJoin))
         painter.drawPath(path)
     painter.restore()
