@@ -1,24 +1,30 @@
 import json, os, subprocess, sys, urllib.request
 VOICE = sys.argv[1] if len(sys.argv) > 1 else "ash"
 LINES = [
- ("cover",   "Gerald. The private tutor that lives on your screen. It sees, it talks, it draws. It doesn't give you the answer: it helps you find it."),
- ("problem", "Learning alone in front of a screen means learning with nobody next to you. Chatbots solve the exercise for you, so you copy it and you don't understand it. They can't see your screen. And a real tutor who points, draws and makes you think is rare, and expensive. In France, maths scores just dropped twenty-one points, a historic low."),
- ("solution","Our answer: hold a key, speak, and Gerald looks at your screen and explains, like a tutor sitting right next to you. It sees, one screenshot, only while you hold the shortcut. It talks, natural real-time voice. It draws: circles, points, exact curves on your board. And it guides, one step at a time, then your turn."),
- ("demo",    "Let's see it live. Two features: maths at the board, and a real app, Photoshop."),
- ("demoMath","The student opens the worksheet, exercise one: x squared minus five x plus six equals zero. They ask Gerald for help. Gerald doesn't solve it. It opens the board and plots the exact parabola, so the student can see where the curve crosses the axis. Then it hands the pen back: compute delta, and find the two roots yourself."),
- ("demoPs",  "Same engine, any app. Here, Photoshop. The student says: I need a red square. Gerald sees the screen, points at the shapes panel, then the rectangle. It guides them to the fill colour, hex f f zero zero zero zero. And the student drags the square. Gerald never clicks for you. It points, you do."),
- ("hood",    "Under the hood, one voice turn goes from keypress to ink in five steps: push-to-talk capture, perception with accessibility tree, OCR and Moondream grounding, the brain, gpt realtime two over a single websocket, validated tool calls, and a transparent overlay that renders the ink."),
- ("harness", "We don't guess whether Gerald teaches well. We measure it: seventeen rendered scenarios, real model turns, and a judge with eight pedagogical criteria. Our tutor-first prompt went from seventy-seven to over ninety percent."),
- ("pointing","Models see well but aim badly: about ninety pixels of error. So we anchor every gesture: accessibility element first, then OCR word, then a visual grounder. Eight out of ten targets, in under a second, for a fraction of a cent."),
- ("trust",   "A tutor on your screen, not a spy. Vision on demand, real consent before any action, hard guardrails, and your courses indexed locally."),
- ("next",    "Today: Windows, the board, a maths worksheet and the harness. Next: student memory and revision sheets. Then macOS and iPad, pen first. Our vision: teachers load their worksheets, and Gerald supports every student."),
- ("thanks",  "Gerald. Doesn't give you the answer. Helps you find it. Thank you."),
+ ("cover",   "Hi, I'm Talal. Meet Gerald, the AI teacher that lives on your screen. Let me start with something everyone keeps telling me."),
+ ("story",   "For years, everyone told me the same thing. Friends, teachers, LinkedIn, every ad: learn with AI. So I did. And for most subjects, it works."),
+ ("notebook","Then I tried with maths. Before I can even ask my question, I have to retype my equations. Every. Single. Time. Maths isn't text. It's on paper, on a board, in a PDF. I spend five minutes turning my working into x caret two, and I still can't show it where I'm stuck."),
+ ("problem", "Three frictions, everywhere. You retype everything. It can't point: the third icon on the left is the best it can do. And it gives you the answer, so the next morning you still can't solve it. And maths is exactly where students are dropping right now: minus twenty-one points in PISA."),
+ ("solution","So I built Gerald. Not a maths teacher. A teacher. You hold control shift and talk. It sees what you see, only while you hold the key. It talks in real time. It draws circles, underlines, arrows and exact plots. And it teaches: hint first, answer last. You do the thinking."),
+ ("different","One teacher, every subject, every app. Maths: it underlines the exact mistake. Sciences: it writes like a real board. Any software: it points at the right button and waits for your click. Zero retyping, zero screenshots, zero tutorials. Just ask."),
+ ("demo1",   "Demo one. This is the real app. No retyping: the worksheet is already open in Notes. I say: delta equals twenty-five plus twenty-four, right? Gerald stops me and points at the exercise, instead of giving the answer."),
+ ("demo2",   "Demo two. Now I write on the board, with the pen, and I make the classic mistake: plus twenty-four. Gerald underlines it in red and tells me the four a c term is subtracted. I fix it myself. Only then does it write the clean solution: x one equals three, x two equals two."),
+ ("demo2b",  "And this is a real session, filmed on my phone: I write by hand, Gerald follows every line and underlines the exact term that's wrong."),
+ ("demo3",   "Demo three. I ask to see the parabola. Gerald opens a blank board and plots the real curve: the two roots, two and three, and the vertex. It only draws when the picture helps."),
+ ("demo4",   "Demo four. Same engine, different app: Photoshop. Nothing is scripted. Gerald reads the screen, points at Shapes, then Rectangle, then the fill colour and the hex code, and waits for my click at every step, until the red square is on the canvas."),
+ ("clicky",  "Why not Clicky? Clicky is the closest thing to us, and it proved people want an AI next to their cursor. But Clicky is an assistant: it does the job for you. Gerald is a teacher: a hint, you try, it corrects you. It shows exactly where to click, it has a real board, it knows your course, and it runs on Windows and the web, where students are."),
+ ("llms",    "Why not Claude, ChatGPT or Gemini? Brilliant brains. But you still feed them screenshots, or they only see your phone or your browser, and they answer in a chat box. None of them shows you where to click, writes on your exercise, or lets you try first. Gerald does all three."),
+ ("table",   "One table to remember. Everyone has a piece. Chatbots can tutor, but only in a chat window. Clicky sees your screen, but it does the work for you. Gerald is the only one that sees your work, shows you exactly where, writes on it, and makes you think first."),
+ ("how",     "How it works: one voice turn, from keypress to ink. Listen, think, aim, draw. The hard part is pointing. Raw model coordinates are ninety pixels off, so every gesture is anchored on the UI tree, OCR or Moondream: two point four pixels median error. And a harness scores sixteen tutoring scenarios on eight criteria: from seventy-seven to ninety-one percent."),
+ ("market",  "The demand is already there: ninety-five percent of students use AI for their studies. AI in education grows seven x by twenty thirty-three, and private tutoring is a sixty-seven billion dollar market today. Gerald brings the tutor to everyone, at the price of an API call."),
+ ("numbers", "By the numbers: zero equations retyped. Five times fewer steps to ask. Thirty-seven times more precise pointing. Plus sixteen points of pedagogy. Point six seconds to find any target. And two hundredths of a cent per gesture."),
+ ("thanks",  "So: stop retyping, stop screenshotting, just ask Gerald. And if it gets too pedagogical... it's the first teacher you can actually mute. Thank you!"),
 ]
 key = os.environ["OPENAI_API_KEY"]
 out = {}
 for name, text in LINES:
     body = json.dumps({"model": "gpt-4o-mini-tts", "voice": VOICE, "input": text, "response_format": "mp3", "speed": 1.06,
-        "instructions": "Native English presenter pitching a startup to a jury. Natural, human, warm and confident, clear articulation, brisk but relaxed pace with real breaths; never robotic or announcer-like."}).encode()
+        "instructions": "Talal, a young founder pitching his startup to a hackathon jury, in English. Natural, human, dynamic and enthusiastic, slight smile, clear articulation, brisk pace with real breaths and small pauses for effect; never robotic or announcer-like."}).encode()
     req = urllib.request.Request("https://api.openai.com/v1/audio/speech", data=body, headers={"Authorization": f"Bearer {key}", "Content-Type": "application/json"})
     try:
         with urllib.request.urlopen(req, timeout=180) as r:
