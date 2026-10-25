@@ -5,8 +5,8 @@ import math
 import time
 
 from PIL import Image
-from PyQt6.QtCore import QPointF, QRectF, Qt, QTimer
-from PyQt6.QtGui import QColor, QFont, QFontMetricsF, QImage, QPainter, QPainterPath, QPen, QPixmap
+from PyQt6.QtCore import QPointF, QRectF, QSize, Qt, QTimer
+from PyQt6.QtGui import QColor, QFont, QFontMetricsF, QIcon, QImage, QPainter, QPainterPath, QPen, QPixmap
 from PyQt6.QtWidgets import QFrame, QHBoxLayout, QPushButton, QWidget
 
 from gerald.capture.screen import Capture, MonitorRect, capture_from_image
@@ -93,14 +93,16 @@ class BoardWindow(QWidget):
         self._reveal_timer.timeout.connect(self._advance_reveals)
         self._toolbar = QFrame(self)
         self._toolbar.setStyleSheet(
-            "QFrame { background: #161616; border-radius: 18px; }"
+            "QFrame { background: #161616; border-radius: 22px; }"
             "QPushButton { color: #F7F6F3; background: transparent; border: 0; "
-            "padding: 7px 10px; font: 11px 'Google Sans Flex'; }"
-            "QPushButton:hover { background: rgba(255,255,255,0.16); border-radius: 12px; }"
+            "padding: 5px 10px; font: 11px 'Google Sans Flex'; }"
+            "QPushButton:hover { background: rgba(255,255,255,0.10); border-radius: 18px; }"
         )
+        self._toolbar.setFixedHeight(44)
         toolbar = QHBoxLayout(self._toolbar)
         toolbar.setContentsMargins(6, 4, 6, 4)
         toolbar.setSpacing(2)
+        self._tool_buttons: dict[str, QPushButton] = {}
         for name, callback in (
             ("Stylo", lambda: self.set_tool("pen")),
             ("Gomme", lambda: self.set_tool("eraser")),
@@ -109,8 +111,12 @@ class BoardWindow(QWidget):
             ("Fermer", self.close),
         ):
             button = QPushButton(name, self._toolbar)
+            button.setFixedHeight(36)
             button.clicked.connect(callback)
             toolbar.addWidget(button)
+            if name in {"Stylo", "Gomme"}:
+                self._tool_buttons[name] = button
+        self.set_tool("pen")
         self._position_toolbar()
 
     def set_exercise(self, title: str, lines: list[str]) -> None:
@@ -148,6 +154,19 @@ class BoardWindow(QWidget):
 
     def set_tool(self, tool: str) -> None:
         self._tool = tool
+        active_name = "Stylo" if tool == "pen" else "Gomme"
+        for name, button in self._tool_buttons.items():
+            pixmap = QPixmap(8, 8)
+            pixmap.fill(Qt.GlobalColor.transparent)
+            painter = QPainter(pixmap)
+            painter.setRenderHint(QPainter.RenderHint.Antialiasing)
+            if name == active_name:
+                painter.setPen(Qt.PenStyle.NoPen)
+                painter.setBrush(QColor("#FFFDBD"))
+                painter.drawEllipse(1, 1, 6, 6)
+            painter.end()
+            button.setIcon(QIcon(pixmap))
+            button.setIconSize(QSize(8, 8))
 
     def undo(self) -> None:
         if self.user_strokes:

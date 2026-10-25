@@ -164,6 +164,12 @@ def test_exercise_card_is_visible_and_unchanged_by_board_actions():
     assert image.pixelColor(470, 70) == QColor("#EEEEEE")
     capture, rects = board.capture()
     assert capture.image.getpixel((470, 70)) == (238, 238, 238)
+    text_pixels = capture.image.crop((472, 62, 870, 120)).convert("RGB")
+    assert any(
+        text_pixels.getpixel((x, y)) != (238, 238, 238)
+        for y in range(text_pixels.height)
+        for x in range(text_pixels.width)
+    )
     assert rects == []
     assert board._exercise_title == "Exercice 1"
     assert board._exercise_lines == ["Résous dans ℝ : x² − 5x + 6 = 0"]
