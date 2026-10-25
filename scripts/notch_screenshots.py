@@ -21,9 +21,10 @@ MOCK_BRIDGE = """
 (() => {
   const storageKey = "gerald-preview-state";
   const saved = JSON.parse(sessionStorage.getItem(storageKey) || "{}");
+  const hoursAgo = hours => new Date(Date.now() - hours * 60 * 60 * 1000).toISOString();
   const persist = () => sessionStorage.setItem(storageKey, JSON.stringify({
     session_open: state.session_open, recap_pending: state.recap_pending,
-    recap: state.recap, last_exercise: state.last_exercise
+    recap: state.recap, last_exercise: state.last_exercise, recaps: state.recaps
   }));
   const signal = () => {
     const listeners = [];
@@ -40,11 +41,13 @@ MOCK_BRIDGE = """
       {id: 6, filename: "Cours — Suites.pdf", status: "ready", error: "", folder: "Suites numériques"}
     ],
     conversations: [
-      {id: 1, title: "Résoudre une équation du second degré", source: "chat", updated_at: "2025-02-15T12:00:00+00:00"},
-      {id: 2, title: "Méthode du discriminant", source: "agent", updated_at: "2025-02-14T12:00:00+00:00"}
+      {id: 1, title: "Résoudre une équation du second degré", source: "chat", updated_at: hoursAgo(1)},
+      {id: 2, title: "Méthode du discriminant", source: "agent", updated_at: hoursAgo(5)},
+      {id: 3, title: "Comprendre le discriminant", source: "chat", updated_at: hoursAgo(26)},
+      {id: 4, title: "Préparer le contrôle", source: "agent", updated_at: hoursAgo(72)}
     ],
     session_open: saved.session_open ?? false, recap_pending: saved.recap_pending ?? false,
-    recap: saved.recap ?? "", last_exercise: saved.last_exercise ?? null
+    recap: saved.recap ?? "", last_exercise: saved.last_exercise ?? null, recaps: saved.recaps ?? []
   };
   const signals = {
     stateChanged: signal(), modeChanged: signal(), answer: signal(),
@@ -92,8 +95,8 @@ MOCK_BRIDGE = """
       ? `Polynômes du second degré\n\nUn polynôme du second degré s’écrit f(x) = ax² + bx + c avec a ≠ 0.\n\nDiscriminant\nOn pose Δ = b² − 4ac.\n• Si Δ > 0 : deux racines x₁ = (−b − √Δ) / 2a et x₂ = (−b + √Δ) / 2a.\n• Si Δ = 0 : une racine double x₀ = −b / 2a.\n• Si Δ < 0 : pas de racine réelle.\n\nExemple\nx² − 5x + 6 = 0 : a = 1, b = −5, c = 6, Δ = 25 − 24 = 1, donc x₁ = 2 et x₂ = 3.`
       : "Aperçu de démonstration de ce document."),
     messages: (_id, callback) => callback(JSON.stringify([
-      {role: "assistant", text: "On commence par calculer le discriminant."},
-      {role: "user", text: "Je ne comprends pas cette étape."}
+      {role: "assistant", text: "On commence par calculer le discriminant.", created_at: hoursAgo(1)},
+      {role: "user", text: "Je ne comprends pas cette étape.", created_at: hoursAgo(.9)}
     ])),
     addDocuments: () => {},
     deleteDocument: () => {},
@@ -111,6 +114,7 @@ MOCK_BRIDGE = """
       state.recap_pending = true; persist(); signals.stateChanged.emit(JSON.stringify(state));
       setTimeout(() => {
         state.session_open = false; state.recap_pending = false; state.recap = "fiche.html";
+        state.recaps = [...state.recaps, {path:"fiche.html", title:"Polynômes du second degré", created_at:new Date().toISOString()}];
         persist(); signals.recapReady.emit(state.recap); signals.stateChanged.emit(JSON.stringify(state));
       }, 1200);
     },
