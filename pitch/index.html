@@ -168,6 +168,53 @@
   <aside class="notes">Same engine, different app. Nothing is scripted: Gerald reads the screen, points at Shapes, then Rectangle, then the fill colour and the hex code, and waits for my click at every step until the red square is on the canvas.</aside>
 </section>
 
+<!-- 9b · vs Clicky -->
+<section class="slide tight" data-title="Why not Clicky?">
+  <span class="badge r">Why not Clicky?</span>
+  <h2 class="r h2s">Clicky is a buddy that does it for you.<br><span class="soft">Gerald is a teacher that makes <span class="mark">you<svg viewBox="0 0 100 12" preserveAspectRatio="none"><path d="M1 7 C 25 3, 55 10, 99 4" pathLength="1"/></svg></span> do it.</span></h2>
+  <div class="vs r">
+    <div class="vs-h"><span></span><span>Clicky &amp; HeyClicky</span><span class="g">Gerald</span></div>
+    <div class="vs-row"><b>Goal</b><span>An AI buddy + agents that do the task for you: research, Gmail, Notion, apps.</span><span class="g">A teacher. Hint first, waits for your try, fixes your mistake. <i>Pedagogy 77 → 93 %, measured.</i></span></div>
+    <div class="vs-row"><b>Pointing</b><span>The model guesses raw x,y from a screenshot (open-source Clicky).</span><span class="g">Anchored on the UI tree → OCR → Moondream. <i>2.4 px median, 37× tighter.</i></span></div>
+    <div class="vs-row"><b>Maths &amp; science</b><span>Arrows and circles floating over your screen.</span><span class="g">A real board: rendered formulas, exact computed plots, red = fix, green = right.</span></div>
+    <div class="vs-row"><b>Your course</b><span>Text summaries of past chats.</span><span class="g">Reads your worksheets, PDFs and notes, cites them, ends with a revision sheet.</span></div>
+    <div class="vs-row"><b>Voice</b><span>Speech → text → Claude → speech: three hops.</span><span class="g">Speech-to-speech in real time. Cut it off mid-sentence.</span></div>
+    <div class="vs-row"><b>Access</b><span>Mac-first. Free plan: 25 talk messages a month.</span><span class="g">Windows + web, where students are. Open source (MIT), ~$0.0002 a gesture.</span></div>
+  </div>
+  <p class="foot r">Sources: github.com/farzaa/clicky README, heyclicky.com/pricing, YC profile (Oct. 2026). Gerald figures: our harness.</p>
+  <aside class="notes">Clicky is the closest thing to us, and it's great, it proved people want an AI next to their cursor. But it's built as an assistant: its agent mode goes and does the work for you. Gerald is built as a teacher: it gives a hint, waits for your attempt and corrects the exact mistake, and we measured that pedagogy at 77 to 93 percent on 16 judged scenarios. Second, pointing: in open-source Clicky the model writes raw coordinates; raw model coordinates were about 90 pixels off in our tests, so Gerald anchors every gesture on the UI tree, OCR or Moondream: 2.4 pixels median. Third, maths: Gerald has a real board with rendered formulas and computed plots, not just arrows. And it knows your course, runs on Windows and the web, and it's open source.</aside>
+</section>
+
+<!-- 9c · vs Claude / ChatGPT / Gemini -->
+<section class="slide" data-title="Why not Claude or ChatGPT?">
+  <span class="badge r">Why not Claude, ChatGPT or Gemini?</span>
+  <h2 class="r h2s">Brilliant brains.<br><span class="soft">No eyes on your work, no hands, and way too helpful.</span></h2>
+  <div class="grid3">
+    <article class="card r"><span class="num">Claude</span><h3>You feed it screenshots</h3><p>On Mac, you drag a capture by hand into a chat. Learning mode lives inside a chat project. Computer use takes your mouse and does the job for you: you learn nothing.</p></article>
+    <article class="card r"><span class="num">ChatGPT</span><h3>It talks about your screen</h3><p>Screen sharing only in Advanced Voice, on the phone apps. The new Live voice has none. It describes the button; it never points at it.</p></article>
+    <article class="card r"><span class="num">Gemini</span><h3>It lives in a side panel</h3><p>In Chrome you draw boxes around what to share, browser tabs only. Live screen share is mobile. The answer lands in a panel, not on your work.</p></article>
+  </div>
+  <div class="none r"><span>None of them</span><b>points at the exact pixel</b><b>writes &amp; plots on your work</b><b>waits for you to try</b></div>
+  <p class="foot r">Sources: support.claude.com, help.openai.com (ChatGPT Voice FAQ), support.google.com (Gemini in Chrome), Oct. 2026.</p>
+  <aside class="notes">Claude, ChatGPT and Gemini are the best brains on the planet, and Gerald uses that kind of model. But the interface is the problem. With Claude you still drag screenshots into a chat; its learning mode is a chat project; and computer use takes over your mouse and does the work, which is the opposite of learning. ChatGPT only shares your screen in Advanced Voice on the phone apps; the new Live voice doesn't do screen sharing at all. Gemini in Chrome makes you draw boxes around what to share, browser tabs only. And all three answer in a text box: they can describe the button, they can't point at it, write on your exercise or wait for you to try.</aside>
+</section>
+
+<!-- 9d · Matrix -->
+<section class="slide" data-title="Side by side">
+  <span class="badge r">Side by side</span>
+  <h2 class="r h2s">Everyone has a piece.<br><span class="soft">Gerald is the only one with all of it.</span></h2>
+  <div class="mx r">
+    <div class="mx-h"><span></span><span>ChatGPT</span><span>Claude</span><span>Gemini</span><span>Clicky</span><span class="g">Gerald</span></div>
+    <div class="mx-row"><b>Sees any app on a hotkey</b><i class="p">phone</i><i class="p">screenshot</i><i class="p">tabs</i><i class="y">✓</i><i class="y g">✓</i></div>
+    <div class="mx-row"><b>Points at the exact spot</b><i class="n">✗</i><i class="n">✗</i><i class="n">✗</i><i class="p">raw x,y</i><i class="y g">2.4 px</i></div>
+    <div class="mx-row"><b>Writes &amp; plots on your work</b><i class="n">✗</i><i class="n">✗</i><i class="n">✗</i><i class="p">arrows</i><i class="y g">✓</i></div>
+    <div class="mx-row"><b>Hint → your try → fix</b><i class="p">in chat</i><i class="p">in chat</i><i class="p">in chat</i><i class="n">✗</i><i class="y g">93 %</i></div>
+    <div class="mx-row"><b>Open source</b><i class="n">✗</i><i class="n">✗</i><i class="n">✗</i><i class="p">old version</i><i class="y g">MIT</i></div>
+  </div>
+  <p class="foot r">“In chat”: ChatGPT study mode, Claude learning mode, Gemini guided learning work in the chat window only. Gerald: 2.4 px median pointing, up to 93 % pedagogy score, our harness.</p>
+  <aside class="notes">One table to remember. Everyone has a piece: chatbots have tutoring modes but only in a chat window, Clicky sees your screen and points, but it's an assistant, not a teacher. Gerald is the only one that sees any app, points at the exact pixel, writes and plots on your work, and teaches you instead of doing it for you. And it's open source.</aside>
+</section>
+
 <!-- 9 · How it works -->
 <section class="slide" data-title="How it works">
   <span class="badge r">How it works</span>
