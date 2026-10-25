@@ -50,6 +50,7 @@ class Bridge(QObject):
     sessionOpenChanged = pyqtSignal(bool)
     recapReady = pyqtSignal(str)
     agentStatus = pyqtSignal(str)
+    tdRequested = pyqtSignal()
 
     def __init__(
         self, store, indexer, settings, *, ask_fn=None, open_board=None, end_session=None, on_library_changed=None
@@ -208,6 +209,10 @@ class Bridge(QObject):
         self._session_open = True
         self.sessionOpenChanged.emit(True)
         self.stateChanged.emit(self.state())
+
+    @pyqtSlot()
+    def openTd(self) -> None:
+        self.tdRequested.emit()
 
     @pyqtSlot()
     def endSession(self) -> None:

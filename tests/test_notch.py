@@ -66,6 +66,16 @@ def test_bridge_open_board_passes_exercise_and_tracks_session():
     assert bridge._session_open
 
 
+def test_bridge_open_td_emits_request():
+    bridge = Bridge(EmptyStore(), object(), object())
+    requested = []
+    bridge.tdRequested.connect(lambda: requested.append(True))
+
+    bridge.openTd()
+
+    assert requested == [True]
+
+
 def test_seed_demo_is_idempotent():
     store = FakeStore()
     indexer = FakeIndexer(store)
@@ -76,8 +86,8 @@ def test_seed_demo_is_idempotent():
     assert store.get_profile().name == ""
     assert [course.title for course in store.list_courses()] == ["Maths — Second degré"]
     documents = store.list_documents(store.list_courses()[0].id)
-    assert len(documents) == 3
-    assert len(store.calls["add_document"]) == 3
+    assert len(documents) == 4
+    assert len(store.calls["add_document"]) == 4
 
 
 def test_end_session_discovers_recap_and_closes_session(tmp_path):

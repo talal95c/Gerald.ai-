@@ -25,6 +25,7 @@ export type GeraldBridge = {
   addDocuments: () => void;
   deleteDocument: (id: number) => void;
   openBoard: (title: string, lines: string) => void;
+  openTd: () => void;
   endSession: () => void;
   openRecap: (path: string) => void;
   requestFocus: (active: boolean) => void;
@@ -48,7 +49,7 @@ const mock: GeraldBridge = {
   stateChanged: mockSignal<string>(), modeChanged: mockSignal<string>(),
   answer: mockSignal<string>(), answerError: mockSignal<string>(), recapReady: mockSignal<string>(),
   setMode: () => undefined, ask: () => undefined, messages: (_id, cb) => cb("[]"), documentText: (_id, cb) => cb(""),
-  addDocuments: () => undefined, deleteDocument: () => undefined, openBoard: () => undefined,
+  addDocuments: () => undefined, deleteDocument: () => undefined, openBoard: () => undefined, openTd: () => undefined,
   endSession: () => undefined, openRecap: () => undefined, requestFocus: () => undefined,
   quit: () => undefined
 };

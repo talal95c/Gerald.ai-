@@ -28,7 +28,7 @@ function path(radii: number[], size: number, scale: number, t: number, wobble: n
 }
 
 export function Orb({status, size = 26}: {status: string; size?: number}) {
-  const halo = useRef<SVGPathElement>(null), core = useRef<SVGPathElement>(null);
+  const halo = useRef<SVGPathElement>(null), ring = useRef<SVGPathElement>(null), core = useRef<SVGPathElement>(null), rim = useRef<SVGPathElement>(null);
   const target = useRef(status);
   target.current = status;
   useEffect(() => {
@@ -38,12 +38,15 @@ export function Orb({status, size = 26}: {status: string; size?: number}) {
       const dt = Math.min(0.05, (now - last) / 1000); last = now; t += dt;
       const s = target.current, n = sides[s] ?? 0;
       const goal = shape(n, -Math.PI / 2 + (n === 4 ? Math.PI / 4 : 0) + (s === "thinking" ? t * 0.9 : 0));
-      const k = 1 - Math.exp(-dt * 9);
+      const k = 1 - Math.exp(-dt * 6);
       current = current.map((r, i) => r + (goal[i] - r) * k);
       const pulse = s === "listening" ? 1 + Math.sin(t * 5) * 0.05 : s === "speaking" ? 1 + Math.abs(Math.sin(t * 7)) * 0.07 : 1 + Math.sin(t * 1.6) * 0.025;
       const wobble = s === "listening" ? 0.035 : s === "speaking" ? 0.02 : 0.012;
-      halo.current?.setAttribute("d", path(current, size, 1.08 * pulse, t, wobble * 1.8));
-      core.current?.setAttribute("d", path(current, size, 0.74 * pulse, t + 1, wobble));
+      const inner = path(current, size, 0.72 * pulse, t + 1, wobble);
+      halo.current?.setAttribute("d", path(current, size, 1.12 * pulse, t, wobble * 2.2));
+      ring.current?.setAttribute("d", path(current, size, 0.98 * pulse, t + 0.5, wobble * 1.6));
+      core.current?.setAttribute("d", inner);
+      rim.current?.setAttribute("d", inner);
       frame = requestAnimationFrame(tick);
     };
     frame = requestAnimationFrame(tick);
@@ -52,11 +55,21 @@ export function Orb({status, size = 26}: {status: string; size?: number}) {
   const id = `orb${size}`;
   return <svg style={{overflow:"visible", flex:"none"}} className={`orb o-${status}`} width={size} height={size} viewBox={`0 0 ${size} ${size}`} aria-hidden="true">
     <defs>
-      <linearGradient id={`${id}h`} x1="0" y1="0" x2="1" y2="1"><stop offset="0" stopColor="#6F7BFF"/><stop offset=".55" stopColor="#B9A6FF"/><stop offset="1" stopColor="#F3C9F2"/></linearGradient>
-      <radialGradient id={`${id}c`} cx=".35" cy=".3" r=".9"><stop offset="0" stopColor="#F4F2FF"/><stop offset=".6" stopColor="#C9C3FF"/><stop offset="1" stopColor="#A9A2F5"/></radialGradient>
-      <filter id={`${id}b`} x="-50%" y="-50%" width="200%" height="200%"><feGaussianBlur stdDeviation={size * 0.035}/></filter>
+      <linearGradient id={`${id}h`} x1="0" y1="0" x2="1" y2="1"><stop offset="0" stopColor="#5E6BFF"/><stop offset=".5" stopColor="#A99BFF"/><stop offset="1" stopColor="#F2C4F0"/></linearGradient>
+      <linearGradient id={`${id}c`} x1=".2" y1="0" x2=".8" y2="1"><stop offset="0" stopColor="#F4F3FF" stopOpacity=".75"/><stop offset=".55" stopColor="#C9C1FF" stopOpacity=".45"/><stop offset="1" stopColor="#E9D6FF" stopOpacity=".6"/></linearGradient>
+      <linearGradient id={`${id}r`} x1="0" y1="0" x2="1" y2="1"><stop offset=".35" stopColor="#fff" stopOpacity="0"/><stop offset="1" stopColor="#fff" stopOpacity=".95"/></linearGradient>
+      <filter id={`${id}b`} x="-80%" y="-80%" width="260%" height="260%"><feGaussianBlur stdDeviation={size * 0.11}/></filter>
+      <filter id={`${id}s`} x="-50%" y="-50%" width="200%" height="200%"><feGaussianBlur stdDeviation={size * 0.02}/></filter>
+      <filter id={`${id}g`} x="0" y="0" width="100%" height="100%">
+        <feTurbulence type="fractalNoise" baseFrequency="1.4" numOctaves="2" seed="3" result="noise"/>
+        <feColorMatrix in="noise" type="matrix" values="0 0 0 0 1  0 0 0 0 1  0 0 0 0 1  0 0 0 .35 0" result="grain"/>
+        <feComposite in="grain" in2="SourceGraphic" operator="in" result="masked"/>
+        <feMerge><feMergeNode in="SourceGraphic"/><feMergeNode in="masked"/></feMerge>
+      </filter>
     </defs>
-    <path ref={halo} fill={`url(#${id}h)`} filter={`url(#${id}b)`} opacity=".95"/>
-    <path ref={core} fill={`url(#${id}c)`} stroke="rgba(255,255,255,.85)" strokeWidth={size * 0.03}/>
+    <path ref={halo} fill={`url(#${id}h)`} filter={`url(#${id}b)`} opacity=".85"/>
+    <path ref={ring} fill={`url(#${id}h)`} filter={`url(#${id}s)`} opacity=".9"/>
+    <g filter={`url(#${id}g)`}><path ref={core} fill={`url(#${id}c)`}/></g>
+    <path ref={rim} fill="none" stroke={`url(#${id}r)`} strokeWidth={Math.max(0.8, size * 0.025)}/>
   </svg>;
 }

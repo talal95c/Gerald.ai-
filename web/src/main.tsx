@@ -3,6 +3,7 @@ import { createRoot } from "react-dom/client";
 import { AppState, getBridge } from "./bridge";
 import "./style.css";
 import { Orb } from "./orb";
+import { Reveal } from "./reveal";
 
 const bridge = getBridge();
 const tabs = ["Tableau", "Documents", "Historique", "Raccourcis"];
@@ -41,10 +42,6 @@ function NavBar({active, onChange}: {active: string; onChange: (tab: string) => 
 }
 
 
-function Reveal({text}: {text: string}) {
-  const words = text.split(/(\s+)/);
-  return <>{words.map((word,index)=>/^\s+$/.test(word)?word:<span className="reveal-word" style={{animationDelay:`${index*40}ms`}} key={`${word}-${index}`}>{word}</span>)}</>;
-}
 
 
 function DocView({doc, folder, hotkey, onBack}: {doc: AppState["documents"][number]; folder: string; hotkey: string; onBack: () => void}) {
@@ -76,7 +73,7 @@ function DocView({doc, folder, hotkey, onBack}: {doc: AppState["documents"][numb
 
 function Folders({docs, hotkey}: {docs: AppState["documents"]; hotkey: string}) {
   const [doc, setDoc] = useState<AppState["documents"][number] | null>(null);
-  const onOpen = (d: AppState["documents"][number]) => setDoc(d);
+  const onOpen = (d: AppState["documents"][number]) => /^TD\b/i.test(d.filename) ? bridge.openTd() : setDoc(d);
   const [open, setOpen] = useState<string | null>(null);
   const groups = docs.reduce<Record<string, AppState["documents"]>>((acc, d) => { (acc[d.folder || "Mes cours"] ??= []).push(d); return acc; }, {});
   if (doc) return <DocView doc={doc} folder={doc.folder || "Mes cours"} hotkey={hotkey} onBack={()=>setDoc(null)}/>;

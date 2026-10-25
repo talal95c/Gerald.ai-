@@ -27,7 +27,7 @@ MOCK_BRIDGE = """
     greeting: "Bonjour.", hotkey_label: "CTRL + SHIFT",
     documents: [
       {id: 1, filename: "Cours — Second degré.pdf", status: "ready", error: "", folder: "Polynômes du second degré"},
-      {id: 2, filename: "TD 4 — Exercices.pdf", status: "ready", error: "", folder: "Polynômes du second degré"},
+      {id: 2, filename: "TD 4 — Polynômes du second degré.pdf", status: "ready", error: "", folder: "Polynômes du second degré"},
       {id: 3, filename: "Fiche discriminant.md", status: "indexing", error: "", folder: "Polynômes du second degré"},
       {id: 4, filename: "Cours — Fonctions affines.pdf", status: "ready", error: "", folder: "Fonctions affines"},
       {id: 5, filename: "Exercices corrigés.pdf", status: "ready", error: "", folder: "Fonctions affines"},
@@ -52,10 +52,20 @@ MOCK_BRIDGE = """
       return json;
     },
     setMode: mode => signals.modeChanged.emit(mode),
-    ask: question => signals.answer.emit(JSON.stringify({
-      text: "Le discriminant vaut Δ = b² − 4ac. Ici, Δ = 1, donc l’équation possède deux racines réelles.",
-      sources: [{document: "Polynômes du second degré.md", page: 2}]
-    })),
+    ask: question => {
+      signals.agentStatus.emit("thinking");
+      const td = /TD|exercice|exo/i.test(question);
+      setTimeout(() => {
+        signals.agentStatus.emit("speaking");
+        signals.answer.emit(JSON.stringify({
+          text: td
+            ? "Ici, x² − 5x + 6 = 0 est un polynôme du second degré : on ne peut pas l’isoler comme une fonction affine. Repère a = 1, b = −5 et c = 6, puis calcule Δ = b² − 4ac. Viens, on va au tableau, je t’explique pas à pas."
+            : "Le discriminant vaut Δ = b² − 4ac. Ici, Δ = 1, donc l’équation possède deux racines réelles.",
+          sources: [{document: td ? "TD 4 — Polynômes du second degré.pdf" : "Polynômes du second degré.md", page: 1}]
+        }));
+        setTimeout(() => signals.agentStatus.emit("idle"), 2600);
+      }, 900);
+    },
     documentText: (id, callback) => callback(id === 1
       ? "Polynômes du second degré\n\nUn polynôme du second degré s’écrit f(x) = ax² + bx + c avec a ≠ 0.\n\nDiscriminant\nOn pose Δ = b² − 4ac.\n• Si Δ > 0 : deux racines x₁ = (−b − √Δ) / 2a et x₂ = (−b + √Δ) / 2a.\n• Si Δ = 0 : une racine double x₀ = −b / 2a.\n• Si Δ < 0 : pas de racine réelle.\n\nExemple\nx² − 5x + 6 = 0 : a = 1, b = −5, c = 6, Δ = 25 − 24 = 1, donc x₁ = 2 et x₂ = 3."
       : "Aperçu de démonstration de ce document."),
@@ -65,7 +75,8 @@ MOCK_BRIDGE = """
     ])),
     addDocuments: () => {},
     deleteDocument: () => {},
-    openBoard: () => {},
+    openBoard: (title, lines) => { if (location.protocol !== "file:") location.href = "board.html?title=" + encodeURIComponent(title) + "&lines=" + encodeURIComponent(lines); },
+    openTd: () => { if (location.protocol !== "file:") location.href = "td.html"; },
     requestFocus: () => {},
     endSession: () => {},
     openRecap: () => {},
