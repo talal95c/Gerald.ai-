@@ -10,7 +10,8 @@ from websockets.asyncio.server import serve
 from gerald.brain.realtime import RealtimeClient
 from gerald.capture.screen import MonitorRect, capture_from_image
 from gerald.perception.elements import Element
-from gerald.tools.registry import ClearCommand
+from gerald.tools.registry import ClearCommand, TipCommand
+from gerald.tools.diagram import DiagramCommand
 
 
 class RecordingPlayer:
@@ -389,6 +390,40 @@ def test_search_courses_dispatches_in_executor_and_returns_json_results():
                 {"course": "Biologie", "document": "cours.pdf", "page": 2, "text": "Cellules"}
             ],
         }
+
+    asyncio.run(scenario())
+
+
+def test_tip_and_diagram_tools_are_dispatched_to_overlay_commands():
+    async def scenario():
+        client, _capture = make_client()
+        commands = []
+        client.on_commands = commands.extend
+
+        tip_output = await client._execute_function_call(
+            "tip-call",
+            "tip",
+            json.dumps({"text": "Cherche le mot important"}),
+        )
+        diagram_output = await client._execute_function_call(
+            "diagram-call",
+            "diagram",
+            json.dumps(
+                {
+                    "layout": "flow",
+                    "nodes": [{"id": "a", "text": "Départ"}, {"id": "b", "text": "Arrivée"}],
+                    "edges": [{"from": "a", "to": "b"}],
+                },
+                ensure_ascii=False,
+            ),
+        )
+
+        assert json.loads(tip_output)["ok"] is True
+        assert isinstance(commands[0], TipCommand)
+        assert commands[0].text == "Cherche le mot important"
+        assert json.loads(diagram_output)["ok"] is True
+        assert isinstance(commands[1], DiagramCommand)
+        assert commands[1].layout.nodes[0].id == "a"
 
     asyncio.run(scenario())
 

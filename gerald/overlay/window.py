@@ -7,10 +7,12 @@ import sys
 import time
 import uuid
 from dataclasses import dataclass
+from typing import Callable
 
-from PyQt6.QtCore import QEvent, QPoint, QPointF, QRectF, Qt, QTimer
+from PyQt6.QtCore import QEvent, QPoint, QPointF, QRectF, Qt, QTimer, QPropertyAnimation
 from PyQt6.QtGui import (
     QColor,
+    QCursor,
     QFont,
     QFontDatabase,
     QFontMetrics,
@@ -19,7 +21,16 @@ from PyQt6.QtGui import (
     QPalette,
     QPen,
 )
-from PyQt6.QtWidgets import QApplication, QHBoxLayout, QLabel, QLineEdit, QPushButton, QVBoxLayout, QWidget
+from PyQt6.QtWidgets import (
+    QApplication,
+    QGraphicsOpacityEffect,
+    QHBoxLayout,
+    QLabel,
+    QLineEdit,
+    QPushButton,
+    QVBoxLayout,
+    QWidget,
+)
 
 from gerald.capture.screen import Capture
 from gerald.perception.grounding import ScreenRect
@@ -31,8 +42,11 @@ from gerald.tools.registry import (
     LinkCommand,
     NoteCommand,
     PointCommand,
+    TipCommand,
     UnderlineCommand,
 )
+from gerald.tools.diagram import DiagramCommand
+from gerald.tools.diagram_render import draw_diagram
 
 
 def _accent_color() -> QColor:
@@ -407,8 +421,92 @@ class _ConfirmationPill(QWidget):
         painter.end()
 
 
+class _SuggestionBubble(QWidget):
+    def __init__(self, owner: OverlayWindow, text: str, choices, on_choice, ttl: float) -> None:
+        super().__init__(
+            None,
+            Qt.WindowType.FramelessWindowHint
+            | Qt.WindowType.WindowStaysOnTopHint
+            | Qt.WindowType.Tool
+            | Qt.WindowType.WindowDoesNotAcceptFocus,
+        )
+        self.owner = owner
+        self.on_choice = on_choice
+        self.tail_x = 0.5
+        self.tail_up = False
+        self.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground, True)
+        self.setAttribute(Qt.WidgetAttribute.WA_ShowWithoutActivating, True)
+        self.setToolTip(text)
+        layout = QVBoxLayout(self)
+        layout.setContentsMargins(14, 12, 14, 18)
+        layout.setSpacing(8)
+        self.label = QLabel(text, self)
+        label_font = QFont(owner._font_family)
+        label_font.setPixelSize(13)
+        self.label.setFont(label_font)
+        self.label.setWordWrap(True)
+        self.label.setMaximumWidth(292)
+        layout.addWidget(self.label)
+        self.buttons: list[QPushButton] = []
+        if choices:
+            row = QHBoxLayout()
+            row.addStretch(1)
+            for index, choice in enumerate(choices):
+                button = QPushButton(choice, self)
+                button.setMinimumHeight(30)
+                button_font = QFont(owner._font_family)
+                button_font.setPixelSize(11)
+                button_font.setWeight(QFont.Weight.Medium)
+                button.setFont(button_font)
+                button.setStyleSheet(
+                    "QPushButton { color: white; background: #0A84FF; border: none; "
+                    "border-radius: 15px; padding: 0 14px; }"
+                    if index == 0
+                    else "QPushButton { color: #0A84FF; background: transparent; border: none; "
+                    "border-radius: 15px; padding: 0 14px; }"
+                )
+                button.clicked.connect(lambda _checked=False, value=choice: owner.dismiss_bubble(value))
+                row.addWidget(button)
+                self.buttons.append(button)
+            layout.addLayout(row)
+        self.setMaximumWidth(320)
+        self.adjustSize()
+        effect = QGraphicsOpacityEffect(self)
+        self._opacity_effect = effect
+        self.setGraphicsEffect(effect)
+        effect.setOpacity(0.0)
+        self._fade = QPropertyAnimation(effect, b"opacity", self)
+        self._fade.setDuration(180)
+        self._fade.setStartValue(0.0)
+        self._fade.setEndValue(1.0)
+        self._ttl = QTimer(self)
+        self._ttl.setSingleShot(True)
+        self._ttl.timeout.connect(owner.dismiss_bubble)
+        self._ttl.start(max(1, round(ttl * 1000)))
+
+    def paintEvent(self, event) -> None:
+        del event
+        painter = QPainter(self)
+        painter.setRenderHint(QPainter.RenderHint.Antialiasing)
+        self.owner._draw_glass_card(painter, QRectF(self.rect()).adjusted(1, 1, -1, -9), 14, False)
+        path = QPainterPath()
+        center = self.width() * self.tail_x
+        if self.tail_up:
+            path.moveTo(center - 7, 8)
+            path.lineTo(center, 0)
+            path.lineTo(center + 7, 8)
+        else:
+            path.moveTo(center - 7, self.height() - 10)
+            path.lineTo(center, self.height() - 2)
+            path.lineTo(center + 7, self.height() - 10)
+        painter.setPen(Qt.PenStyle.NoPen)
+        painter.setBrush(QColor(250, 250, 252, 235))
+        painter.drawPath(path)
+        painter.end()
+
+
 class OverlayWindow(QWidget):
-    def __init__(self) -> None:
+    def __init__(self, cursor_enabled: bool | None = None) -> None:
         super().__init__()
         self.setWindowFlags(
             Qt.WindowType.FramelessWindowHint
@@ -423,6 +521,7 @@ class OverlayWindow(QWidget):
         if screen is not None:
             self.setGeometry(screen.virtualGeometry())
         self._marks: list[_Mark] = []
+        self._diagrams: list[dict] = []
         self._marks_visible = True
         self._status = "idle"
         self._status_visible = False
@@ -435,6 +534,19 @@ class OverlayWindow(QWidget):
         self._capture: Capture | None = None
         self._appearance_cache: dict[tuple[int, int, int, int], bool] = {}
         self._reduced_motion = _reduced_motion()
+        self._cursor_enabled = (
+            os.getenv("GERALD_CURSOR", "1").strip().casefold() not in {"0", "false", "no", "off"}
+            if cursor_enabled is None
+            else cursor_enabled
+        )
+        mouse = QCursor.pos()
+        self._mouse_position = QPointF(mouse.x(), mouse.y())
+        self._cursor_position = QPointF(mouse.x() + 18, mouse.y() + 14)
+        self._cursor_target = QPointF(self._cursor_position)
+        self._cursor_flight: tuple[QPointF, QPointF, float] | None = None
+        self._cursor_hold_until = 0.0
+        self._bubble: _SuggestionBubble | None = None
+        self._bubble_choice = None
         self._font_family = _system_font_family()
         self._text_input_submit = None
         self._text_input_cancel = None
@@ -577,10 +689,134 @@ class OverlayWindow(QWidget):
         for command in commands:
             if isinstance(command, ClearCommand):
                 self._marks.clear()
+                self._diagrams.clear()
+                self._start_cursor_flight(self._mouse_position + QPointF(18, 14), now, 0.0)
+            elif isinstance(command, TipCommand):
+                self.show_bubble(command.text)
+            elif isinstance(command, DiagramCommand):
+                self._diagrams.append(self._diagram_state(command, now, 30.0))
             else:
                 self._marks.append(_Mark(command, now, ttl))
+                target = self._cursor_target_for(command)
+                if target is not None:
+                    self._start_cursor_flight(target, now, now + ttl)
         self._ensure_timer()
         self.update()
+
+    def _diagram_state(self, command: DiagramCommand, now: float, ttl: float) -> dict:
+        layout = command.layout
+        screen = QApplication.screenAt(QPoint(round(self._cursor_position.x()), round(self._cursor_position.y())))
+        screen = screen or QApplication.primaryScreen()
+        area = screen.availableGeometry() if screen else self.geometry()
+        max_w, max_h = area.width() * 0.46, area.height() * 0.46
+        scale = min(1.0, max_w / max(1, layout.width), max_h / max(1, layout.height))
+        width, height = layout.width * scale, layout.height * scale
+        cursor = self._cursor_position
+        quadrants = [
+            QRectF(area.left(), area.top(), area.width() / 2, area.height() / 2),
+            QRectF(area.center().x(), area.top(), area.width() / 2, area.height() / 2),
+            QRectF(area.left(), area.center().y(), area.width() / 2, area.height() / 2),
+            QRectF(area.center().x(), area.center().y(), area.width() / 2, area.height() / 2),
+        ]
+        quadrant = max(quadrants, key=lambda rect: (rect.center().x() - cursor.x()) ** 2 + (rect.center().y() - cursor.y()) ** 2)
+        x = min(max(quadrant.left(), quadrant.center().x() - width / 2), area.right() - width)
+        y = min(max(quadrant.top(), quadrant.center().y() - height / 2), area.bottom() - height)
+        return {"command": command, "created": now, "ttl": ttl, "x": x, "y": y, "scale": scale}
+
+    def _cursor_target_for(self, command: object) -> QPointF | None:
+        if isinstance(command, (CircleCommand, NoteCommand, HighlightCommand, UnderlineCommand)):
+            rect = command.rect
+            left, top = self._point((rect.x, rect.y))
+            right, bottom = self._point((rect.x + rect.w, rect.y + rect.h))
+            return QPointF(
+                self.geometry().x() + (left + right) / 2 - 20,
+                self.geometry().y() + (top + bottom) / 2 + 20,
+            )
+        point = command.end if isinstance(command, ArrowCommand) else (
+            command.rect.center if isinstance(command, PointCommand) else None
+        )
+        if point is None:
+            return None
+        x, y = self._point(point)
+        return QPointF(self.geometry().x() + x, self.geometry().y() + y)
+
+    def _start_cursor_flight(self, target: QPointF, now: float, hold_until: float) -> None:
+        if not self._cursor_enabled:
+            return
+        self._cursor_target = QPointF(target)
+        self._cursor_flight = (QPointF(self._cursor_position), QPointF(target), now)
+        self._cursor_hold_until = hold_until
+        self._ensure_timer()
+
+    def set_mouse_position(self, x: float, y: float, physical: bool = True) -> None:
+        if physical:
+            mapped = self._global_physical_to_logical(x, y)
+            if mapped is not None:
+                x, y = mapped[:2]
+        self._mouse_position = QPointF(x, y)
+        if not self._cursor_enabled and self._bubble is None:
+            return
+        if time.monotonic() >= self._cursor_hold_until:
+            self._cursor_target = self._mouse_position + QPointF(18, 14)
+        self._ensure_timer()
+
+    def show_bubble(
+        self,
+        text: str,
+        choices: list[str] | None = None,
+        on_choice: Callable[[str | None], None] | None = None,
+        ttl: float = 8.0,
+    ) -> None:
+        self.dismiss_bubble()
+        bubble = _SuggestionBubble(self, text, choices, on_choice, ttl)
+        self._bubble = bubble
+        self._bubble_choice = on_choice
+        self._position_bubble()
+        final_geometry = bubble.geometry()
+        bubble.setGeometry(final_geometry.adjusted(0, 5, 0, 5))
+        bubble.show()
+        bubble.raise_()
+        bubble._fade.start()
+        bubble._rise = QPropertyAnimation(bubble, b"geometry", bubble)
+        bubble._rise.setDuration(180)
+        bubble._rise.setStartValue(bubble.geometry())
+        bubble._rise.setEndValue(final_geometry)
+        bubble._rise.start()
+        self._ensure_timer()
+
+    def dismiss_bubble(self, choice: str | None = None) -> None:
+        bubble = self._bubble
+        if bubble is None:
+            return
+        callback = self._bubble_choice
+        self._bubble = None
+        self._bubble_choice = None
+        bubble._ttl.stop()
+        bubble.close()
+        if callback is not None:
+            callback(choice)
+
+    def has_bubble(self) -> bool:
+        return self._bubble is not None
+
+    def _position_bubble(self) -> None:
+        bubble = self._bubble
+        if bubble is None:
+            return
+        cursor = self._cursor_position
+        screen = QApplication.screenAt(QPoint(round(cursor.x()), round(cursor.y()))) or QApplication.primaryScreen()
+        area = screen.availableGeometry() if screen else self.geometry()
+        x = round(cursor.x() - bubble.width() / 2)
+        y = round(cursor.y() - bubble.height() - 10)
+        x = min(max(area.left(), x), area.right() - bubble.width())
+        if y < area.top():
+            y = min(area.bottom() - bubble.height(), round(cursor.y() + 20))
+            bubble.tail_up = True
+        else:
+            bubble.tail_up = False
+        bubble.move(x, y)
+        bubble.tail_x = min(0.9, max(0.1, (cursor.x() - x) / max(1, bubble.width())))
+        bubble.update()
 
     def set_marks_visible(self, visible: bool) -> None:
         self._marks_visible = visible
@@ -678,7 +914,10 @@ class OverlayWindow(QWidget):
         return self._confirmation is not None
 
     def clear(self) -> None:
+        self.dismiss_bubble()
         self._marks.clear()
+        self._diagrams.clear()
+        self._start_cursor_flight(self._mouse_position + QPointF(18, 14), time.monotonic(), 0.0)
         self._status = "idle"
         self._status_visible = False
         self._status_changed = time.monotonic()
@@ -691,6 +930,34 @@ class OverlayWindow(QWidget):
     def _tick(self) -> None:
         now = time.monotonic()
         self._marks = [mark for mark in self._marks if now - mark.created < mark.ttl]
+        self._diagrams = [item for item in self._diagrams if now - item["created"] < item["ttl"]]
+        cursor_animating = False
+        track_pointer = self._cursor_enabled or self._bubble is not None
+        if track_pointer and self._cursor_hold_until and now >= self._cursor_hold_until:
+            self._start_cursor_flight(self._mouse_position + QPointF(18, 14), now, 0.0)
+        if not track_pointer:
+            self._cursor_flight = None
+        elif self._cursor_flight is not None:
+            start, end, started = self._cursor_flight
+            progress = min(1.0, max(0.0, (now - started) / 0.35))
+            eased = 1 - (1 - progress) ** 3
+            self._cursor_position = start + (end - start) * eased
+            cursor_animating = progress < 1.0
+            if progress >= 1.0:
+                self._cursor_position = end
+                self._cursor_flight = None
+                if not self._cursor_hold_until:
+                    self._cursor_target = self._mouse_position + QPointF(18, 14)
+        elif now < self._cursor_hold_until:
+            self._cursor_position = QPointF(self._cursor_target)
+        else:
+            target = self._mouse_position + QPointF(18, 14)
+            delta = target - self._cursor_position
+            if math.hypot(delta.x(), delta.y()) > 0.5:
+                self._cursor_position += delta * 0.32
+                cursor_animating = True
+        if self._bubble is not None:
+            self._position_bubble()
         animating = (
             any(
                 now - mark.created < 0.32
@@ -699,9 +966,13 @@ class OverlayWindow(QWidget):
             )
             and not self._reduced_motion
         )
+        animating = animating or any(
+            now - item["created"] < len(item["command"].layout.nodes) * 0.09 + 0.2
+            for item in self._diagrams
+        )
         status_age = now - self._status_changed
         animating = animating or (
-            self._status in {"thinking"}
+            self._status in {"listening", "thinking"}
             or (
                 self._status not in {"idle", "offline"}
                 and status_age < (0.15 if self._reduced_motion else 0.2)
@@ -709,9 +980,10 @@ class OverlayWindow(QWidget):
             or (self._status == "idle" and status_age < 0.15)
         )
         caption_active = bool(self._caption) and now - self._caption_time < 6
+        animating = animating or (cursor_animating and not self._reduced_motion)
         if animating and self._timer.interval() != 16:
             self._timer.start(16)
-        elif self._marks or caption_active or self._status not in {"idle", "offline"}:
+        elif self._marks or self._diagrams or caption_active or self._status not in {"idle", "offline"}:
             if self._timer.interval() != 200:
                 self._timer.start(200)
         else:
@@ -835,8 +1107,54 @@ class OverlayWindow(QWidget):
                     self._paint_mark(painter, mark.command, progress, age, outline=True)
                 self._paint_mark(painter, mark.command, progress, age)
                 painter.restore()
+        for item in self._diagrams:
+            age = now - item["created"]
+            opacity = min(1.0, max(0.0, (item["ttl"] - age) / 1.2))
+            painter.save()
+            painter.setOpacity(opacity)
+            draw_diagram(
+                painter,
+                item["command"].layout,
+                item["x"] - self.geometry().x(),
+                item["y"] - self.geometry().y(),
+                item["scale"],
+                age,
+                self._font_family,
+            )
+            painter.restore()
         self._paint_status(painter, now)
+        if self._cursor_enabled:
+            self._paint_cursor(painter, now)
         painter.end()
+
+    def _paint_cursor(self, painter: QPainter, now: float) -> None:
+        position = QPointF(
+            self._cursor_position.x() - self.geometry().x(),
+            self._cursor_position.y() - self.geometry().y(),
+        )
+        painter.save()
+        pulse = self._status in {"listening", "thinking"}
+        if pulse:
+            phase = (now % 1.1) / 1.1
+            painter.setPen(QPen(QColor(10, 132, 255, round(90 * (1 - phase))), 1.4))
+            painter.setBrush(Qt.BrushStyle.NoBrush)
+            painter.drawEllipse(position, 9 + phase * 7, 9 + phase * 7)
+        path = QPainterPath()
+        path.moveTo(position)
+        path.lineTo(position.x() + 2, position.y() + 14)
+        path.lineTo(position.x() + 5, position.y() + 10)
+        path.lineTo(position.x() + 10, position.y() + 16)
+        path.lineTo(position.x() + 13, position.y() + 14)
+        path.lineTo(position.x() + 8, position.y() + 8)
+        path.lineTo(position.x() + 14, position.y() + 8)
+        path.closeSubpath()
+        painter.setPen(QPen(QColor(0, 0, 0, 55), 2.5, Qt.PenStyle.SolidLine, Qt.PenCapStyle.RoundCap, Qt.PenJoinStyle.RoundJoin))
+        painter.setBrush(QColor(0, 0, 0, 24))
+        painter.drawPath(path.translated(1.5, 2))
+        painter.setPen(QPen(QColor("white"), 1.5, Qt.PenStyle.SolidLine, Qt.PenCapStyle.RoundCap, Qt.PenJoinStyle.RoundJoin))
+        painter.setBrush(QColor("#0A84FF"))
+        painter.drawPath(path)
+        painter.restore()
 
     def _paint_mark(
         self,

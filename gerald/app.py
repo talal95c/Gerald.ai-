@@ -235,6 +235,7 @@ def main() -> int:
         QVBoxLayout,
     )
     from pynput import keyboard
+    from pynput import mouse as pynput_mouse
 
     from gerald.audio.mic import Microphone
     from gerald.board import BoardWindow
@@ -247,9 +248,11 @@ def main() -> int:
         save_moondream_cloud_settings,
         set_runtime_grounder_backend,
     )
-    from gerald.perception.elements import collect_elements_detailed, serialize_context
+    from gerald.perception.elements import active_window_context, collect_elements_detailed, serialize_context
     from gerald.library import Indexer, OpenAIEmbedder, Store
     from gerald.library.context import course_search_results, profile_block
+    from gerald.proactive import ProactiveWatcher, Suggestion
+    from gerald.tools.registry import TipCommand
     try:
         from gerald.home import open_home
     except ImportError:
@@ -282,9 +285,15 @@ def main() -> int:
         output_level = pyqtSignal(float)
         audio_unavailable = pyqtSignal()
         action_marks_visible = pyqtSignal(object)
+        mouse_moved = pyqtSignal(float, float)
+
+        @pyqtSlot(float, float)
+        def update_mouse_position(self, x: float, y: float) -> None:
+            overlay.set_mouse_position(x, y, physical=True)
 
     bridge = Bridge()
-    overlay = OverlayWindow()
+    overlay = OverlayWindow(settings.cursor_enabled)
+    bridge.mouse_moved.connect(bridge.update_mouse_position)
     board = BoardWindow()
     overlay.show()
 
@@ -761,6 +770,64 @@ def main() -> int:
         overlay.show()
         overlay.set_status("idle" if audio_capability["available"] else "error")
 
+    def accept_suggestion(suggestion: Suggestion) -> None:
+        question = (
+            f"(Suggestion acceptée) L'utilisateur a cliqué Oui à ta proposition "
+            f"« {suggestion.question} » dans {suggestion.app} — « {suggestion.title} ». "
+            "Explique-lui ce qu'il y a d'important à l'écran pour lui, en lien avec ses cours si c'est pertinent."
+        )
+        if not app_state["connected"] or app_state["active"] or app_state["response_active"]:
+            return
+        with audio_buffer_lock:
+            app_state.update(
+                active=True,
+                started=time.monotonic(),
+                audio_sent_bytes=0,
+                released=False,
+                typed=True,
+                pending_audio=[],
+                realtime_turn_started=True,
+            )
+        schedule(client.start_turn())
+        client.record_user_message(question)
+        overlay.set_status("thinking" if audio_capability["available"] else "error")
+        begin_capture(True, question)
+        app_state["released"] = True
+        await_capture_after_release()
+
+    def on_suggestion(suggestion: Suggestion) -> None:
+        def choice(value: str | None) -> None:
+            watcher.resolve(suggestion, value)
+            if value == "Oui":
+                accept_suggestion(suggestion)
+
+        overlay.show_bubble(suggestion.question, ["Oui", "Non"], choice, ttl=10)
+
+    def proactive_busy() -> bool:
+        return (
+            not app_state["connected"]
+            or app_state["active"]
+            or app_state["response_active"]
+            or bool(app_state["pressed"])
+            or overlay.has_bubble()
+            or overlay.has_confirmation()
+            or board.isVisible()
+        )
+
+    watcher = ProactiveWatcher(
+        active_window_context,
+        time.monotonic,
+        proactive_busy,
+        on_suggestion,
+        store=store,
+        enabled=settings.proactive_enabled and bool(settings.api_key),
+        threaded_probe=True,
+    )
+    proactive_timer = QTimer(app)
+    proactive_timer.timeout.connect(watcher.poll)
+    proactive_timer.start(1000)
+    app.aboutToQuit.connect(watcher.close)
+
     def open_lesson_recap() -> None:
         if app_state["recap_pending"]:
             return
@@ -914,10 +981,15 @@ def main() -> int:
 
         @pyqtSlot(list)
         def commands(self, commands) -> None:
-            if board.isVisible():
-                board.add_commands(commands)
-            else:
-                overlay.add_commands(commands)
+            tips = [command for command in commands if isinstance(command, TipCommand)]
+            drawing = [command for command in commands if not isinstance(command, TipCommand)]
+            if tips:
+                overlay.add_commands(tips)
+            if drawing:
+                if board.isVisible():
+                    board.add_commands(drawing)
+                else:
+                    overlay.add_commands(drawing)
 
         @pyqtSlot(object)
         def action_marks_visible(self, request) -> None:
@@ -1003,6 +1075,10 @@ def main() -> int:
         home_action.triggered.connect(open_home_window)
     text_action = menu.addAction("Poser une question…")
     text_action.triggered.connect(open_typed_question)
+    proactive_action = menu.addAction("Suggestions proactives")
+    proactive_action.setCheckable(True)
+    proactive_action.setChecked(watcher.enabled)
+    proactive_action.toggled.connect(lambda enabled: setattr(watcher, "enabled", enabled))
     recap_action = menu.addAction("Récap de la leçon")
     recap_action.triggered.connect(open_lesson_recap)
     board_action = menu.addAction("Tableau")
@@ -1032,6 +1108,14 @@ def main() -> int:
 
     listener = keyboard.Listener(on_press=on_press, on_release=on_release)
     listener.start()
+    mouse_listener = pynput_mouse.Listener(
+        on_move=lambda x, y: bridge.mouse_moved.emit(x, y)
+    )
+    try:
+        mouse_listener.start()
+        app.aboutToQuit.connect(mouse_listener.stop)
+    except Exception:
+        logger.exception("Global mouse listener unavailable; Gerald cursor cannot follow the pointer")
 
     cleanup_done = {"value": False}
 
@@ -1040,6 +1124,7 @@ def main() -> int:
             return
         cleanup_done["value"] = True
         listener.stop()
+        mouse_listener.stop()
         mic.stop()
         capture_executor.shutdown(wait=False, cancel_futures=True)
         indexer.close()
