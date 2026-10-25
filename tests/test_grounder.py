@@ -146,3 +146,83 @@ def test_grounder_result_prefers_containing_element(monkeypatch):
     )
 
     assert result == GroundingResolution(ScreenRect(110, 64, 40, 30), "grounder")
+
+
+def test_text_match_does_not_call_grounder(monkeypatch):
+    capture = capture_from_image(
+        Image.new("RGB", (240, 160), "white"),
+        MonitorRect(0, 0, 240, 160),
+    )
+    element = Element(0, "text", "Search Wikipedia", (20, 10, 80, 18), "ocr")
+    calls = []
+
+    class FakeGrounder:
+        def locate(self, _image, _description):
+            calls.append(True)
+            return None
+
+    monkeypatch.setattr(grounder_module, "configured_grounder", lambda: FakeGrounder())
+
+    result = resolve_target(
+        {"text": "Search Wikipedia", "description": "search input"},
+        capture,
+        [element],
+        with_details=True,
+    )
+
+    assert result == GroundingResolution(ScreenRect(20, 10, 80, 18), "text")
+    assert calls == []
+
+
+def test_unmatched_text_uses_description_grounder(monkeypatch):
+    capture = capture_from_image(
+        Image.new("RGB", (240, 160), "white"),
+        MonitorRect(0, 0, 240, 160),
+    )
+    descriptions = []
+
+    class FakeGrounder:
+        def locate(self, _image, description):
+            descriptions.append(description)
+            return 120, 80
+
+    monkeypatch.setattr(grounder_module, "configured_grounder", lambda: FakeGrounder())
+
+    result = resolve_target(
+        {"text": "Mic", "description": "microphone icon"},
+        capture,
+        [],
+        with_details=True,
+    )
+
+    assert isinstance(result, GroundingResolution)
+    assert result.layer == "grounder"
+    assert descriptions == ["microphone icon"]
+
+
+def test_grounder_uses_full_image_and_scales_point_to_capture_image(monkeypatch):
+    capture = capture_from_image(
+        Image.new("RGB", (400, 200), "white"),
+        MonitorRect(10, 20, 400, 200),
+        max_width=200,
+    )
+    element = Element(0, "button", "Target", (145, 45, 20, 10), "uia")
+    seen_sizes = []
+
+    class FakeGrounder:
+        def locate(self, image, _description):
+            seen_sizes.append(image.size)
+            return 300, 100
+
+    monkeypatch.setattr(grounder_module, "configured_grounder", lambda: FakeGrounder())
+
+    result = resolve_target(
+        {"description": "target button"},
+        capture,
+        [element],
+        np.asarray(capture.image),
+        with_details=True,
+    )
+
+    assert result == GroundingResolution(ScreenRect(300, 110, 40, 20), "grounder")
+    assert seen_sizes == [(400, 200)]

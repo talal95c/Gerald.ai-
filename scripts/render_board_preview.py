@@ -43,6 +43,7 @@ def main() -> int:
     )
     for _ in range(30):
         board._advance_reveals()
+    board.show()
     app.processEvents()
 
     image = QImage(board.size(), QImage.Format.Format_ARGB32)

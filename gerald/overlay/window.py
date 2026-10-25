@@ -311,6 +311,7 @@ class _ConfirmationPill(QWidget):
         self.owner = owner
         self.finish = finish
         self.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground, True)
+        self.setAutoFillBackground(False)
         self.setAttribute(Qt.WidgetAttribute.WA_ShowWithoutActivating, True)
         layout = QHBoxLayout(self)
         layout.setContentsMargins(16, 10, 16, 10)
@@ -348,8 +349,17 @@ class _ConfirmationPill(QWidget):
         del event
         painter = QPainter(self)
         painter.setRenderHint(QPainter.RenderHint.Antialiasing)
+        painter.setCompositionMode(QPainter.CompositionMode.CompositionMode_Source)
+        painter.fillRect(self.rect(), QColor(0, 0, 0, 0))
+        painter.setCompositionMode(QPainter.CompositionMode.CompositionMode_SourceOver)
         dark = self.owner._dark_for_global_logical(self.frameGeometry().center())
-        self.owner._draw_glass_card(painter, QRectF(self.rect()), self.height() / 2, dark)
+        card = QRectF(self.rect()).adjusted(0.5, 0.5, -0.5, -0.5)
+        path = QPainterPath()
+        path.addRoundedRect(card, self.height() / 2, self.height() / 2)
+        painter.save()
+        painter.setClipPath(path)
+        self.owner._draw_glass_card(painter, card, self.height() / 2, dark)
+        painter.restore()
         _fill, label, _hairline = self.owner._palette_colors(dark)
         self.label.setStyleSheet(
             f"QLabel {{ background: transparent; color: {label.name()}; }}"

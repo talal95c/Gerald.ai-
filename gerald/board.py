@@ -97,6 +97,7 @@ class BoardWindow(QWidget):
             button = QPushButton(name, self._toolbar)
             button.clicked.connect(callback)
             toolbar.addWidget(button)
+        self._position_toolbar()
 
     def open_on_screen(self, screen, dark: bool | None = None) -> None:
         if dark is None:
@@ -106,13 +107,25 @@ class BoardWindow(QWidget):
             dark = QApplication.palette().color(QPalette.ColorRole.Window).lightness() < 128
         self._dark = dark
         self.setGeometry(screen.geometry())
-        self._toolbar.adjustSize()
-        self._toolbar.move((self.width() - self._toolbar.width()) // 2, 20)
+        self._position_toolbar()
         self.show()
         self.raise_()
         self.activateWindow()
         self.setFocus()
         self.update()
+
+    def resizeEvent(self, event) -> None:
+        super().resizeEvent(event)
+        self._position_toolbar()
+
+    def _position_toolbar(self) -> None:
+        if not hasattr(self, "_toolbar"):
+            return
+        self._toolbar.adjustSize()
+        x = max(0, (self.width() - self._toolbar.width()) // 2)
+        y = min(20, max(0, self.height() - self._toolbar.height()))
+        self._toolbar.move(x, y)
+        self._toolbar.show()
 
     def set_tool(self, tool: str) -> None:
         self._tool = tool

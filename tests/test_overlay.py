@@ -105,6 +105,7 @@ def test_confirmation_pill_renders_and_declines_without_accepting_focus():
     assert pill is not None
     assert pill.windowFlags() & Qt.WindowType.WindowDoesNotAcceptFocus
     assert not pill.windowFlags() & Qt.WindowType.WindowTransparentForInput
+    assert pill.testAttribute(Qt.WidgetAttribute.WA_TranslucentBackground)
     assert pill.label.font().pointSize() == 13
     assert pill.height() >= 32
     assert all(button.minimumHeight() >= 24 for button, _approved in pill.buttons)
@@ -113,7 +114,9 @@ def test_confirmation_pill_renders_and_declines_without_accepting_focus():
     painter = QPainter(image)
     pill.render(painter)
     painter.end()
-    assert image.pixelColor(12, 12).alpha() > 0
+    assert image.pixelColor(0, 0).alpha() == 0
+    assert image.pixelColor(image.width() - 1, image.height() - 1).alpha() == 0
+    assert image.pixelColor(image.width() // 2, image.height() // 2).alpha() > 0
 
     assert overlay.dismiss_confirmation()
     assert completion.is_set()

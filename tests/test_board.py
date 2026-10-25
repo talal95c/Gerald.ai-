@@ -5,7 +5,7 @@ os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
 from PyQt6.QtCore import Qt
 from PyQt6.QtTest import QTest
-from PyQt6.QtWidgets import QApplication
+from PyQt6.QtWidgets import QApplication, QPushButton
 
 from gerald.board import BoardWindow, group_strokes
 
@@ -78,3 +78,25 @@ def test_escape_closes_board():
 
     assert not board.isVisible()
     board.close()
+
+
+def test_toolbar_is_visible_and_centered_at_top():
+    app = QApplication.instance() or QApplication([])
+    board = BoardWindow()
+    board.resize(640, 480)
+    board.show()
+    app.processEvents()
+
+    toolbar = board._toolbar
+    assert toolbar.isVisible()
+    assert toolbar.y() == 20
+    assert toolbar.x() == (board.width() - toolbar.width()) // 2
+    assert [button.text() for button in toolbar.findChildren(QPushButton)] == [
+        "Pen",
+        "Eraser",
+        "Undo",
+        "Clear",
+        "Close",
+    ]
+    board.close()
+    app.processEvents()
