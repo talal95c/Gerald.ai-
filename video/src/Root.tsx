@@ -17,7 +17,7 @@ export const RemotionRoot: React.FC = () => {
         height={1080}
         defaultProps={{
           music: "motivating-mornings.mp3",
-          musicVolume: 0.16,
+          musicVolume: 0.3,
           voiceOver: true,
           footage: { board: null, photoshop: null, td: null },
         }}

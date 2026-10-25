@@ -30,16 +30,22 @@ export const sceneStart = (id: keyof typeof MIN) => {
   return acc;
 };
 
-const Music: React.FC<{ src: string; volume: number }> = ({ src, volume }) => {
+/** Background music, ducked (×0.45) while a voice-over line is playing, full in the gaps. */
+const Music: React.FC<{ src: string; volume: number; voiceOver: boolean }> = ({ src, volume, voiceOver }) => {
   const frame = useCurrentFrame();
   const { fps, durationInFrames } = useVideoConfig();
-  const meet = sceneStart("meet") * fps;
-  return (
-    <Audio
-      src={staticFile(`audio/${src}`)}
-      volume={interpolate(frame, [0, 1 * fps, meet - 10, meet, durationInFrames - 2.5 * fps, durationInFrames], [0, volume * 0.75, volume * 0.75, volume, volume, 0], { extrapolateLeft: "clamp", extrapolateRight: "clamp" })}
-    />
-  );
+  const t = frame / fps;
+  let duck = 1;
+  if (voiceOver) {
+    for (const sc of SCENES) {
+      const a = sceneStart(sc.id) + 0.35;
+      const b = a + VO[sc.id].dur;
+      const d = interpolate(t, [a - 0.4, a, b, b + 0.6], [1, 0.45, 0.45, 1], { extrapolateLeft: "clamp", extrapolateRight: "clamp" });
+      duck = Math.min(duck, d);
+    }
+  }
+  const env = interpolate(frame, [0, 1 * fps, durationInFrames - 2.5 * fps, durationInFrames], [0, 1, 1, 0], { extrapolateLeft: "clamp", extrapolateRight: "clamp" });
+  return <Audio src={staticFile(`audio/${src}`)} volume={volume * duck * env} />;
 };
 
 const Voice: React.FC<{ id: keyof typeof MIN; at: number }> = ({ id, at }) => {
@@ -59,7 +65,7 @@ export const Launch: React.FC<LaunchProps> = ({ music, musicVolume, voiceOver, f
   const dur = (id: keyof typeof MIN) => SCENES.find((s) => s.id === id)!.s;
   return (
     <>
-      <Music src={music} volume={musicVolume} />
+      <Music src={music} volume={musicVolume} voiceOver={voiceOver} />
       {voiceOver && SCENES.map((s) => <Voice key={s.id} id={s.id} at={sceneStart(s.id) + 0.35} />)}
       <Sfx at={sceneStart("meet")} src="https://remotion.media/whoosh.wav" volume={0.5} />
       <Sfx at={sceneStart("board") + 4.7} src="https://remotion.media/mouse-click.wav" />
