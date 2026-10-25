@@ -49,6 +49,8 @@ class Bridge(QObject):
     focusRequested = pyqtSignal(bool)
     sessionOpenChanged = pyqtSignal(bool)
     recapReady = pyqtSignal(str)
+    agentStatus = pyqtSignal(str)
+    tdRequested = pyqtSignal()
 
     def __init__(
         self, store, indexer, settings, *, ask_fn=None, open_board=None, end_session=None, on_library_changed=None
@@ -63,6 +65,7 @@ class Bridge(QObject):
         self.on_library_changed = on_library_changed
         self.mode = "greeting"
         self._session_open = False
+        self._last_exercise: tuple[str, list[str]] | None = None
         self._recap_requested_at: float | None = None
         self._recap_dir = Path.home() / "Gerald" / "lessons"
         self._fallback_board = None
@@ -80,6 +83,7 @@ class Bridge(QObject):
                 "filename": value(document, "filename", ""),
                 "status": value(document, "status", "ready"),
                 "error": value(document, "error"),
+                "folder": value(course, "title") or "Mes cours",
             }
             for course in self.store.list_courses()
             for document in self.store.list_documents(value(course, "id"))
@@ -103,6 +107,11 @@ class Bridge(QObject):
                 "conversations": conversations,
                 "session_open": self._session_open,
                 "recap_pending": self._recap_requested_at is not None,
+                "last_exercise": (
+                    {"title": self._last_exercise[0], "lines": self._last_exercise[1]}
+                    if self._last_exercise is not None
+                    else None
+                ),
             },
             ensure_ascii=False,
         )
@@ -149,6 +158,11 @@ class Bridge(QObject):
         threading.Thread(target=run, name="gerald-home-ask", daemon=True).start()
 
     @pyqtSlot(int, result=str)
+    def documentText(self, document_id: int) -> str:
+        reader = getattr(self.store, "document_text", None)
+        return reader(document_id) if reader else ""
+
+    @pyqtSlot(int, result=str)
     def messages(self, conversation_id: int) -> str:
         return json.dumps(
             [
@@ -187,6 +201,7 @@ class Bridge(QObject):
         if not isinstance(lines, list):
             lines = []
         lines = [str(line) for line in lines]
+        self._last_exercise = (title, lines)
         if self.open_board is not None:
             self.open_board(title, lines)
         else:
@@ -201,6 +216,10 @@ class Bridge(QObject):
         self._session_open = True
         self.sessionOpenChanged.emit(True)
         self.stateChanged.emit(self.state())
+
+    @pyqtSlot()
+    def openTd(self) -> None:
+        self.tdRequested.emit()
 
     @pyqtSlot()
     def endSession(self) -> None:
@@ -235,6 +254,9 @@ class Bridge(QObject):
     @pyqtSlot(bool)
     def requestFocus(self, requested: bool) -> None:
         self.focusRequested.emit(requested)
+
+    def set_agent_status(self, status: str) -> None:
+        self.agentStatus.emit(status)
 
     @pyqtSlot()
     def quit(self) -> None:

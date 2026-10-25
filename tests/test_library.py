@@ -462,3 +462,17 @@ def test_ask_persists_chat_messages_and_cited_sources(monkeypatch, tmp_path):
     ]
     assert result.sources == [source]
     store.close()
+
+
+def test_store_document_text_joins_chunks_in_order(tmp_path):
+    store = Store(tmp_path / "library")
+    course = store.create_course("Maths", "Maths")
+    document = store._create_document(course.id, "cours.md")
+    store.connection.executemany(
+        "INSERT INTO chunks (document_id, ord, text) VALUES (?, ?, ?)",
+        [(document.id, 1, "deux"), (document.id, 0, "un")],
+    )
+    store.connection.commit()
+
+    assert store.document_text(document.id) == "un\n\ndeux"
+    store.close()

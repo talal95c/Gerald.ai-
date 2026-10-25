@@ -1,0 +1,20 @@
+@import "./style.css";
+html,body,#root{margin:0;height:100%;overflow:hidden}
+.board{position:fixed;inset:0;background:#F7F6F3;background-image:radial-gradient(rgba(38,38,38,.13) 1px,transparent 1.2px);background-size:24px 24px;font-family:"Google Sans Flex",sans-serif;color:#262626}
+.board canvas{position:absolute;inset:0;width:100%;height:100%;touch-action:none;cursor:crosshair}.board canvas.eraser{cursor:cell}
+.ex-card{position:absolute;top:20px;right:20px;max-width:340px;padding:16px 18px;border-radius:16px;background:#fff;border:1px solid rgba(38,38,38,.08);box-shadow:0 10px 30px rgba(38,38,38,.08);animation:blur-reveal .42s both}
+.ex-label{display:flex;align-items:center;gap:8px;font:12px Abel,sans-serif;letter-spacing:.08em;color:#6D6D6D}.ex-label i,.plot-win .dot{width:7px;height:7px;border-radius:50%;background:#E8C547;display:inline-block}
+.ex-card p{margin:8px 0 0;font-size:17px;font-weight:500;letter-spacing:-.01em}
+.board-tools{position:absolute;left:50%;bottom:22px;transform:translateX(-50%);display:flex;align-items:center;gap:4px;padding:6px;border-radius:999px;background:#161616;box-shadow:0 12px 30px rgba(0,0,0,.22)}
+.board-tools button{width:44px;height:44px;border:0;border-radius:999px;background:transparent;display:grid;place-items:center;transition:background .15s,transform .15s}
+.board-tools button:hover{background:#262626}.board-tools button:active{transform:scale(.92)}.board-tools button.on{background:#F7F6F3}
+.board-tools svg{width:20px;height:20px;fill:none;stroke:#F7F6F3;stroke-width:1.5;stroke-linecap:round;stroke-linejoin:round}.board-tools button.on svg{stroke:#161616}
+.board-tools .sep{width:1px;height:22px;background:#333;margin:0 4px}.board-tools .close{width:auto;padding:0 16px;color:#F7F6F3;font:500 13px "Google Sans Flex",sans-serif}
+.plot-win{position:absolute;display:flex;flex-direction:column;background:#fff;border:1px solid rgba(38,38,38,.12);border-radius:14px;box-shadow:0 16px 40px rgba(38,38,38,.12);overflow:hidden;animation:blur-reveal .3s both;touch-action:none}
+.plot-win header{height:30px;flex:none;display:flex;align-items:center;gap:8px;padding:0 6px 0 12px;background:#F7F6F3;border-bottom:1px solid rgba(38,38,38,.08);font-size:12.5px;font-weight:500;cursor:move;user-select:none}
+.plot-win header span:nth-child(2){flex:1}.plot-win header button{width:24px;height:24px;border:0;border-radius:8px;background:transparent;color:#6D6D6D;font-size:16px;cursor:pointer}.plot-win header button:hover{background:#EEEEEE;color:#262626}
+.grip{position:absolute;right:0;bottom:0;width:30px;height:30px;cursor:nwse-resize}.grip i{position:absolute;right:5px;bottom:5px;height:1.5px;background:rgba(38,38,38,.35);transform-origin:right;transform:rotate(-45deg);border-radius:1px}.grip i:nth-child(1){width:14px}.grip i:nth-child(2){width:9px;bottom:9px;right:5px}.grip i:nth-child(3){width:4px;bottom:13px}
+.plot-svg{display:block}.plot-svg .grid{stroke:rgba(38,38,38,.07)}.plot-svg .axis{stroke:#262626;stroke-width:1.2}.plot-svg .tick{font-size:11px;fill:#6D6D6D}
+.plot-svg .curve{fill:none;stroke:#161616;stroke-width:2.4;stroke-linecap:round;stroke-dasharray:1;stroke-dashoffset:1;animation:draw 1s cubic-bezier(.4,0,.2,1) .1s forwards}
+.plot-svg .pt{opacity:0;animation:fade .25s forwards}.plot-svg .pt circle{fill:#E8C547;stroke:#161616;stroke-width:1.5}.plot-svg .pt-label{font-size:11.5px;font-weight:500;fill:#262626;paint-order:stroke;stroke:#fff;stroke-width:4px}
+@keyframes draw{to{stroke-dashoffset:0}}
