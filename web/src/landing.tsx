@@ -1,78 +1,89 @@
 /// <reference types="vite/client" />
-import React, { useEffect, useRef } from "react";
+import React, { useEffect, useRef, useState } from "react";
 import { createRoot } from "react-dom/client";
 import "./landing.css";
-import bg from "./assets/landing-bg.jpg";
 import { GeraldMark } from "./logo";
 
 const DEMO_HREF = "./td.html";
 const LIVE_HREF = "./td.html?voice=1";
+const WORD = "Gerald";
 
-const lines = ["Le prof qui", "voit ton écran", "et t’explique", "au tableau"];
-
-function Clip() {
-  return <svg className="clip" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" aria-hidden="true">
-    <path d="M8 12.5 13.6 6.9a3 3 0 0 1 4.2 4.2l-7.1 7.1a4.6 4.6 0 0 1-6.5-6.5L11 4.9"/>
-  </svg>;
+function Clock() {
+  const [now, setNow] = useState(() => new Date());
+  useEffect(() => { const id = setInterval(() => setNow(new Date()), 1000); return () => clearInterval(id); }, []);
+  return <time className="clock">{now.toLocaleTimeString("en-US")}</time>;
 }
 
-function Sticker({label, tone, icon, className}: {label: React.ReactNode; tone: string; icon: React.ReactNode; className: string}) {
-  return <div className={`sticker ${className}`} style={{"--tone": tone} as React.CSSProperties}>
-    <span className="sticker-icon">{icon}</span><Clip/>
-    <span className="sticker-label">{label}</span><i className="sticker-fold"/>
+function Ruler() {
+  return <div className="ruler" aria-hidden="true">
+    {Array.from({length: 40}, (_, i) => <span key={i} style={{left: i * 100}}>{i ? i * 100 : ""}</span>)}
   </div>;
 }
 
+function Arrow({color}: {color: string}) {
+  return <svg className="arrow" viewBox="0 0 32 32" aria-hidden="true"><path d="M3 3l26 10-11 3.5L13.5 29z" fill={color} stroke="#111212" strokeWidth="2" strokeLinejoin="round"/></svg>;
+}
+
+function Cursor({label, className, children}: {label: string; className: string; children: React.ReactNode}) {
+  return <div className={`peer ${className}`}><span className="peer-bubble">{children}</span><span className="peer-name">{label}</span></div>;
+}
+
 function Landing() {
-  const scene = useRef<HTMLDivElement>(null);
+  const you = useRef<HTMLDivElement>(null);
   useEffect(() => {
-    const el = scene.current;
+    const el = you.current;
     if (!el || matchMedia("(prefers-reduced-motion: reduce)").matches) return;
     let frame = 0;
-    const move = (event: PointerEvent) => {
+    const move = (e: PointerEvent) => {
       cancelAnimationFrame(frame);
       frame = requestAnimationFrame(() => {
-        el.style.setProperty("--mx", String(event.clientX / innerWidth - .5));
-        el.style.setProperty("--my", String(event.clientY / innerHeight - .5));
+        el.style.setProperty("--dx", `${(e.clientX / innerWidth - .5) * 40}px`);
+        el.style.setProperty("--dy", `${(e.clientY / innerHeight - .5) * 30}px`);
       });
     };
     addEventListener("pointermove", move);
     return () => { removeEventListener("pointermove", move); cancelAnimationFrame(frame); };
   }, []);
 
-  return <main className="hero" ref={scene}>
-    <div className="hero-bg" style={{backgroundImage: `url(${bg})`}}/>
-    <div className="hero-grain"/>
+  return <div className="page">
+    <header className="nav">
+      <a className="nav-logo" href="./landing.html" aria-label="Gerald"><GeraldMark size={16}/></a>
+      <span className="nav-sep"/>
+      <span className="nav-tab"><GeraldMark size={10}/>HOME</span>
+      <span className="nav-spacer"/>
+      <span className="kbd"><kbd>CTRL</kbd>+<kbd>SHIFT</kbd> to talk</span>
+      <a className="nav-cta" href={LIVE_HREF}><i className="live-dot"/>LEARN LIVE</a>
+    </header>
+    <Ruler/>
 
-    <header className="brand"><GeraldMark size={18}/><span>GERALD<sup>®</sup></span></header>
+    <main className="hero">
+      <Clock/>
+      <div className="stage">
+        <p className="hello">say hi to<svg viewBox="0 0 80 12" aria-hidden="true"><path d="M2 5c22-3 50-3 76-1M8 10c20-2 44-2 64-1" fill="none" stroke="#111212" strokeWidth="1.4" strokeLinecap="round"/></svg></p>
+        <span className="tag tag-green">Sees your screen</span>
+        <span className="tag tag-yellow">Explains at the board</span>
+        <h1 className="select" aria-label={WORD}>
+          {[...WORD].map((c, i) => <span key={i} className="glyph" style={{"--i": i} as React.CSSProperties}>{c}</span>)}
+          <i className="h tl"/><i className="h tr"/><i className="h bl"/><i className="h br"/>
+        </h1>
+        <p className="status"><i className="status-dot"/>YOUR AI TUTOR, READY WHEN YOU ARE</p>
+      </div>
 
-    <div className="glass status-card">
-      <span className="mini-orb" aria-hidden="true"/>
-      <div><p className="status-live"><i/>En ligne · voix en direct</p><p className="status-name">GERALD — TUTEUR À L’ÉCRAN</p></div>
-    </div>
+      <Cursor label="Gerald" className="peer-gerald"><span className="mini-orb"/></Cursor>
+      <div className="peer-you-wrap" ref={you}><Cursor label="You" className="peer-you"><GeraldMark size={12}/></Cursor></div>
 
-    <h1 className="headline" aria-label={lines.join(" ")}>
-      {lines.map((line, i) => <span key={line} className="headline-line" style={{"--i": i} as React.CSSProperties}>{line}</span>)}
-      <Sticker className="s1" tone="#8B5CF6" label="Voix en direct" icon={<svg viewBox="0 0 24 24" fill="none" stroke="#fff" strokeWidth="2" strokeLinecap="round"><rect x="9" y="3" width="6" height="11" rx="3"/><path d="M5 11a7 7 0 0 0 14 0M12 18v3"/></svg>}/>
-      <Sticker className="s2" tone="#E8C547" label={<>Δ = b² − 4ac</>} icon={<svg viewBox="0 0 24 24" fill="none" stroke="#161616" strokeWidth="2" strokeLinecap="round"><path d="M4 20 16 8M14 4l6 6M4 20l1.5-5L16 4.5"/></svg>}/>
-      <Sticker className="s3" tone="#3B82F6" label="Il te montre" icon={<svg viewBox="0 0 24 24" fill="#fff"><path d="M5 3l14 7-6 2-2 6z"/></svg>}/>
-    </h1>
+      <div className="pill pill-pink"><Arrow color="#E11D63"/><span>Δ = b² − 4ac</span></div>
+      <div className="pill pill-yellow"><span>MATH · PHYSICS · CS</span><Arrow color="#E8B425"/></div>
 
-    <p className="tagline"><span className="dash"/>Pas un chatbot.<br/>un prof qui t’aide<br/>pas à pas</p>
+      <p className="tagline">The tutor <span className="ico ico-ring"/> that draws<br/>on your screen <span className="ico ico-pen">✎</span>.</p>
 
-    <nav className="dock" aria-label="Commencer">
-      <a className="cta cta-demo" href={DEMO_HREF}><span className="cta-kicker">Tester</span><span className="cta-title">La démo</span></a>
-      <a className="cta cta-live" href={LIVE_HREF}><span className="cta-kicker"><i className="live-dot"/>Session live</span><span className="cta-title">Apprendre</span></a>
-    </nav>
-
-    <a className="cards" href={DEMO_HREF}>
-      <span className="glass card c3"/><span className="glass card c2"/>
-      <span className="glass card c1">
-        <span className="card-thumb"><b>x² − 5x + 6</b><em>= 0</em></span>
-        <span className="card-body"><span className="card-meta"><span>TD 4</span><span>2026</span></span><span className="card-title">POLYNÔMES</span><span className="card-link">OUVRIR LA DÉMO <span>→</span></span></span>
-      </span>
-    </a>
-  </main>;
+      <nav className="ctas" aria-label="Get started">
+        <a className="cta" href={DEMO_HREF}><span className="cta-ico cta-ico-blue">»</span>TRY THE DEMO</a>
+        <a className="cta cta-live" href={LIVE_HREF}><span className="cta-ico cta-ico-violet"><i className="live-dot"/></span>LEARN LIVE</a>
+      </nav>
+    </main>
+    <span className="corner-chip">BETA · VOICE</span>
+  </div>;
 }
 
 createRoot(document.getElementById("root")!).render(<Landing/>);
