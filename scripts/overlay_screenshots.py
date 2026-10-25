@@ -7,8 +7,8 @@ from pathlib import Path
 
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
-from PyQt6.QtCore import QSize
-from PyQt6.QtGui import QColor, QCursor, QImage, QPainter
+from PyQt6.QtCore import QPointF, QSize
+from PyQt6.QtGui import QColor, QImage, QPainter
 from PyQt6.QtWidgets import QApplication
 
 from gerald.overlay.window import OverlayWindow
@@ -41,7 +41,9 @@ def _create_previews(app: QApplication, base: QImage) -> None:
     overlay = OverlayWindow()
     overlay.setGeometry(0, 0, SIZE.width(), SIZE.height())
     overlay._dark_for_physical = lambda _x, _y: False
-    QCursor.setPos(260, 200)
+    overlay._cursor_poll_timer.stop()
+    overlay.set_mouse_position(260, 200, physical=False)
+    overlay._cursor_position = QPointF(278, 214)
     captions = {
         "listening": "Je t’écoute. Dis-moi ce que tu cherches.",
         "thinking": "Je parcours tes documents…",
@@ -52,7 +54,6 @@ def _create_previews(app: QApplication, base: QImage) -> None:
         overlay.set_caption(caption)
         overlay._status_changed = time.monotonic() - 0.5
         overlay._morph_started = time.monotonic() - 0.5
-        overlay._update_cursor_companion(time.monotonic())
         app.processEvents()
         output = ROOT / "docs" / f"overlay-{status}.png"
         if not _render_frame(base, overlay).save(str(output)):
@@ -66,7 +67,9 @@ def _create_video(app: QApplication, base: QImage) -> None:
     overlay = OverlayWindow()
     overlay.setGeometry(0, 0, SIZE.width(), SIZE.height())
     overlay._dark_for_physical = lambda _x, _y: False
-    QCursor.setPos(520, 230)
+    overlay._cursor_poll_timer.stop()
+    overlay.set_mouse_position(520, 230, physical=False)
+    overlay._cursor_position = QPointF(538, 244)
     overlay.show()
     segments = (
         ("listening", "Je t’écoute.", 1.8),

@@ -16,10 +16,12 @@ from PyQt6.QtGui import (
     QFont,
     QFontDatabase,
     QFontMetrics,
+    QLinearGradient,
     QPainter,
     QPainterPath,
     QPalette,
     QPen,
+    QRadialGradient,
 )
 from PyQt6.QtWidgets import (
     QApplication,
@@ -32,7 +34,10 @@ from PyQt6.QtWidgets import (
 )
 
 from gerald.capture.screen import Capture
+from gerald.overlay import agent_visuals
 from gerald.perception.grounding import ScreenRect
+from gerald.tools.diagram import DiagramCommand
+from gerald.tools.diagram_render import draw_diagram
 from gerald.tools.registry import (
     ArrowCommand,
     CircleCommand,
@@ -44,13 +49,11 @@ from gerald.tools.registry import (
     TipCommand,
     UnderlineCommand,
 )
-from gerald.tools.diagram import DiagramCommand
-from gerald.tools.diagram_render import draw_diagram
 
 
 def _accent_color() -> QColor:
-    color = QColor(os.environ.get("GERALD_ACCENT", "#FF9F0A"))
-    return color if color.isValid() else QColor("#FF9F0A")
+    color = QColor(os.environ.get("GERALD_ACCENT", "#7B6CFF"))
+    return color if color.isValid() else QColor("#7B6CFF")
 
 
 def _reduced_motion() -> bool:
@@ -445,6 +448,7 @@ class _SuggestionBubble(QWidget):
         self.label.setFont(label_font)
         self.label.setWordWrap(True)
         self.label.setMaximumWidth(292)
+        self.label.setStyleSheet("QLabel { background: transparent; color: #0F0F0F; }")
         layout.addWidget(self.label)
         self.buttons: list[QPushButton] = []
         if choices:
@@ -458,11 +462,14 @@ class _SuggestionBubble(QWidget):
                 button_font.setWeight(QFont.Weight.Medium)
                 button.setFont(button_font)
                 button.setStyleSheet(
-                    "QPushButton { color: white; background: #0A84FF; border: none; "
+                    "QPushButton { color: white; background: #0F0F0F; border: 1px solid #0F0F0F; "
                     "border-radius: 15px; padding: 0 14px; }"
+                    "QPushButton:hover { background: #292929; border-color: #292929; }"
                     if index == 0
-                    else "QPushButton { color: #0A84FF; background: transparent; border: none; "
-                    "border-radius: 15px; padding: 0 14px; }"
+                    else "QPushButton { color: #0F0F0F; background: rgba(255,255,255,0.52); "
+                    "border: 1px solid rgba(15,15,15,0.08); border-radius: 15px; padding: 0 14px; }"
+                    "QPushButton:hover { background: rgba(15,15,15,0.06); "
+                    "border-color: rgba(15,15,15,0.14); }"
                 )
                 button.clicked.connect(lambda _checked=False, value=choice: owner.dismiss_bubble(value))
                 row.addWidget(button)
@@ -485,15 +492,17 @@ class _SuggestionBubble(QWidget):
         painter = QPainter(self)
         painter.setRenderHint(QPainter.RenderHint.Antialiasing)
         card = QRectF(self.rect()).adjusted(2, 2, -2, -9)
-        for outset, alpha in ((10, 3), (8, 4), (6, 5), (4, 6), (2, 7)):
-            shadow = card.translated(0, 3).adjusted(-outset, -outset, outset, outset)
-            painter.setPen(Qt.PenStyle.NoPen)
-            painter.setBrush(QColor(0, 0, 0, alpha))
-            painter.drawRoundedRect(shadow, 14 + outset, 14 + outset)
+        hairline = QColor(15, 15, 15, 20)
+        painter.setBrush(Qt.BrushStyle.NoBrush)
+        painter.setPen(QPen(QColor(15, 15, 15, 22), 7))
+        painter.drawRoundedRect(card.translated(0, 2), 18, 18)
         fill = QColor(255, 255, 255, 250)
         painter.setPen(Qt.PenStyle.NoPen)
         painter.setBrush(fill)
-        painter.drawRoundedRect(card, 14, 14)
+        painter.drawRoundedRect(card, 16, 16)
+        painter.setBrush(Qt.BrushStyle.NoBrush)
+        painter.setPen(QPen(hairline, 1))
+        painter.drawRoundedRect(card.adjusted(0.5, 0.5, -0.5, -0.5), 16, 16)
         path = QPainterPath()
         center = self.width() * self.tail_x
         if self.tail_up:
@@ -507,6 +516,18 @@ class _SuggestionBubble(QWidget):
         painter.setPen(Qt.PenStyle.NoPen)
         painter.setBrush(fill)
         painter.drawPath(path)
+        tail_edge = QPainterPath()
+        if self.tail_up:
+            tail_edge.moveTo(center - 7, 9)
+            tail_edge.lineTo(center, 0)
+            tail_edge.lineTo(center + 7, 9)
+        else:
+            tail_edge.moveTo(center - 7, self.height() - 18)
+            tail_edge.lineTo(center, self.height() - 2)
+            tail_edge.lineTo(center + 7, self.height() - 18)
+        painter.setBrush(Qt.BrushStyle.NoBrush)
+        painter.setPen(QPen(hairline, 1, Qt.PenStyle.SolidLine, Qt.PenCapStyle.RoundCap))
+        painter.drawPath(tail_edge)
         painter.end()
 
 
@@ -532,6 +553,9 @@ class OverlayWindow(QWidget):
         self._status_visible = False
         self._status_message = ""
         self._status_changed = time.monotonic()
+        self._morph_from_shape = agent_visuals.shape_for_status("idle")
+        self._morph_to_shape = self._morph_from_shape
+        self._morph_started = self._status_changed
         self._caption = ""
         self._caption_time = 0.0
         self._mic_level = 0.0
@@ -614,8 +638,14 @@ class OverlayWindow(QWidget):
         ):
             self._timed_error_timer.stop()
             self._timed_error_message = None
+        now = time.monotonic()
         if status != self._status:
-            self._status_changed = time.monotonic()
+            self._status_changed = now
+            self._morph_from_shape = self._morph_to_shape
+            self._morph_to_shape = agent_visuals.shape_for_status(status)
+            self._morph_started = now
+            if self._reduced_motion:
+                self._morph_from_shape = self._morph_to_shape
         if status != "idle" or self._status != "idle":
             self._status_visible = True
         self._status = status
@@ -993,6 +1023,9 @@ class OverlayWindow(QWidget):
         self._status = "idle"
         self._status_visible = False
         self._status_changed = time.monotonic()
+        self._morph_from_shape = agent_visuals.shape_for_status("idle")
+        self._morph_to_shape = self._morph_from_shape
+        self._morph_started = self._status_changed
         self.update()
 
     def _ensure_timer(self) -> None:
@@ -1066,6 +1099,11 @@ class OverlayWindow(QWidget):
             )
             or (self._status == "idle" and status_age < 0.15)
         )
+        visual_animating = visual_animating or (
+            not self._reduced_motion
+            and self._morph_from_shape != self._morph_to_shape
+            and now - self._morph_started < 0.45
+        )
         caption_active = bool(self._caption) and now - self._caption_time < 6
         visual_animating = visual_animating or caption_active
         animating = visual_animating or (cursor_animating and not self._reduced_motion)
@@ -1088,6 +1126,22 @@ class OverlayWindow(QWidget):
                 self._cursor_update_rect(self._cursor_position)
             )
             self.update(region)
+
+    def _morph_progress(self, now: float) -> float:
+        if self._reduced_motion:
+            return 1.0
+        amount = max(0.0, min(1.0, (now - self._morph_started) / 0.45))
+        return amount * amount * (3 - 2 * amount)
+
+    def _orb_rect(self) -> QRectF:
+        area = self._local_available_geometry()
+        size = 72.0
+        return QRectF(
+            area.center().x() - size / 2,
+            area.bottom() - 24 - size,
+            size,
+            size,
+        )
 
     def _screen_mappings(self) -> list[_ScreenMapping]:
         return _screen_mappings()
@@ -1235,33 +1289,86 @@ class OverlayWindow(QWidget):
         pulse = self._status in {"listening", "thinking"}
         if pulse:
             phase = (now % 1.1) / 1.1
-            painter.setPen(QPen(QColor(10, 132, 255, round(90 * (1 - phase))), 1.4))
+            painter.setPen(
+                QPen(QColor(123, 108, 255, round(82 * (1 - phase))), 1.4)
+            )
             painter.setBrush(Qt.BrushStyle.NoBrush)
             center = position + QPointF(8, 8)
             painter.drawEllipse(center, 9 + phase * 7, 9 + phase * 7)
         path = QPainterPath()
         path.moveTo(0, 0)
-        path.quadTo(1, -0.2, 2.5, 0.5)
-        path.lineTo(15, 7)
-        path.quadTo(16, 7.5, 15, 9)
-        path.lineTo(8, 10.5)
-        path.lineTo(6.2, 15.5)
-        path.quadTo(5.5, 17, 4.2, 15.3)
-        path.lineTo(0, 1.5)
-        path.quadTo(-0.2, 0.3, 0, 0)
+        path.cubicTo(0.4, -0.3, 1.2, 0.1, 2.2, 0.5)
+        path.lineTo(14.8, 6.6)
+        path.cubicTo(16.2, 7.3, 16.1, 8.7, 14.5, 9.1)
+        path.lineTo(8.3, 10.3)
+        path.lineTo(6.3, 15)
+        path.cubicTo(5.8, 16.7, 4.4, 16.7, 3.8, 15.1)
+        path.lineTo(-0.4, 1.5)
+        path.cubicTo(-0.8, 0.4, -0.5, -0.1, 0, 0)
         path.closeSubpath()
         painter.translate(position)
         painter.rotate(-20)
         painter.save()
-        painter.translate(0, 1)
-        painter.scale(1.08, 1.08)
+        glow = QRadialGradient(QPointF(7, 8), 18)
+        glow.setColorAt(0, QColor(123, 108, 255, 64))
+        glow.setColorAt(1, QColor(123, 108, 255, 0))
         painter.setPen(Qt.PenStyle.NoPen)
-        painter.setBrush(QColor(0, 0, 0, 40))
-        painter.drawPath(path)
+        painter.setBrush(glow)
+        painter.drawEllipse(QPointF(7, 8), 18, 18)
+        painter.translate(0, 1)
+        shadow = QPainterPath(path)
+        shadow.translate(0, 0.5)
+        painter.setPen(
+            QPen(
+                QColor(68, 65, 150, 76),
+                3,
+                Qt.PenStyle.SolidLine,
+                Qt.PenCapStyle.RoundCap,
+                Qt.PenJoinStyle.RoundJoin,
+            )
+        )
+        painter.setBrush(QColor(47, 44, 112, 52))
+        painter.drawPath(shadow)
         painter.restore()
-        painter.setPen(QPen(QColor("white"), 2, Qt.PenStyle.SolidLine, Qt.PenCapStyle.RoundCap, Qt.PenJoinStyle.RoundJoin))
-        painter.setBrush(QColor("#0A84FF"))
+        painter.save()
+        gradient = QLinearGradient(0, 0, 16, 16)
+        gradient.setColorAt(0, QColor("#6F7BFF"))
+        gradient.setColorAt(1, QColor("#9AA3FF"))
+        painter.setPen(Qt.PenStyle.NoPen)
+        painter.setBrush(gradient)
         painter.drawPath(path)
+        painter.save()
+        painter.setClipPath(path)
+        pink = QRadialGradient(QPointF(4, 3), 11)
+        pink.setColorAt(0, QColor(255, 207, 241, 124))
+        pink.setColorAt(1, QColor(255, 207, 241, 0))
+        painter.setBrush(pink)
+        painter.drawEllipse(QPointF(4, 3), 11, 11)
+        painter.restore()
+        painter.setBrush(Qt.BrushStyle.NoBrush)
+        painter.setPen(
+            QPen(
+                QColor(255, 255, 255, 238),
+                1.5,
+                Qt.PenStyle.SolidLine,
+                Qt.PenCapStyle.RoundCap,
+                Qt.PenJoinStyle.RoundJoin,
+            )
+        )
+        painter.drawPath(path)
+        highlight = QPainterPath()
+        highlight.moveTo(1.5, 1.2)
+        highlight.cubicTo(4, 1.6, 8.3, 3.4, 12, 5.2)
+        painter.setPen(
+            QPen(
+                QColor(255, 255, 255, 205),
+                1.1,
+                Qt.PenStyle.SolidLine,
+                Qt.PenCapStyle.RoundCap,
+            )
+        )
+        painter.drawPath(highlight)
+        painter.restore()
         painter.restore()
 
     def _paint_mark(
@@ -1454,6 +1561,29 @@ class OverlayWindow(QWidget):
         label_width = max(1, width - horizontal_padding)
         return width, metrics.elidedText(label, Qt.TextElideMode.ElideMiddle, label_width)
 
+    def _draw_status_bubble(self, painter: QPainter, rect: QRectF, dark: bool) -> None:
+        fill, _label, hairline = self._palette_colors(dark)
+        shadow = QColor(0, 0, 0, 46 if dark else 16)
+        painter.save()
+        painter.setBrush(Qt.BrushStyle.NoBrush)
+        painter.setPen(
+            QPen(
+                shadow,
+                6,
+                Qt.PenStyle.SolidLine,
+                Qt.PenCapStyle.RoundCap,
+                Qt.PenJoinStyle.RoundJoin,
+            )
+        )
+        painter.drawRoundedRect(rect.translated(0, 3), 18, 18)
+        painter.setPen(Qt.PenStyle.NoPen)
+        painter.setBrush(fill)
+        painter.drawRoundedRect(rect, 18, 18)
+        painter.setBrush(Qt.BrushStyle.NoBrush)
+        painter.setPen(QPen(hairline, 1))
+        painter.drawRoundedRect(rect.adjusted(0.5, 0.5, -0.5, -0.5), 18, 18)
+        painter.restore()
+
     def _paint_status(self, painter: QPainter, now: float) -> None:
         caption_age = now - self._caption_time
         caption_active = bool(self._caption) and caption_age < 6
@@ -1464,21 +1594,16 @@ class OverlayWindow(QWidget):
             status_alpha = max(0.0, 1 - age / 0.15)
             caption_alpha = max(0.0, 1 - caption_age / 6) if caption_active else 0.0
             alpha = max(status_alpha, caption_alpha)
-            scale = 1.0
+            amount = 1.0
             if alpha <= 0:
                 self._status_visible = False
         else:
             duration = 0.15 if self._reduced_motion else 0.2
             amount = min(1.0, age / duration)
-            alpha = 0.62 if self._status == "offline" else 1 - (1 - amount) ** 3
-            scale = 1.0 if self._status == "offline" else 0.96 + 0.04 * alpha
+            amount = 1 - (1 - amount) ** 3
+            alpha = 0.62 if self._status == "offline" else amount
         if alpha <= 0:
             return
-        lines = self._caption_lines()
-        caption_font = QFont(self._font_family)
-        caption_font.setPixelSize(15)
-        line_width = max((QFontMetrics(caption_font).horizontalAdvance(line) for line in lines), default=0)
-        area = self._local_available_geometry()
         label = self._status_message or {
             "listening": "Écoute",
             "thinking": "Réflexion",
@@ -1486,45 +1611,78 @@ class OverlayWindow(QWidget):
             "error": "audio indisponible",
             "offline": "Hors ligne",
         }.get(self._status, "")
-        level_indicators = self._status in {"listening", "speaking"}
+        lines = self._caption_lines()
+        caption_font = QFont(self._font_family)
+        caption_font.setPixelSize(15)
+        line_width = max(
+            (QFontMetrics(caption_font).horizontalAdvance(line) for line in lines),
+            default=0,
+        )
+        area = self._local_available_geometry()
+        orb = self._orb_rect()
+        right_space = area.right() - orb.right() - 12
+        left_space = orb.left() - area.left() - 12
+        to_right = right_space >= left_space
+        available_space = max(1, max(right_space, left_space))
         width, label = self._status_label_layout(
             label,
-            area.width(),
+            round(available_space + 24),
             line_width,
-            level_indicators,
+            False,
         )
-        height = 50 + (38 if lines else 0)
-        pill = QRectF(
-            area.center().x() - width / 2,
-            area.bottom() - 24 - height,
-            width,
-            height,
+        lines = self._caption_lines(max(1, width - 36))
+        label_height = 18 if label else 0
+        height = 18 + label_height + len(lines) * 19
+        bubble_x = orb.right() + 12 if to_right else orb.left() - width - 12
+        bubble_x = min(max(area.left(), bubble_x), area.right() - width)
+        bubble_y = min(
+            max(area.top(), orb.center().y() - height / 2),
+            area.bottom() - height,
         )
+        bubble = QRectF(bubble_x, bubble_y, width, height)
+
+        agent_visuals.paint_orb(
+            painter,
+            orb,
+            status=self._status,
+            start_shape=self._morph_from_shape,
+            end_shape=self._morph_to_shape,
+            progress=self._morph_progress(now),
+            mic_level=self._mic_level,
+            output_level=self._output_level,
+            now=now,
+            reduced_motion=self._reduced_motion,
+            thinking_rotation=max(0.0, now - self._morph_started) * 0.2,
+            opacity=(
+                alpha
+                if self._status == "idle"
+                else 0.62
+                if self._status == "offline"
+                else 1.0
+            ),
+        )
+        if not label and not lines:
+            return
         painter.save()
         painter.setOpacity(alpha)
-        painter.translate(pill.center())
-        painter.scale(scale, scale)
-        painter.translate(-pill.center())
-        dark = self._dark_for_widget_rect(pill)
-        self._draw_glass_card(painter, pill, height / 2, dark)
+        slide = 0.0 if self._status in {"idle", "offline"} else 8 * (1 - amount)
+        painter.translate(0, slide)
+        dark = self._dark_for_widget_rect(bubble.translated(0, slide))
+        self._draw_status_bubble(painter, bubble, dark)
         _fill, label_color, _hairline = self._palette_colors(dark)
         font = QFont(self._font_family)
         font.setPixelSize(13)
         font.setWeight(QFont.Weight.Medium)
         painter.setFont(font)
         painter.setPen(label_color)
-        label_width = max(1, width - (72 if level_indicators else 36))
-        painter.drawText(
-            QRectF(pill.left() + 18, pill.top() + 6, label_width, 22),
-            Qt.AlignmentFlag.AlignVCenter | Qt.AlignmentFlag.AlignLeft,
-            label,
-        )
-        if self._status == "listening":
-            self._draw_level_bars(painter, pill, ACCENT, self._mic_level)
-        elif self._status == "speaking":
-            self._draw_level_bars(painter, pill, label_color, self._output_level)
-        elif self._status == "thinking":
-            self._draw_thinking_dots(painter, pill, label_color, now)
+        y = bubble.top() + 8
+        if label:
+            painter.drawText(
+                QRectF(bubble.left() + 16, y, bubble.width() - 32, 19),
+                Qt.AlignmentFlag.AlignVCenter | Qt.AlignmentFlag.AlignLeft,
+                label,
+            )
+            y += 19
         if lines:
             caption_font = QFont(self._font_family)
             caption_font.setPixelSize(15)
@@ -1532,7 +1690,7 @@ class OverlayWindow(QWidget):
             painter.setFont(caption_font)
             painter.setPen(label_color)
             painter.drawText(
-                pill.adjusted(18, 32, -18, -4),
+                QRectF(bubble.left() + 16, y, bubble.width() - 32, len(lines) * 19),
                 Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignTop,
                 "\n".join(lines),
             )
