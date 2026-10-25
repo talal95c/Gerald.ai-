@@ -1,5 +1,6 @@
 import os
 import threading
+from types import SimpleNamespace
 
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
@@ -12,9 +13,29 @@ from gerald.overlay.window import (
     _build_screen_mappings,
     _confirmation_position,
     _physical_to_logical,
+    _try_set_capture_exclusion,
 )
 from gerald.perception.grounding import ScreenRect
 from gerald.tools.registry import ArrowCommand, CircleCommand, NoteCommand
+
+
+def test_display_affinity_failure_is_recorded_and_warned_once(monkeypatch, caplog):
+    import ctypes
+    from gerald.overlay import window as window_module
+
+    monkeypatch.setattr(window_module, "_capture_exclusion_warning_logged", False)
+    monkeypatch.setattr(ctypes, "set_last_error", lambda _error: None, raising=False)
+    monkeypatch.setattr(ctypes, "get_last_error", lambda: 8, raising=False)
+    monkeypatch.setattr(
+        ctypes,
+        "windll",
+        SimpleNamespace(kernel32=SimpleNamespace(GetLastError=lambda: 8)),
+        raising=False,
+    )
+    user32 = SimpleNamespace(SetWindowDisplayAffinity=lambda _hwnd, _affinity: 0)
+
+    assert not _try_set_capture_exclusion(123, user32)
+    assert "GetLastError=8" in caplog.text
 
 
 def test_overlay_renders_circle_and_arrow_with_transparent_surroundings():

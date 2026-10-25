@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import math
+import logging
 import os
 import sys
 import time
@@ -68,6 +69,8 @@ def _system_font_family() -> str:
 
 
 ACCENT = _accent_color()
+logger = logging.getLogger(__name__)
+_capture_exclusion_warning_logged = False
 Rect = tuple[int, int, int, int]
 
 
@@ -86,6 +89,33 @@ def _confirmation_position(
     y = below if below + pill_height <= area_y + area_height else target_y - gap - pill_height
     y = min(max(area_y, y), area_y + area_height - pill_height)
     return x, y
+
+
+def _try_set_capture_exclusion(hwnd: int, user32) -> bool:
+    global _capture_exclusion_warning_logged
+    try:
+        import ctypes
+
+        ctypes.set_last_error(0)
+    except Exception:
+        ctypes = None
+    try:
+        result = user32.SetWindowDisplayAffinity(hwnd, 0x11)
+    except Exception:
+        result = 0
+    if result:
+        return True
+    if not _capture_exclusion_warning_logged:
+        if ctypes is None:
+            error = 0
+        else:
+            try:
+                error = ctypes.windll.kernel32.GetLastError()
+            except Exception:
+                error = ctypes.get_last_error()
+        logger.warning("SetWindowDisplayAffinity failed (GetLastError=%s)", error)
+        _capture_exclusion_warning_logged = True
+    return False
 
 
 @dataclass(frozen=True)
@@ -373,6 +403,7 @@ class OverlayWindow(QWidget):
         self._confirmation_completion = None
         self._confirmation_result = None
         self._expired_confirmation_tokens: set[str] = set()
+        self.capture_excluded = False
         self._timer = QTimer(self)
         self._timer.timeout.connect(self._tick)
         self._set_capture_exclusion()
@@ -388,9 +419,9 @@ class OverlayWindow(QWidget):
             set_window_long = ctypes.windll.user32.SetWindowLongPtrW
             exstyle = get_window_long(hwnd, -20)
             set_window_long(hwnd, -20, exstyle | 0x20 | 0x80000 | 0x8000000)
-            ctypes.windll.user32.SetWindowDisplayAffinity(hwnd, 0x11)
+            self.capture_excluded = _try_set_capture_exclusion(hwnd, ctypes.windll.user32)
         except Exception:
-            pass
+            self.capture_excluded = False
 
     def set_capture(self, capture: Capture | None) -> None:
         self._capture = capture

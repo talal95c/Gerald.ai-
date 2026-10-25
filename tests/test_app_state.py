@@ -1,4 +1,9 @@
-from gerald.app import AUDIO_BYTES_FOR_100MS, _has_audio_to_commit, _reset_failed_capture
+from gerald.app import (
+    AUDIO_BYTES_FOR_100MS,
+    _has_audio_to_commit,
+    _reset_failed_capture,
+    _should_hide_overlay_for_capture,
+)
 
 
 def test_quiet_audio_commits_after_100ms_of_pcm_was_sent():
@@ -33,3 +38,9 @@ def test_terminal_capture_failure_invalidates_and_resets_the_turn():
     assert not state["released"]
     assert state["audio_sent_bytes"] == 0
     assert not _reset_failed_capture(state, 5)
+
+
+def test_failed_capture_exclusion_uses_overlay_hide_fallback():
+    assert _should_hide_overlay_for_capture(False, "nt")
+    assert not _should_hide_overlay_for_capture(True, "nt")
+    assert _should_hide_overlay_for_capture(True, "linux")

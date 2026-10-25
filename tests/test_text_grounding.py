@@ -241,7 +241,7 @@ def test_ocr_uses_full_resolution_and_retains_word_boxes(monkeypatch):
 
     elements_module._tesseract_languages.cache_clear()
     try:
-        provider = OCRProvider()
+        provider = OCRProvider(backend="tesseract")
         found = provider.get_elements(capture)
         assert len(observed["sizes"]) == 6
         assert all(width == 800 for width, _height in observed["sizes"])
@@ -320,7 +320,7 @@ def test_ocr_budget_returns_completed_tiles_as_partial_results(monkeypatch):
     try:
         result = collect_elements_detailed(
             capture,
-            ocr_provider=OCRProvider(upscale=True),
+            ocr_provider=OCRProvider(upscale=True, backend="tesseract"),
             budget=0.05,
             on_update=lambda elements: updates.append(elements),
         )
@@ -330,3 +330,68 @@ def test_ocr_budget_returns_completed_tiles_as_partial_results(monkeypatch):
     assert not result.complete
     assert any(element.name == "login" for element in result.elements)
     assert any(any(element.name == "login" for element in update) for update in updates)
+
+
+def test_windows_uia_breadth_first_keeps_top_children_before_later_items(monkeypatch):
+    from gerald.perception import elements as elements_module
+
+    class Rect:
+        left, top, right, bottom = -990, 50, -950, 70
+
+    class Control:
+        BoundingRectangle = Rect()
+        ControlTypeName = "ButtonControl"
+        IsOffscreen = False
+
+        def __init__(self, name, children=()):
+            self.Name = name
+            self.children = list(children)
+
+        def GetChildren(self):
+            return self.children
+
+    root = Control("root", [Control("top"), Control("middle"), Control("bottom")])
+    automation = ModuleType("uiautomation")
+    automation.SetGlobalSearchTimeout = lambda _timeout: None
+    automation.GetForegroundControl = lambda: root
+    monkeypatch.setitem(sys.modules, "uiautomation", automation)
+    monkeypatch.setattr(elements_module, "os", SimpleNamespace(name="nt"))
+    ticks = iter(index / 10 for index in range(20))
+    monkeypatch.setattr(elements_module, "time", SimpleNamespace(monotonic=lambda: next(ticks)))
+
+    found = elements_module.UIAProvider().get_elements(make_capture())
+
+    names = [element.name for element in found]
+    assert "top" in names
+    assert "bottom" not in names
+
+
+def test_windows_ocr_worker_returns_partial_results_on_budget_timeout(monkeypatch):
+    from gerald.perception import elements as elements_module
+
+    capture = make_capture()
+    partial = Element(1, "text", "login", (1, 2, 20, 10), "ocr")
+
+    class Future:
+        def result(self, timeout=None):
+            assert timeout is not None and timeout > 0
+            raise TimeoutError
+
+        def cancel(self):
+            return True
+
+    class Executor:
+        def submit(self, function, seen_capture, timeout, publish):
+            assert function == OCRProvider._windows_ocr
+            assert seen_capture is capture
+            publish([partial])
+            return Future()
+
+    monkeypatch.setattr(elements_module, "_WINDOWS_OCR_EXECUTOR", Executor())
+    elements, complete, _seconds = OCRProvider(backend="windows").get_elements_detailed(
+        capture,
+        deadline=__import__("time").monotonic() + 1,
+    )
+
+    assert elements == [partial]
+    assert not complete

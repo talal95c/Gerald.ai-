@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+from collections import deque
 from concurrent.futures import FIRST_COMPLETED, ThreadPoolExecutor, wait
 from dataclasses import dataclass
 from functools import lru_cache
@@ -9,16 +10,18 @@ import os
 import shutil
 from statistics import median
 import subprocess
+import threading
 import time
 from typing import Callable, Literal, Protocol
 
-from PIL import Image
+from PIL import Image, ImageOps, ImageStat
 
 from gerald.capture.screen import Capture
 
 logger = logging.getLogger(__name__)
+_WINDOWS_OCR_EXECUTOR = ThreadPoolExecutor(max_workers=1, thread_name_prefix="gerald-winocr")
 
-ElementSource = Literal["uia", "ocr"]
+ElementSource = Literal["uia", "ocr", "board"]
 Rect = tuple[int, int, int, int]
 WordBox = tuple[str, Rect]
 OCRWord = tuple[str, Rect, float, tuple[int, int, int, int]]
@@ -92,7 +95,7 @@ def _rect_iou(first: Rect, second: Rect) -> float:
 
 def _dedupe_ocr_words(words: list[OCRWord]) -> list[OCRWord]:
     accepted: list[OCRWord] = []
-    for word in sorted(words, key=lambda item: item[2], reverse=True):
+    for word in sorted(words, key=lambda item: (item[2], len(item[0])), reverse=True):
         if any(_rect_iou(word[1], existing[1]) > 0.5 for existing in accepted):
             continue
         accepted.append(word)
@@ -207,10 +210,10 @@ class UIAProvider:
                 monitor.top + monitor.height,
             )
             found: list[Element] = []
-            stack: list[tuple[object, int]] = [(root, 0)]
+            queue = deque([(root, 0)])
             visited = 0
-            while stack and len(found) < 150 and visited < 500 and time.monotonic() < deadline:
-                control, depth = stack.pop()
+            while queue and len(found) < 150 and visited < 500 and time.monotonic() < deadline:
+                control, depth = queue.popleft()
                 visited += 1
                 try:
                     rect = control.BoundingRectangle
@@ -224,7 +227,7 @@ class UIAProvider:
                             found.append(Element(len(found), role.removesuffix("Control"), name, (x, y, width, height), "uia"))
                     if depth < 25 and time.monotonic() < deadline:
                         children = control.GetChildren()
-                        stack.extend((child, depth + 1) for child in children[:300])
+                        queue.extend((child, depth + 1) for child in children[:300])
                 except Exception:
                     logger.debug("Skipping inaccessible UI Automation control", exc_info=True)
             return found[:150]
@@ -234,9 +237,18 @@ class UIAProvider:
 
 
 class OCRProvider:
-    def __init__(self, *, psm: int = 11, upscale: bool | None = None) -> None:
+    def __init__(
+        self,
+        *,
+        psm: int = 11,
+        upscale: bool | None = None,
+        backend: Literal["auto", "tesseract", "windows"] = "auto",
+    ) -> None:
+        if backend not in {"auto", "tesseract", "windows"}:
+            raise ValueError("backend must be auto, tesseract, or windows")
         self.psm = psm
         self.upscale = upscale
+        self.backend = backend
 
     def get_elements(self, capture: Capture) -> list[Element]:
         elements, _complete, _seconds = self.get_elements_detailed(capture)
@@ -251,14 +263,36 @@ class OCRProvider:
     ) -> tuple[list[Element], bool, float]:
         started = time.monotonic()
         try:
-            if os.name == "nt":
+            backend = "windows" if self.backend == "auto" and os.name == "nt" else self.backend
+            if backend == "auto":
+                backend = "tesseract"
+            if backend == "windows":
                 remaining = None if deadline is None else max(0.0, deadline - time.monotonic())
                 if remaining == 0:
                     return [], False, time.monotonic() - started
+                partial: list[Element] = []
+                partial_lock = threading.Lock()
+
+                def publish(elements: list[Element]) -> None:
+                    nonlocal partial
+                    with partial_lock:
+                        partial = elements
+                    if on_partial is not None:
+                        on_partial(elements)
+
+                future = _WINDOWS_OCR_EXECUTOR.submit(
+                    self._windows_ocr,
+                    capture,
+                    remaining,
+                    publish,
+                )
                 try:
-                    result = self._windows_ocr(capture, timeout=remaining)
+                    result = future.result(timeout=remaining)
                 except TimeoutError:
-                    return [], False, time.monotonic() - started
+                    future.cancel()
+                    with partial_lock:
+                        result = partial
+                    return result, False, time.monotonic() - started
                 return result, True, time.monotonic() - started
             import pytesseract
 
@@ -370,68 +404,109 @@ class OCRProvider:
             return [], True, time.monotonic() - started
 
     @staticmethod
-    def _windows_ocr(capture: Capture, timeout: float | None = None) -> list[Element]:
+    def _windows_ocr(
+        capture: Capture,
+        timeout: float | None = None,
+        on_partial: Callable[[list[Element]], None] | None = None,
+    ) -> list[Element]:
         async def recognize() -> list[Element]:
-            from winsdk.windows.graphics.imaging import BitmapDecoder
-            from winsdk.windows.media.ocr import OcrEngine
-            from winsdk.windows.storage.streams import DataWriter, InMemoryRandomAccessStream
+            try:
+                from winrt.windows.graphics.imaging import BitmapDecoder
+                from winrt.windows.media.ocr import OcrEngine
+                from winrt.windows.storage.streams import DataWriter, InMemoryRandomAccessStream
+            except ImportError:
+                from winsdk.windows.graphics.imaging import BitmapDecoder
+                from winsdk.windows.media.ocr import OcrEngine
+                from winsdk.windows.storage.streams import DataWriter, InMemoryRandomAccessStream
 
-            png = capture.full_image or capture.image
             import io
 
-            buffer = io.BytesIO()
-            png.save(buffer, format="PNG")
-            stream = InMemoryRandomAccessStream()
-            writer = DataWriter(stream)
-            writer.write_bytes(buffer.getvalue())
-            await writer.store_async()
-            await writer.flush_async()
-            writer.detach_stream()
-            stream.seek(0)
-            decoder = await BitmapDecoder.create_async(stream)
-            bitmap = await decoder.get_software_bitmap_async()
+            source = capture.full_image or capture.image
+            scale = 2 if source.width <= 2000 else 1
+            image = source.resize(
+                (source.width * scale, source.height * scale),
+                Image.Resampling.LANCZOS,
+            ) if scale != 1 else source
+            bands = _tile_bounds(source.height)
             engine = OcrEngine.try_create_from_user_profile_languages()
             if engine is None:
                 return []
-            result = await engine.recognize_async(bitmap)
-            output = []
-            for line in result.lines:
-                words = [
-                    (
-                        str(word.text),
-                        (
-                            int(word.bounding_rect.x),
-                            int(word.bounding_rect.y),
-                            int(word.bounding_rect.width),
-                            int(word.bounding_rect.height),
-                        ),
-                    )
-                    for word in line.words
-                ]
-                for segment in _split_ocr_words(words):
-                    left = min(rect[0] for _word, rect in segment)
-                    top = min(rect[1] for _word, rect in segment)
-                    right = max(rect[0] + rect[2] for _word, rect in segment)
-                    bottom = max(rect[1] + rect[3] for _word, rect in segment)
-                    output.append(
-                        Element(
-                            len(output),
-                            "text",
-                            " ".join(word for word, _rect in segment),
-                            capture.full_rect_to_screen((left, top, right - left, bottom - top)),
-                            "ocr",
-                            tuple(
-                                (word, capture.full_rect_to_screen(rect))
-                                for word, rect in segment
-                            ),
+            words: list[OCRWord] = []
+
+            async def recognize_pass(tile: Image.Image, top: int, band_index: int, inverted: bool) -> list[OCRWord]:
+                processed = ImageOps.autocontrast(tile.convert("L"))
+                if inverted:
+                    processed = ImageOps.invert(processed)
+                buffer = io.BytesIO()
+                processed.save(buffer, format="PNG")
+                stream = InMemoryRandomAccessStream()
+                writer = DataWriter(stream)
+                writer.write_bytes(buffer.getvalue())
+                await writer.store_async()
+                await writer.flush_async()
+                writer.detach_stream()
+                stream.seek(0)
+                decoder = await BitmapDecoder.create_async(stream)
+                bitmap = await decoder.get_software_bitmap_async()
+                result = await engine.recognize_async(bitmap)
+                found: list[OCRWord] = []
+                for line_index, line in enumerate(result.lines):
+                    for word_index, word in enumerate(line.words):
+                        text = str(word.text).strip()
+                        if not text or not any(character.isalnum() for character in text):
+                            continue
+                        box = word.bounding_rect
+                        left = round(float(box.x) / scale)
+                        word_top = round(float(box.y) / scale)
+                        width = max(1, round(float(box.width) / scale))
+                        height = max(1, round(float(box.height) / scale))
+                        confidence = float(getattr(word, "confidence", 0.5))
+                        found.append(
+                            (
+                                text,
+                                (left, top // scale + word_top, width, height),
+                                confidence,
+                                (band_index, line_index, int(inverted), word_index),
+                            )
                         )
-                    )
-            return output
+                return found
+
+            async def recognize_band(
+                band_index: int,
+                source_top: int,
+                source_bottom: int,
+            ) -> list[OCRWord]:
+                top = source_top * scale
+                bottom = source_bottom * scale
+                tile = image.crop((0, top, image.width, bottom))
+                luminance = ImageStat.Stat(tile.convert("L")).mean[0]
+                saturation = ImageStat.Stat(tile.convert("HSV")).mean[1]
+                passes = [recognize_pass(tile, top, band_index, False)]
+                if luminance < 140 or saturation > 48:
+                    passes.append(recognize_pass(tile, top, band_index, True))
+                completed = await asyncio.gather(*passes, return_exceptions=True)
+                found: list[OCRWord] = []
+                for result in completed:
+                    if isinstance(result, list):
+                        found.extend(result)
+                return found
+
+            tasks = [
+                asyncio.create_task(recognize_band(index, top, bottom))
+                for index, (top, bottom) in enumerate(bands)
+            ]
+            for task in asyncio.as_completed(tasks):
+                try:
+                    words.extend(await task)
+                except Exception:
+                    logger.debug("Windows OCR band failed", exc_info=True)
+                elements = _elements_from_ocr_words(_dedupe_ocr_words(words), capture)
+                if on_partial is not None:
+                    on_partial(elements)
+            return _elements_from_ocr_words(_dedupe_ocr_words(words), capture)
 
         async def recognize_with_timeout() -> list[Element]:
-            if timeout is None:
-                return await recognize()
-            return await asyncio.wait_for(recognize(), timeout=timeout)
+            return await recognize() if timeout is None else await asyncio.wait_for(recognize(), timeout=timeout)
 
         return asyncio.run(recognize_with_timeout())
 
