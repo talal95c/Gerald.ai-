@@ -33,6 +33,45 @@ def test_branching_children_share_a_layer():
     assert boxes["1"].x + boxes["1"].w / 2 == boxes["2"].x + boxes["2"].w / 2
 
 
+def test_tree_root_is_centered_over_three_children_and_edges_elbow():
+    layout = layout_diagram(
+        title=None,
+        layout="tree",
+        nodes=_nodes("Root", "First child", "Second child", "Third child"),
+        edges=[
+            {"from": "0", "to": "1"},
+            {"from": "0", "to": "2"},
+            {"from": "0", "to": "3"},
+        ],
+    )
+    boxes = _box_map(layout)
+    child_centers = [boxes[str(index)].x + boxes[str(index)].w / 2 for index in (1, 2, 3)]
+    root_center = boxes["0"].x + boxes["0"].w / 2
+
+    assert abs(root_center - sum(child_centers) / len(child_centers)) <= 1
+    assert all(len(edge.points) == 4 for edge in layout.edges)
+    for edge in layout.edges:
+        assert edge.points[0][0] == edge.points[1][0]
+        assert edge.points[1][1] == edge.points[2][1]
+        assert edge.points[2][0] == edge.points[3][0]
+
+
+def test_node_wraps_only_at_spaces_and_keeps_minimum_width():
+    layout = layout_diagram(
+        title=None,
+        layout="flow",
+        nodes=[
+            {"id": "a", "text": "Membrane transport consumes energy"},
+            {"id": "b", "text": "A"},
+        ],
+    )
+    boxes = _box_map(layout)
+
+    assert boxes["a"].lines == ("Membrane transport", "consumes energy")
+    assert boxes["a"].w >= 84
+    assert boxes["b"].w == 84
+
+
 def test_directed_cycle_terminates_and_keeps_three_nodes():
     layout = layout_diagram(
         title=None,

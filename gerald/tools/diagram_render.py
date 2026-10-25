@@ -3,7 +3,7 @@ from __future__ import annotations
 import math
 
 from PyQt6.QtCore import QPointF, QRectF, Qt
-from PyQt6.QtGui import QColor, QFont, QFontMetricsF, QPainter, QPen
+from PyQt6.QtGui import QColor, QFont, QFontMetricsF, QPainter, QPainterPath, QPen
 
 from gerald.tools.diagram import DiagramLayout
 
@@ -22,16 +22,17 @@ def draw_diagram(
     painter.translate(x, y)
     painter.scale(scale, scale)
     bounds = QRectF(0, 0, layout.width, layout.height)
-    for width, alpha in ((20, 4), (12, 8), (6, 14), (2, 20)):
-        painter.setPen(QPen(QColor(0, 0, 0, alpha), width))
-        painter.setBrush(Qt.BrushStyle.NoBrush)
-        painter.drawRoundedRect(bounds.adjusted(-width / 2, 3, width / 2, 3), 16, 16)
-    painter.setPen(QPen(QColor(229, 229, 234, 210), 1))
+    for outset, alpha in ((12, 3), (10, 4), (8, 4), (6, 5), (4, 5), (2, 6)):
+        shadow = bounds.translated(0, 2).adjusted(-outset, -outset, outset, outset)
+        painter.setPen(Qt.PenStyle.NoPen)
+        painter.setBrush(QColor(0, 0, 0, alpha))
+        painter.drawRoundedRect(shadow, 16 + outset, 16 + outset)
+    painter.setPen(QPen(QColor("#E5E5EA"), 1))
     painter.setBrush(QColor(255, 255, 255, background_alpha))
     painter.drawRoundedRect(bounds, 16, 16)
     if layout.title:
         title_font = QFont(font_family)
-        title_font.setPixelSize(15)
+        title_font.setPixelSize(17)
         title_font.setWeight(QFont.Weight.DemiBold)
         painter.setFont(title_font)
         painter.setPen(QColor("#1D1D1F"))
@@ -47,13 +48,31 @@ def draw_diagram(
         progress = min(1.0, max(0.0, (elapsed - start_time) / 0.16))
         if progress <= 0:
             continue
-        first, last = edge.points[0], edge.points[-1]
-        end = (first[0] + (last[0] - first[0]) * progress, first[1] + (last[1] - first[1]) * progress)
+        segment_lengths = [
+            math.hypot(second[0] - first[0], second[1] - first[1])
+            for first, second in zip(edge.points, edge.points[1:])
+        ]
+        total_length = sum(segment_lengths)
+        remaining = total_length * progress
+        edge_path = QPainterPath(QPointF(*edge.points[0]))
+        for first, second, length in zip(edge.points, edge.points[1:], segment_lengths):
+            if remaining >= length:
+                edge_path.lineTo(QPointF(*second))
+                remaining -= length
+            elif remaining > 0:
+                ratio = remaining / max(1e-9, length)
+                edge_path.lineTo(
+                    QPointF(first[0] + (second[0] - first[0]) * ratio, first[1] + (second[1] - first[1]) * ratio)
+                )
+                break
+            else:
+                break
         painter.setOpacity(progress)
         painter.setPen(QPen(QColor("#6E6E73"), 1.5, Qt.PenStyle.SolidLine, Qt.PenCapStyle.RoundCap))
-        painter.drawLine(QPointF(*first), QPointF(*end))
+        painter.drawPath(edge_path)
         if progress >= 1:
-            angle = math.atan2(last[1] - first[1], last[0] - first[0])
+            penultimate, last = edge.points[-2], edge.points[-1]
+            angle = math.atan2(last[1] - penultimate[1], last[0] - penultimate[0])
             for delta in (-0.45, 0.45):
                 painter.drawLine(
                     QPointF(*last),
@@ -61,7 +80,7 @@ def draw_diagram(
                 )
             if edge.label:
                 font = QFont(font_family)
-                font.setPixelSize(11)
+                font.setPixelSize(12)
                 painter.setFont(font)
                 metrics = QFontMetricsF(font)
                 width = metrics.horizontalAdvance(edge.label) + 12
@@ -87,18 +106,20 @@ def draw_diagram(
         painter.setBrush(QColor("#FFFFFF"))
         painter.drawRoundedRect(rect, 10, 10)
         font = QFont(font_family)
-        font.setPixelSize(13)
+        font.setPixelSize(15)
         painter.setFont(font)
         painter.setPen(QColor("#1D1D1F"))
         metrics = QFontMetricsF(font)
         line_height = metrics.height()
         block_height = len(node.lines) * line_height
         top = node.y + (node.h - block_height) / 2
+        max_text_width = max(1, node.w - 28)
         for index, line in enumerate(node.lines):
+            display_line = metrics.elidedText(line, Qt.TextElideMode.ElideRight, max_text_width)
             painter.drawText(
-                QRectF(node.x + 8, top + index * line_height, node.w - 16, line_height),
+                QRectF(node.x + 14, top + index * line_height, max_text_width, line_height),
                 Qt.AlignmentFlag.AlignCenter,
-                line,
+                display_line,
             )
         painter.restore()
     painter.restore()

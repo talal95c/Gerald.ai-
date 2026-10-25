@@ -57,7 +57,8 @@ def _make_overlay(app: QApplication, source: Image.Image) -> OverlayWindow:
 def _render_overlay(app: QApplication, source_image: QImage, overlay: OverlayWindow, output: Path) -> None:
     app.processEvents()
     if overlay._bubble is not None:
-        overlay._bubble._opacity_effect.setOpacity(1.0)
+        overlay._bubble._fade.stop()
+        overlay._bubble.setWindowOpacity(1.0)
         overlay._bubble._rise.stop()
     image = QImage(source_image.size(), QImage.Format.Format_ARGB32)
     image.fill(Qt.GlobalColor.transparent)
@@ -73,6 +74,36 @@ def _render_overlay(app: QApplication, source_image: QImage, overlay: OverlayWin
     painter.end()
     if not image.save(str(output)):
         raise RuntimeError(f"Could not save {output}")
+    composite = Image.open(output).convert("RGBA")
+
+    def save_zoom(name: str, bounds: tuple[int, int, int, int]) -> None:
+        left, top, width, height = bounds
+        left, top = max(0, left), max(0, top)
+        right = min(composite.width, left + width)
+        bottom = min(composite.height, top + height)
+        crop = composite.crop((left, top, right, bottom))
+        crop.resize((crop.width * 2, crop.height * 2), Image.Resampling.LANCZOS).save(
+            OUTPUT / name
+        )
+
+    cursor = overlay._cursor_position
+    cursor_x = round(cursor.x() - overlay.geometry().x())
+    cursor_y = round(cursor.y() - overlay.geometry().y())
+    save_zoom(
+        f"{output.stem}-cursor-zoom2x.png",
+        (max(0, cursor_x - 28), max(0, cursor_y - 28), 72, 72),
+    )
+    if overlay._bubble is not None:
+        bubble = overlay._bubble
+        save_zoom(
+            f"{output.stem}-bubble-zoom2x.png",
+            (
+                max(0, bubble.x() - 10),
+                max(0, bubble.y() - 40),
+                bubble.width() + 40,
+                bubble.height() + 60,
+            ),
+        )
     overlay.close()
     app.processEvents()
 
@@ -105,6 +136,11 @@ def _render_floating_diagram(app: QApplication, source: Image.Image, source_imag
     overlay.add_commands([_photosynthesis()])
     overlay._diagrams[0]["x"] = 920
     overlay._diagrams[0]["y"] = 520
+    state = overlay._diagrams[0]
+    diagram_width = _photosynthesis().layout.width * state["scale"]
+    diagram_height = _photosynthesis().layout.height * state["scale"]
+    state["x"] = max(12, min(state["x"], source.width - diagram_width - 12))
+    state["y"] = max(12, min(state["y"], source.height - diagram_height - 12))
     overlay._diagrams[0]["created"] -= 2
     _render_overlay(app, source_image, overlay, OUTPUT / "photosynthesis-floating-diagram.png")
 

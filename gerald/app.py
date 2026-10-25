@@ -235,7 +235,6 @@ def main() -> int:
         QVBoxLayout,
     )
     from pynput import keyboard
-    from pynput import mouse as pynput_mouse
 
     from gerald.audio.mic import Microphone
     from gerald.board import BoardWindow
@@ -285,15 +284,8 @@ def main() -> int:
         output_level = pyqtSignal(float)
         audio_unavailable = pyqtSignal()
         action_marks_visible = pyqtSignal(object)
-        mouse_moved = pyqtSignal(float, float)
-
-        @pyqtSlot(float, float)
-        def update_mouse_position(self, x: float, y: float) -> None:
-            overlay.set_mouse_position(x, y, physical=True)
-
     bridge = Bridge()
     overlay = OverlayWindow(settings.cursor_enabled)
-    bridge.mouse_moved.connect(bridge.update_mouse_position)
     board = BoardWindow()
     overlay.show()
 
@@ -1108,15 +1100,6 @@ def main() -> int:
 
     listener = keyboard.Listener(on_press=on_press, on_release=on_release)
     listener.start()
-    mouse_listener = pynput_mouse.Listener(
-        on_move=lambda x, y: bridge.mouse_moved.emit(x, y)
-    )
-    try:
-        mouse_listener.start()
-        app.aboutToQuit.connect(mouse_listener.stop)
-    except Exception:
-        logger.exception("Global mouse listener unavailable; Gerald cursor cannot follow the pointer")
-
     cleanup_done = {"value": False}
 
     def cleanup() -> None:
@@ -1124,7 +1107,6 @@ def main() -> int:
             return
         cleanup_done["value"] = True
         listener.stop()
-        mouse_listener.stop()
         mic.stop()
         capture_executor.shutdown(wait=False, cancel_futures=True)
         indexer.close()

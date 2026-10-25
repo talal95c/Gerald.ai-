@@ -43,18 +43,9 @@ class DiagramCommand:
 
 
 def _wrap(text: str, width: float, measure: Callable[[str], float]) -> tuple[str, ...]:
-    words = []
-    for word in text.split():
-        while len(word) > 1 and measure(word) > width:
-            cut = len(word) - 1
-            while cut > 1 and measure(word[:cut]) > width:
-                cut -= 1
-            words.append(word[:cut])
-            word = word[cut:]
-        words.append(word)
     lines: list[str] = []
     current = ""
-    for word in words:
+    for word in text.split():
         candidate = f"{current} {word}".strip()
         if current and measure(candidate) > width:
             lines.append(current)
@@ -148,14 +139,22 @@ def layout_diagram(
         label = edge.get("label")
         if label is not None and (not isinstance(label, str) or len(label) > 24):
             raise ValueError("edge label must be a string of at most 24 characters")
-    measure = measure_text or (lambda text: len(text) * 7.2)
+    def estimate(text: str) -> float:
+        return sum(
+            9.8 * (1.25 if character.isupper() or character in "MW@#%&" else 1)
+            for character in text
+        )
+
+    measure = measure_text or estimate
     sizes = []
     for node in nodes:
-        width = min(200.0, max(72.0, measure(node["text"]) + 24))
-        lines = _wrap(node["text"], width - 24, measure)
-        height = 16 + 16 * len(lines)
+        words = node["text"].split()
+        longest_word = max((measure(word) for word in words), default=0)
+        width = min(240.0, max(84.0, measure(node["text"]) + 28, longest_word + 28))
+        lines = _wrap(node["text"], width - 28, measure)
+        height = 20 + 20 * len(lines)
         sizes.append((width, height, lines))
-    title_height = 34.0 if title else 16.0
+    title_height = 40.0 if title else 16.0
     boxes: list[NodeBox] = []
     kept_edges = edges
     reveal_order = ids[:]
@@ -204,13 +203,65 @@ def layout_diagram(
             for layer in ordered_layers:
                 ypos[layer] = cursor
                 cursor += layer_height[layer] + 54
-            for layer in ordered_layers:
-                x = 24.0
-                for index in groups[layer]:
-                    w, h, lines = sizes[index]
-                    boxes.append(NodeBox(ids[index], nodes[index]["text"], x, ypos[layer] + (layer_height[layer] - h) / 2, w, h, lines))
-                    x += w + 38
-            width = max((sum(sizes[i][0] + 38 for i in groups[layer]) for layer in ordered_layers), default=0) + 8
+
+            child_map = {node_id: [] for node_id in ids}
+            parent_map: dict[str, str] = {}
+            for edge in kept_edges:
+                parent, child = edge["from"], edge["to"]
+                if child not in parent_map and parent != child:
+                    parent_map[child] = parent
+                    child_map[parent].append(child)
+            roots = [node_id for node_id in ids if node_id not in parent_map]
+            if not roots:
+                roots = [ids[0]]
+            centers: dict[str, float] = {}
+            rightmost = 24.0
+            gap = 38.0
+
+            def place_subtree(node_id: str, left: float) -> tuple[dict[str, float], float]:
+                child_centers: list[float] = []
+                placed: dict[str, float] = {}
+                cursor_x = left
+                for child_id in child_map[node_id]:
+                    child_placed, child_right = place_subtree(child_id, cursor_x)
+                    placed.update(child_placed)
+                    child_centers.append(child_placed[child_id])
+                    cursor_x = child_right + gap
+                subtree_right = cursor_x - gap if child_centers else left
+                width = sizes[ids.index(node_id)][0]
+                if child_centers:
+                    center = sum(child_centers) / len(child_centers)
+                    node_left = center - width / 2
+                    shift = max(0.0, left - node_left)
+                    if shift:
+                        placed = {key: value + shift for key, value in placed.items()}
+                        child_centers = [value + shift for value in child_centers]
+                        center += shift
+                        subtree_right += shift
+                else:
+                    center = left + width / 2
+                placed[node_id] = center
+                return placed, max(subtree_right, center + width / 2)
+
+            for root in roots:
+                placed, root_right = place_subtree(root, rightmost)
+                centers.update(placed)
+                rightmost = root_right + gap
+            for index, node_id in enumerate(ids):
+                w, h, lines = sizes[index]
+                center_x = centers.get(node_id, rightmost + w / 2)
+                boxes.append(
+                    NodeBox(
+                        node_id,
+                        nodes[index]["text"],
+                        center_x - w / 2,
+                        ypos[layers[node_id]] + (layer_height[layers[node_id]] - h) / 2,
+                        w,
+                        h,
+                        lines,
+                    )
+                )
+            width = max(84.0, rightmost - gap + 24.0)
             height = cursor - 20
     by_id = {box.id: box for box in boxes}
     directions = []
@@ -219,6 +270,8 @@ def layout_diagram(
         if layout == "tree":
             start = (source.x + source.w / 2, source.y + source.h)
             end = (target.x + target.w / 2, target.y)
+            elbow_y = (start[1] + end[1]) / 2
+            points = (start, (start[0], elbow_y), (end[0], elbow_y), end)
         elif layout == "cycle":
             source_center = (source.x + source.w / 2, source.y + source.h / 2)
             target_center = (target.x + target.w / 2, target.y + target.h / 2)
@@ -234,8 +287,18 @@ def layout_diagram(
 
             start = boundary(source, source_center, dx, dy)
             end = boundary(target, target_center, -dx, -dy)
+            points = (start, end)
         else:
             start = (source.x + source.w, source.y + source.h / 2)
             end = (target.x, target.y + target.h / 2)
-        directions.append(EdgePath(edge["from"], edge["to"], (start, end), edge.get("label"), ((start[0] + end[0]) / 2, (start[1] + end[1]) / 2)))
+            points = (start, end)
+        directions.append(
+            EdgePath(
+                edge["from"],
+                edge["to"],
+                points,
+                edge.get("label"),
+                ((start[0] + end[0]) / 2, (start[1] + end[1]) / 2),
+            )
+        )
     return DiagramLayout(width, height, boxes, directions, title, reveal_order)

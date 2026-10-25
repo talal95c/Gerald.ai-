@@ -5,7 +5,7 @@ from types import SimpleNamespace
 
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
-from PyQt6.QtCore import Qt
+from PyQt6.QtCore import QPoint, QPointF, QRect, QRectF, Qt
 from PyQt6.QtGui import QImage, QPainter
 from PyQt6.QtWidgets import QApplication
 from PyQt6.QtTest import QTest
@@ -304,6 +304,59 @@ def test_bubble_timeout_calls_none():
     app.processEvents()
 
 
+def test_tip_bubble_avoids_circle_target_and_uses_window_opacity():
+    app = QApplication.instance() or QApplication([])
+    overlay = OverlayWindow(cursor_enabled=True)
+    overlay.setGeometry(0, 0, 640, 400)
+    overlay._screen_mappings = lambda: _build_screen_mappings(
+        [("fake", (0, 0, 640, 400), 1.0)]
+    )
+
+    overlay.add_commands(
+        [CircleCommand(ScreenRect(200, 100, 160, 80)), TipCommand("Astuce : Ctrl+F")]
+    )
+
+    bubble = overlay._bubble
+    assert bubble is not None
+    bubble_rect = QRectF(
+        bubble.geometry().translated(-overlay.geometry().x(), -overlay.geometry().y())
+    )
+    target_rect = overlay._cursor_target_rect.translated(
+        -overlay.geometry().x(), -overlay.geometry().y()
+    )
+    assert not bubble_rect.intersects(target_rect)
+    assert bubble.graphicsEffect() is None
+    assert bubble._fade.propertyName() == b"windowOpacity"
+    bubble.setWindowOpacity(1.0)
+    image = QImage(bubble.width(), bubble.height(), QImage.Format.Format_ARGB32)
+    image.fill(0)
+    painter = QPainter(image)
+    bubble.render(painter)
+    painter.end()
+    assert image.pixelColor(bubble.width() // 2, 10).alpha() >= 248
+    overlay.close()
+    app.processEvents()
+
+
+def test_floating_diagram_never_scales_below_point_eight_five():
+    app = QApplication.instance() or QApplication([])
+    overlay = OverlayWindow(cursor_enabled=True)
+    layout = layout_diagram(
+        title="Grand diagram",
+        layout="flow",
+        nodes=[
+            {"id": str(index), "text": "A very wide label"}
+            for index in range(8)
+        ],
+    )
+
+    state = overlay._diagram_state(DiagramCommand(layout), time.monotonic(), 30)
+
+    assert state["scale"] >= 0.85
+    overlay.close()
+    app.processEvents()
+
+
 def test_cursor_flies_to_mark_and_returns_after_clear():
     app = QApplication.instance() or QApplication([])
     overlay = OverlayWindow(cursor_enabled=True)
@@ -343,6 +396,42 @@ def test_cursor_environment_setting_disables_paint(monkeypatch):
     painter.end()
     assert not overlay._cursor_enabled
     assert image.pixelColor(20, 20).alpha() == 0
+    overlay.close()
+    app.processEvents()
+
+
+def test_cursor_poll_keeps_qt_logical_coordinates_at_150_percent_scale(monkeypatch):
+    from gerald.overlay import window as window_module
+
+    app = QApplication.instance() or QApplication([])
+    overlay = OverlayWindow(cursor_enabled=True)
+    overlay._screen_mappings = lambda: _build_screen_mappings(
+        [("fake", (0, 0, 1000, 600), 1.5)]
+    )
+    monkeypatch.setattr(window_module.QCursor, "pos", staticmethod(lambda: QPoint(50, 40)))
+
+    assert _physical_to_logical(75, 60, overlay._screen_mappings()) == (50.0, 40.0, 1.5)
+    overlay._poll_cursor_position()
+    assert overlay._mouse_position == QPointF(50, 40)
+    overlay.close()
+    app.processEvents()
+
+
+def test_cursor_only_motion_requests_a_partial_repaint(monkeypatch):
+    app = QApplication.instance() or QApplication([])
+    overlay = OverlayWindow(cursor_enabled=True)
+    overlay._mouse_position = QPointF(100, 100)
+    overlay._cursor_position = QPointF(100, 100)
+    overlay._status_changed = time.monotonic() - 1
+    calls = []
+    monkeypatch.setattr(overlay, "update", lambda *args: calls.append(args))
+
+    overlay._tick()
+
+    assert len(calls) == 1
+    assert len(calls[0]) == 1
+    assert isinstance(calls[0][0], QRect)
+    assert calls[0][0].width() >= 56
     overlay.close()
     app.processEvents()
 

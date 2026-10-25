@@ -151,7 +151,7 @@ class BoardWindow(QWidget):
             if isinstance(command, ClearCommand):
                 self.clear_gerald()
             elif isinstance(command, DiagramCommand):
-                scale = min(1.0, (self.width() - 48) / max(1, command.layout.width), (self.height() - 100) / max(1, command.layout.height))
+                scale = max(0.85, min(1.0, (self.width() - 48) / max(1, command.layout.width), (self.height() - 100) / max(1, command.layout.height)))
                 if command.x is not None and command.y is not None:
                     x, y = self._image_to_local(command.x, command.y)
                 else:
@@ -165,6 +165,10 @@ class BoardWindow(QWidget):
                     x, y = 32.0, bottom + 24.0
                     if y + command.layout.height * scale > self.height() - 24:
                         x, y = max(24.0, self.width() - command.layout.width * scale - 24), 48.0
+                panel_width = command.layout.width * scale
+                panel_height = command.layout.height * scale
+                x = min(max(0.0, self.width() - panel_width), max(0.0, x))
+                y = min(max(0.0, self.height() - panel_height), max(0.0, y))
                 self._gerald.append({
                     "kind": "diagram",
                     "layout": command.layout,

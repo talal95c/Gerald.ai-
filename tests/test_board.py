@@ -79,6 +79,28 @@ def test_board_diagram_honors_position_and_remains_in_gerald_ink():
     app.processEvents()
 
 
+def test_board_diagram_never_scales_below_point_eighty_five():
+    app = QApplication.instance() or QApplication([])
+    board = BoardWindow()
+    board.resize(260, 180)
+    layout = layout_diagram(
+        title="Grand diagram",
+        layout="flow",
+        nodes=[
+            {"id": str(index), "text": "A very wide label"}
+            for index in range(8)
+        ],
+    )
+
+    board.add_commands([DiagramCommand(layout)])
+
+    assert board._gerald[0]["scale"] == 0.85
+    assert board._gerald[0]["x"] >= 0
+    assert board._gerald[0]["y"] >= 0
+    board.close()
+    app.processEvents()
+
+
 def test_clear_gerald_preserves_user_ink():
     app = QApplication.instance() or QApplication([])
     board = BoardWindow()
