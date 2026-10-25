@@ -46,7 +46,6 @@ html,body,#root{margin:0;height:100%;overflow:hidden}
 .td-board-close{position:absolute;z-index:12;top:16px;left:16px;min-height:44px;padding:0 16px;border:1px solid rgba(38,38,38,.12);border-radius:999px;background:rgba(255,255,255,.94);color:#262626;font:500 13px "Google Sans Flex",sans-serif;box-shadow:0 8px 24px rgba(38,38,38,.12)}
 .td-assist{z-index:20}
 .td-assist.live{position:fixed;left:50%;bottom:18px;width:min(940px,calc(100vw - 36px));transform:translateX(-50%);z-index:20}
-.td-assist.board-open{position:fixed;left:calc(50% + 64px);bottom:18px;width:min(940px,calc(100vw - 152px));transform:translateX(-50%);z-index:20}
 .td-mark-layer{position:fixed;inset:0;z-index:9;pointer-events:none;overflow:visible}
 .td-mark-layer svg{position:absolute;inset:0;overflow:visible}
 .td-mark-layer ellipse,.td-mark-layer line{fill:none;stroke:#7C3AED;stroke-width:3;stroke-linecap:round;stroke-linejoin:round;animation:td-mark-in .32s ease both}

@@ -171,7 +171,6 @@ def test_session_posts_sdp_and_filtered_realtime_config(monkeypatch, server):
         "vert (intent=valide)",
         "bleu (intent=remarque)",
         "l'écriture normale reste noire",
-        "souligne aussi le terme fautif en rouge (intent=correction) dans le même tour",
     ):
         assert color_intent in session["instructions"]
     assert "une seule underline ou circle (intent=correction)" in session["instructions"]

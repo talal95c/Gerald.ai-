@@ -52,20 +52,12 @@ export function arrowEndpoints(
   }
 
   const bounds = viewport ?? (typeof window === "undefined" ? undefined : {w: window.innerWidth, h: window.innerHeight});
-  const centerX = to.x + to.w / 2;
-  const spaceAbove = to.y;
-  const spaceBelow = (bounds?.h ?? to.y + to.h + 100) - (to.y + to.h);
-  const above = spaceAbove >= spaceBelow;
-  const direction = above ? -1 : 1;
-  const edgeY = above ? to.y : to.y + to.h;
-  const endY = edgeY + direction * gap;
-  const startY = edgeY + direction * 75;
-  return {
-    x1: Math.max(0, Math.min(bounds?.w ?? Infinity, centerX)),
-    y1: Math.max(0, Math.min(bounds?.h ?? Infinity, startY)),
-    x2: centerX,
-    y2: endY,
+  const corner = {x: to.x - gap, y: to.y - gap};
+  const start = {
+    x: Math.max(0, Math.min(bounds?.w ?? Infinity, corner.x - 70)),
+    y: Math.max(0, Math.min(bounds?.h ?? Infinity, corner.y - 70)),
   };
+  return {x1: start.x, y1: start.y, x2: corner.x, y2: corner.y};
 }
 
 export function animateCursor(

@@ -33,6 +33,7 @@ const liveMode = params.get("live") === "1";
 const docId = params.has("doc") ? Number(params.get("doc")) : null;
 const docMode = docId !== null && Number.isFinite(docId);
 const boardMode = params.get("board") === "1";
+const embedded = params.get("embed") === "1";
 function boundsOfPoints(points:CursorPoint[],padding=0):AnnotationRect {
   const xs=points.map(({x})=>x),ys=points.map(({y})=>y),left=Math.min(...xs),top=Math.min(...ys);
   return {x:left-padding,y:top-padding,w:Math.max(...xs)-left+padding*2,h:Math.max(...ys)-top+padding*2};
@@ -587,7 +588,7 @@ function TD(){
       </svg>
       <div className="gerald-pointer" aria-hidden="true" style={{left:Math.round(cursor.x),top:Math.round(cursor.y),opacity:cursor.visible?1:0}}><i/>Gerald</div>
     </div>
-    <div className={`td-assist${liveMode||docMode?" live":""}${boardOpen?" board-open":""}`}>
+    <div className={`td-assist${liveMode||docMode?" live":""}`}>
       {!voiceMode&&answer&&<div className="td-answer" key={answer.q}><span className="td-q">{answer.q}</span><p>{answer.text||"…"}</p><button className="td-go" onClick={()=>clickExercise(answer.ex)}>Viens, on va au tableau · {answer.ex.title} →</button></div>}
       {voiceMode&&!liveMode&&suggestion&&<button className="td-go" onClick={()=>openBoard(activeExercise.id)}>Viens, on va au tableau · {activeExercise.title} →</button>}
       {voiceMode&&caption&&<div className={`td-caption${captionFading?" fade":""}`}><Reveal text={caption}/></div>}

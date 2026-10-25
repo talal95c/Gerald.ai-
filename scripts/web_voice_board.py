@@ -51,8 +51,7 @@ INTENT_VALUES = ["correction", "valide", "remarque"]
 COLOR_GUIDANCE = (
     "Code couleur : rouge (intent=correction) pour signaler une erreur ou la correction, "
     "vert (intent=valide) pour ce qui est juste, bleu (intent=remarque) pour une remarque "
-    "ou un rappel de méthode ; l'écriture normale reste noire. Si tu montres une erreur "
-    "avec une flèche, souligne aussi le terme fautif en rouge (intent=correction) dans le même tour."
+    "ou un rappel de méthode ; l'écriture normale reste noire."
 )
 TD_EXERCISES = [
     ("exercice-1", "Exercice 1", ["Résous dans ℝ : x² − 5x + 6 = 0"]),
@@ -391,30 +390,6 @@ class WebVoiceHandler(SimpleHTTPRequestHandler):
             "application/json; charset=utf-8",
         )
 
-    def _reject_post(self) -> None:
-        self.close_connection = True
-        try:
-            length = int(self.headers.get("Content-Length", ""))
-            if 0 <= length <= MAX_BODY_BYTES:
-                remaining = length
-                while remaining:
-                    chunk = self.rfile.read(min(65536, remaining))
-                    if not chunk:
-                        break
-                    remaining -= len(chunk)
-        except (ValueError, OSError):
-            pass
-        body = json.dumps(
-            {"ok": False, "error": "origin or host not allowed"}
-        ).encode("utf-8")
-        self.send_response(403)
-        self.send_header("Content-Type", "application/json; charset=utf-8")
-        self.send_header("Content-Length", str(len(body)))
-        self.send_header("Connection", "close")
-        self.send_header("Cache-Control", "no-store")
-        self.end_headers()
-        self.wfile.write(body)
-
     def _read_body(self, limit: int = MAX_BODY_BYTES) -> bytes:
         try:
             length = int(self.headers.get("Content-Length", ""))
@@ -475,7 +450,7 @@ class WebVoiceHandler(SimpleHTTPRequestHandler):
 
     def do_POST(self) -> None:
         if not self._valid_origin():
-            self._reject_post()
+            self._send_json(403, {"ok": False, "error": "origin or host not allowed"})
             return
         parsed = urlsplit(self.path)
         if parsed.path == "/api/session":
