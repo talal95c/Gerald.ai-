@@ -138,7 +138,7 @@ def parse_expression(expression: str) -> Callable[[float], float]:
     if not isinstance(expression, str) or not expression.strip():
         raise ValueError("expr must be a non-empty string")
     try:
-        tree = ast.parse(expression, mode="eval")
+        tree = ast.parse(expression.replace("^", "**"), mode="eval")
     except (SyntaxError, ValueError) as error:
         raise ValueError("expr is not a valid mathematical expression") from error
     try:

@@ -35,7 +35,7 @@ HERE = Path(__file__).parent
 ROOT = HERE.parents[1]
 ASSETS = HERE / "assets"
 ACTION_TOOLS = {"click", "type_text", "press_keys", "scroll"}
-BOARD_TOOLS = {"write", "write_math", "draw_path", "clear_gerald"}
+BOARD_TOOLS = {"write", "write_math", "draw_path", "plot", "clear_gerald"}
 NON_MARK_TOOLS = ACTION_TOOLS | {"save_recap", "search_courses", "clear", "clear_gerald"}
 CRITERIA = [
     "correctness", "explains_why", "guides_not_dumps", "checks_understanding",
@@ -201,9 +201,9 @@ def annotate(image: Image.Image, marks: list[dict[str, Any]], board_ops: list[di
     return Image.alpha_composite(canvas, layer).convert("RGB")
 
 
-def render_rich(image: Image.Image, commands: list[object]) -> Image.Image:
-    """Render diagrams and tips the way Gerald's overlay shows them (Qt offscreen)."""
-    rich = [c for c in commands if type(c).__name__ in {"DiagramCommand", "TipCommand"}]
+def render_rich(image: Image.Image, commands: list[object], scale: float = 1.0) -> Image.Image:
+    """Render diagrams, tips and plots the way Gerald's overlay and board show them (Qt offscreen)."""
+    rich = [c for c in commands if type(c).__name__ in {"DiagramCommand", "TipCommand", "PlotCommand"}]
     if not rich:
         return image
     from PyQt6.QtGui import QColor, QFont, QImage, QPainter
@@ -217,7 +217,14 @@ def render_rich(image: Image.Image, commands: list[object]) -> Image.Image:
     painter.setRenderHint(QPainter.RenderHint.Antialiasing)
     tip_y = 24
     for command in rich:
-        if type(command).__name__ == "DiagramCommand":
+        if type(command).__name__ == "PlotCommand":
+            from gerald.tools.plot_render import draw_plot
+            painter.save()
+            painter.translate(command.box[0] / scale, command.box[1] / scale)
+            painter.scale(1 / scale, 1 / scale)
+            draw_plot(painter, command, 1.0, "DejaVu Sans", QColor("#7C6CF2"))
+            painter.restore()
+        elif type(command).__name__ == "DiagramCommand":
             from gerald.tools.diagram_render import draw_diagram
             layout = command.layout
             scale = max(0.85, min(1.0, rgba.width * 0.46 / max(1, layout.width), rgba.height * 0.6 / max(1, layout.height)))
@@ -293,6 +300,14 @@ async def run_scenario(scenario: dict[str, Any], defaults: dict[str, Any], setti
 
     def on_board_tool(name: str, args: dict[str, Any]) -> str:
         state["board_ops"].append({"name": name, "args": args})
+        if name == "plot":
+            from gerald.tools.plot import build_plot
+            try:
+                plot, result = build_plot(args, state["image_size"])
+            except ValueError as exc:
+                return json.dumps({"ok": False, "error": str(exc)})
+            state["raw"].append(plot)
+            return json.dumps(result, ensure_ascii=False)
         return json.dumps({"ok": True})
 
     client = RealtimeClient(
@@ -321,6 +336,7 @@ async def run_scenario(scenario: dict[str, Any], defaults: dict[str, Any], setti
             if scenario.get("board"):
                 context = f"BOARD MODE\n{context}"
             reset_turn()
+            state["image_size"] = (capture.image_width, capture.image_height)
             actions_before = len(actions.calls)
             await client.start_turn()
             state["t0"] = time.monotonic()
@@ -332,8 +348,8 @@ async def run_scenario(scenario: dict[str, Any], defaults: dict[str, Any], setti
             await asyncio.sleep(0.3)
             target_ids = turn.get("targets", scenario.get("targets", []))
             targets = [targets_by_page[page][t] for t in target_ids if t in targets_by_page.get(page, {})]
-            annotated = annotate(image, [m for m in state["marks"] if m["type"] not in {"ClearCommand", "DiagramCommand", "TipCommand"}], [b for b in state["board_ops"] if b["name"] != "clear_gerald"], capture.scale)
-            annotated = render_rich(annotated, state["raw"])
+            annotated = annotate(image, [m for m in state["marks"] if m["type"] not in {"ClearCommand", "DiagramCommand", "TipCommand"}], [b for b in state["board_ops"] if b["name"] not in {"clear_gerald", "plot"}], capture.scale)
+            annotated = render_rich(annotated, state["raw"], capture.scale)
             image_path = out / f"{scenario['id']}-t{index}.png"
             annotated.save(image_path)
             turns_out.append({
