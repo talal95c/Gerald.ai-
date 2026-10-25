@@ -1,0 +1,42 @@
+{
+ "hook": {
+  "text": "Everyone kept telling me: learn with AI. So I did. And then I tried\u2026 with maths.",
+  "dur": 4.57
+ },
+ "problem": {
+  "text": "Before I can even ask my question, I have to retype every equation. The AI can't see my screen. It can't point. And it just hands me the answer. No wonder maths scores are at a historic low.",
+  "dur": 11.86
+ },
+ "meet": {
+  "text": "So I built Gerald. The AI teacher that lives on your screen. It sees. It talks. It draws. And it makes you think.",
+  "dur": 6.74
+ },
+ "demo1": {
+  "text": "Hold a key, and just talk. Your worksheet is already on screen. I make the classic mistake, and Gerald stops me, and points at the exercise, instead of giving the answer.",
+  "dur": 8.52
+ },
+ "demo2": {
+  "text": "I write on the board, by hand. Gerald follows every line, underlines the sign error in red, and lets me fix it. Only then does it write the clean solution.",
+  "dur": 9.82
+ },
+ "demo3": {
+  "text": "Ask for the parabola, and it plots the real curve: roots, vertex, live, right where you work.",
+  "dur": 5.93
+ },
+ "demo4": {
+  "text": "Same engine, any app. In Photoshop, Gerald points at Shapes, Rectangle, the fill colour, the hex code, and waits for my click at every step, until the red square is on the canvas. Gerald points. You click.",
+  "dur": 13.98
+ },
+ "vs": {
+  "text": "Chatbots are stuck in a chat box. Clicky does the task for you. Gerald is the only one that sees your work, shows you exactly where, writes on it, and lets you try first.",
+  "dur": 9.27
+ },
+ "numbers": {
+  "text": "Zero equations retyped. Thirty-seven times more precise pointing. Half a second to find any target. Pedagogy score from seventy-seven to ninety-three percent. All for a fraction of a cent.",
+  "dur": 12.36
+ },
+ "cta": {
+  "text": "Stop retyping. Stop screenshotting. Just ask Gerald. The first teacher you can actually mute.",
+  "dur": 5.33
+ }
+}

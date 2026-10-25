@@ -3,20 +3,20 @@ import { Audio } from "@remotion/media";
 import { interpolate, staticFile, useCurrentFrame, useVideoConfig } from "remotion";
 import { TransitionSeries, linearTiming } from "@remotion/transitions";
 import { fade } from "@remotion/transitions/fade";
-import { Clicky, Cover, Demo1, Demo2, Demo2b, Demo3, Demo4, Different, How, Llms, Market, Notebook, Numbers, Problem, Solution, Story, Table, Thanks } from "./pitch/scenes";
-import { VOP } from "./voPitch";
+import { Cta, Demo1, Demo2, Demo3, Demo4, Hook, Meet, Numbers, Problem, Vs } from "./pitch/short";
+import { VOP2 as VOP } from "./voPitch2";
 
 export type PitchProps = { readonly music: string; readonly musicVolume: number; readonly voiceOver: boolean };
 
 /** Visual minimum per slide; the demo clips play (almost) whole. */
-const MIN = { cover: 6, story: 8, notebook: 9, problem: 14, solution: 13, different: 11, demo1: 13.5, demo2: 18, demo2b: 10, demo3: 11, demo4: 34.5, clicky: 17, llms: 12, table: 10, how: 12, market: 10, numbers: 10, thanks: 7 } as const;
+const MIN = { hook: 6, problem: 10, meet: 7, demo1: 9.5, demo2: 14, demo3: 7.5, demo4: 15, vs: 8, numbers: 8, cta: 6.5 } as const;
 type Id = keyof typeof MIN;
-export const PITCH_SCENES = (Object.keys(MIN) as Id[]).map((id) => ({ id, s: Math.max(MIN[id], Math.ceil((VOP[id].dur + 1.2) * 2) / 2) }));
+export const PITCH_SCENES = (Object.keys(MIN) as Id[]).map((id) => ({ id, s: Math.max(MIN[id], Math.ceil((VOP[id].dur + 0.9) * 2) / 2) }));
 const X = 0.5;
 export const pitchSeconds = PITCH_SCENES.reduce((a, s) => a + s.s, 0) - X * (PITCH_SCENES.length - 1);
 const start = (id: Id) => { let acc = 0; for (const s of PITCH_SCENES) { if (s.id === id) return acc; acc += s.s - X; } return acc; };
 const dur = (id: Id) => PITCH_SCENES.find((s) => s.id === id)!.s;
-const COMP: Record<Id, React.FC> = { cover: Cover, story: Story, notebook: Notebook, problem: Problem, solution: Solution, different: Different, demo1: Demo1, demo2: Demo2, demo2b: Demo2b, demo3: Demo3, demo4: Demo4, clicky: Clicky, llms: Llms, table: Table, how: How, market: Market, numbers: Numbers, thanks: Thanks };
+const COMP: Record<Id, React.FC> = { hook: Hook, problem: Problem, meet: Meet, demo1: Demo1, demo2: Demo2, demo3: Demo3, demo4: Demo4, vs: Vs, numbers: Numbers, cta: Cta };
 
 const Music: React.FC<{ src: string; volume: number; voiceOver: boolean }> = ({ src, volume, voiceOver }) => {
   const frame = useCurrentFrame();

@@ -30,7 +30,7 @@ export const RemotionRoot: React.FC = () => {
         fps={FPS}
         width={1920}
         height={1080}
-        defaultProps={{ music: "i-wont-surrender.mp3", musicVolume: 0.22, voiceOver: true }}
+        defaultProps={{ music: "training.mp3", musicVolume: 0.3, voiceOver: true }}
       />
     </>
   );
