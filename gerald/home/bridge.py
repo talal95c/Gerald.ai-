@@ -129,7 +129,7 @@ class Bridge(QObject):
                     None,
                     None,
                     getattr(self.settings, "api_key", ""),
-                    model=getattr(self.settings, "model", None),
+                    model=None,
                 )
                 conversation_id, answer = result
                 self.answer.emit(
