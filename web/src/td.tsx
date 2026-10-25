@@ -6,6 +6,7 @@ import "./style.css";
 import { getBridge } from "./bridge";
 import { Orb } from "./orb";
 import { Reveal } from "./reveal";
+import { mountNotch } from "./notch";
 const bridge = getBridge();
 
 const exercises = [
@@ -48,7 +49,7 @@ function AskBar() {
     {answer && <div className="td-answer" key={answer.q}>
       <span className="td-q">{answer.q}</span>
       {answer.text ? <p><Reveal text={answer.text}/></p> : <p><span className="thinking"><i/><i/><i/></span></p>}
-      {answer.text && <button className="td-go" style={{animationDelay:`${answer.text.split(/\s+/).length*80}ms`}} onClick={()=>bridge.openBoard(answer.ex.title, JSON.stringify(answer.ex.lines))}>Viens, on va au tableau · {answer.ex.title} →</button>}
+      {answer.text && (/(?:exercice|exo)\s*\d/i.test(answer.q) || /tableau/i.test(answer.text)) && <button className="td-go" style={{animationDelay:`${answer.text.split(/\s+/).length*80}ms`}} onClick={()=>bridge.openBoard(answer.ex.title, JSON.stringify(answer.ex.lines))}>Viens, on va au tableau · {answer.ex.title} →</button>}
     </div>}
     <form className="td-ask" onSubmit={e=>{e.preventDefault(); send();}}>
       <Orb status={status} size={30}/>
@@ -63,3 +64,9 @@ function TD(){return <main className="td-root"><article className="paper"><heade
   {exercises.map(ex=><section className="exercise" key={ex.title} onClick={()=>bridge.openBoard(ex.title,JSON.stringify(ex.lines))}><p className="exercise-lead"><strong>{ex.title}.</strong><span dangerouslySetInnerHTML={{__html:katex.renderToString(ex.math)}}/></p><p>{ex.instruction}</p><button className="open-ex">Ouvrir au tableau →</button></section>)}
   </article><AskBar/></main>}
 createRoot(document.getElementById("root")!).render(<TD/>);
+if (!window.qt) {
+  const host = document.createElement("div");
+  host.className = "preview-notch-host";
+  document.body.appendChild(host);
+  mountNotch(host);
+}

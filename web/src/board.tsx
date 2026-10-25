@@ -3,14 +3,16 @@ import { createRoot } from "react-dom/client";
 import katex from "katex";
 import "katex/dist/katex.min.css";
 import "./board.css";
+import { mountNotch } from "./notch";
 
 type Pt = {x: number; y: number; p: number};
 type Stroke = {pts: Pt[]; erase: boolean};
 type Win = {x: number; y: number; w: number; h: number};
 
 const params = new URLSearchParams(location.search);
-const title = params.get("title") || "Exercice 1";
-const lines: string[] = (() => { try { const l = JSON.parse(params.get("lines") || "[]"); return l.length ? l : ["Résous dans ℝ : x² − 5x + 6 = 0"]; } catch { return ["Résous dans ℝ : x² − 5x + 6 = 0"]; } })();
+const title = params.get("title")?.trim() ?? "";
+const lines: string[] = (() => { try { const l = JSON.parse(params.get("lines") || "[]"); return Array.isArray(l) ? l.map(String) : []; } catch { return []; } })();
+const canPlot = title === "Exercice 1" && lines.length > 0;
 const f = (x: number) => x * x - 5 * x + 6;
 const X0 = -1, X1 = 6, Y0 = -2, Y1 = 12;
 
@@ -70,7 +72,7 @@ function Board() {
   const canvas = useRef<HTMLCanvasElement>(null);
   const strokes = useRef<Stroke[]>([]);
   const [tool, setTool] = useState("pen");
-  const [plot, setPlot] = useState(true);
+  const [plot, setPlot] = useState(canPlot);
   const [, tick] = useState(0);
   const redraw = () => {
     const c = canvas.current!; const ctx = c.getContext("2d")!; const r = devicePixelRatio;
@@ -111,10 +113,10 @@ function Board() {
   };
   return <main className="board">
     <canvas ref={canvas} className={tool} onPointerDown={down} onPointerMove={move}/>
-    <aside className="ex-card"><div className="ex-label"><i/>{title.toUpperCase()}</div>{lines.map((l, i) => <p key={i}>{l}</p>)}</aside>
+    {title && lines.length > 0 && <aside className="ex-card"><div className="ex-label"><i/>{title.toUpperCase()}</div>{lines.map((l, i) => <p key={i}>{l}</p>)}</aside>}
     {plot && <PlotWindow onClose={() => setPlot(false)}/>}
     <nav className="board-tools">
-      {tools.map(t => <button key={t.id} className={(t.id === tool || (t.id === "plot" && plot)) ? "on" : ""} onClick={() => act(t.id)} title={t.label} aria-label={t.label}>
+      {tools.filter(t => t.id !== "plot" || canPlot).map(t => <button key={t.id} className={(t.id === tool || (t.id === "plot" && plot)) ? "on" : ""} onClick={() => act(t.id)} title={t.label} aria-label={t.label}>
         <svg viewBox="0 0 20 20"><path d={t.d}/></svg></button>)}
       <span className="sep"/>
       <button className="close" onClick={() => history.length > 1 ? history.back() : window.close()} aria-label="Fermer le tableau">Fermer</button>
@@ -123,3 +125,9 @@ function Board() {
 }
 void katex;
 createRoot(document.getElementById("root")!).render(<Board/>);
+if (!window.qt) {
+  const host = document.createElement("div");
+  host.className = "preview-notch-host";
+  document.body.appendChild(host);
+  mountNotch(host);
+}

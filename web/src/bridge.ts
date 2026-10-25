@@ -7,6 +7,8 @@ export type AppState = {
   conversations: Conversation[];
   session_open: boolean;
   recap_pending: boolean;
+  last_exercise: {title: string; lines: string[]} | null;
+  recap?: string;
 };
 
 type Signal<T> = { connect: (callback: (value: T) => void) => void; disconnect?: (callback: (value: T) => void) => void };
@@ -44,7 +46,7 @@ const mockSignal = <T,>(): Signal<T> => ({ connect: () => undefined });
 const mock: GeraldBridge = {
   state: cb => cb(JSON.stringify({
     greeting: "Bonjour.", hotkey_label: "CTRL + SHIFT", documents: [],
-    conversations: [], session_open: false, recap_pending: false
+    conversations: [], session_open: false, recap_pending: false, last_exercise: null
   })),
   stateChanged: mockSignal<string>(), modeChanged: mockSignal<string>(),
   answer: mockSignal<string>(), answerError: mockSignal<string>(), recapReady: mockSignal<string>(),

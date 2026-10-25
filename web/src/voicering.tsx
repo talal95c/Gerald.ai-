@@ -8,8 +8,7 @@ void main(){vec2 uv=gl_FragCoord.xy/uRes*2.-1.;float t=uTime*.5;float a=clamp(uA
 float r=.42+a*.2+sin(t*.9)*.02;float th=.14+a*.1+sin(t*.63)*.018;float d=length(uv);
 float ring=smoothstep(r+th,r,d)-smoothstep(r,r-th,d);float glow=exp(-7.*abs(d-r));float halo=exp(-3.2*d*(1.+a*.35));
 float v=clamp(ring*.75+glow*.5+halo*.08,0.,1.)*smoothstep(.95,.7,d);float s=step(bayer(gl_FragCoord.xy),v);
-vec3 col=mix(vec3(.43,.48,1.),vec3(.95,.78,.95),clamp(uv.x*.5+uv.y*-.5+.5,0.,1.));
-gl_FragColor=vec4(mix(col,vec3(1.),.35)*s,s);}`;
+gl_FragColor=vec4(vec3(1.)*s,s);}`;
 
 export function VoiceRing({active, size}: {active: boolean; size: number}) {
   const canvas = useRef<HTMLCanvasElement>(null);

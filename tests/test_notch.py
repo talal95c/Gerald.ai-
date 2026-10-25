@@ -66,6 +66,18 @@ def test_bridge_open_board_passes_exercise_and_tracks_session():
     assert bridge._session_open
 
 
+def test_bridge_state_tracks_last_opened_exercise():
+    bridge = Bridge(EmptyStore(), object(), object(), open_board=lambda _title, _lines: None)
+    assert json.loads(bridge.state())["last_exercise"] is None
+
+    bridge.openBoard("Exercice 2", '["a"]')
+
+    assert json.loads(bridge.state())["last_exercise"] == {
+        "title": "Exercice 2",
+        "lines": ["a"],
+    }
+
+
 def test_bridge_open_td_emits_request():
     bridge = Bridge(EmptyStore(), object(), object())
     requested = []

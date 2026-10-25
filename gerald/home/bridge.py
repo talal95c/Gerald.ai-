@@ -65,6 +65,7 @@ class Bridge(QObject):
         self.on_library_changed = on_library_changed
         self.mode = "greeting"
         self._session_open = False
+        self._last_exercise: tuple[str, list[str]] | None = None
         self._recap_requested_at: float | None = None
         self._recap_dir = Path.home() / "Gerald" / "lessons"
         self._fallback_board = None
@@ -106,6 +107,11 @@ class Bridge(QObject):
                 "conversations": conversations,
                 "session_open": self._session_open,
                 "recap_pending": self._recap_requested_at is not None,
+                "last_exercise": (
+                    {"title": self._last_exercise[0], "lines": self._last_exercise[1]}
+                    if self._last_exercise is not None
+                    else None
+                ),
             },
             ensure_ascii=False,
         )
@@ -195,6 +201,7 @@ class Bridge(QObject):
         if not isinstance(lines, list):
             lines = []
         lines = [str(line) for line in lines]
+        self._last_exercise = (title, lines)
         if self.open_board is not None:
             self.open_board(title, lines)
         else:

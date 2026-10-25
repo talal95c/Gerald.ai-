@@ -19,6 +19,12 @@ DOCS = ROOT / "docs"
 
 MOCK_BRIDGE = """
 (() => {
+  const storageKey = "gerald-preview-state";
+  const saved = JSON.parse(sessionStorage.getItem(storageKey) || "{}");
+  const persist = () => sessionStorage.setItem(storageKey, JSON.stringify({
+    session_open: state.session_open, recap_pending: state.recap_pending,
+    recap: state.recap, last_exercise: state.last_exercise
+  }));
   const signal = () => {
     const listeners = [];
     return { connect: fn => listeners.push(fn), emit: value => listeners.forEach(fn => fn(value)) };
@@ -37,7 +43,8 @@ MOCK_BRIDGE = """
       {id: 1, title: "Résoudre une équation du second degré", source: "chat", updated_at: "2025-02-15T12:00:00+00:00"},
       {id: 2, title: "Méthode du discriminant", source: "agent", updated_at: "2025-02-14T12:00:00+00:00"}
     ],
-    session_open: false, recap_pending: false
+    session_open: saved.session_open ?? false, recap_pending: saved.recap_pending ?? false,
+    recap: saved.recap ?? "", last_exercise: saved.last_exercise ?? null
   };
   const signals = {
     stateChanged: signal(), modeChanged: signal(), answer: signal(),
@@ -54,20 +61,34 @@ MOCK_BRIDGE = """
     setMode: mode => signals.modeChanged.emit(mode),
     ask: question => {
       signals.agentStatus.emit("thinking");
-      const td = /TD|exercice|exo/i.test(question);
+      const normalized = String(question).normalize("NFD").replace(/[\u0300-\u036f]/g, "").toLowerCase();
+      const match = normalized.match(/(?:exercice|exo)\s*(\d)/);
+      const number = Math.min(4, Math.max(1, Number(match?.[1] || 1)));
+      const equations = ["x² − 5x + 6 = 0", "2x² + 3x − 2 = 0", "x² − 4x + 1 = 0", "x² − x − 6 = 0"];
+      const broad = /exercice|exo|td|methode|comprends|bloque/.test(normalized);
+      const text = /delta|discriminant/.test(normalized)
+        ? "Le discriminant se calcule avec Δ = b² − 4ac. Ici, Δ = 25 − 24 = 1."
+        : /racine|solution/.test(normalized)
+          ? "Les solutions viennent de x = (−b ± √Δ) / 2a. Ici, x₁ = 2 et x₂ = 3."
+          : /canonique/.test(normalized)
+            ? "La forme canonique est a(x − α)² + β, avec α = −b/2a. Pour l’exercice 3, α = 2 et β = −3."
+            : /signe/.test(normalized)
+              ? "Le signe du trinôme est celui de a à l’extérieur des racines. Pour l’exercice 4, elles sont −2 et 3."
+              : broad
+                ? `Ici, ${equations[number - 1]} est un polynôme du second degré. Viens, on va au tableau pour l’exercice ${number}.`
+                : "Je regarde ça avec toi : dis-moi sur quel exercice tu bloques, ou ouvre le TD.";
+      const td = broad;
       setTimeout(() => {
         signals.agentStatus.emit("speaking");
         signals.answer.emit(JSON.stringify({
-          text: td
-            ? "Ici, x² − 5x + 6 = 0 est un polynôme du second degré : on ne peut pas l’isoler comme une fonction affine. Repère a = 1, b = −5 et c = 6, puis calcule Δ = b² − 4ac. Viens, on va au tableau, je t’explique pas à pas."
-            : "Le discriminant vaut Δ = b² − 4ac. Ici, Δ = 1, donc l’équation possède deux racines réelles.",
+          text,
           sources: [{document: td ? "TD 4 — Polynômes du second degré.pdf" : "Polynômes du second degré.md", page: 1}]
         }));
         setTimeout(() => signals.agentStatus.emit("idle"), 2600);
       }, 900);
     },
     documentText: (id, callback) => callback(id === 1
-      ? "Polynômes du second degré\n\nUn polynôme du second degré s’écrit f(x) = ax² + bx + c avec a ≠ 0.\n\nDiscriminant\nOn pose Δ = b² − 4ac.\n• Si Δ > 0 : deux racines x₁ = (−b − √Δ) / 2a et x₂ = (−b + √Δ) / 2a.\n• Si Δ = 0 : une racine double x₀ = −b / 2a.\n• Si Δ < 0 : pas de racine réelle.\n\nExemple\nx² − 5x + 6 = 0 : a = 1, b = −5, c = 6, Δ = 25 − 24 = 1, donc x₁ = 2 et x₂ = 3."
+      ? `Polynômes du second degré\n\nUn polynôme du second degré s’écrit f(x) = ax² + bx + c avec a ≠ 0.\n\nDiscriminant\nOn pose Δ = b² − 4ac.\n• Si Δ > 0 : deux racines x₁ = (−b − √Δ) / 2a et x₂ = (−b + √Δ) / 2a.\n• Si Δ = 0 : une racine double x₀ = −b / 2a.\n• Si Δ < 0 : pas de racine réelle.\n\nExemple\nx² − 5x + 6 = 0 : a = 1, b = −5, c = 6, Δ = 25 − 24 = 1, donc x₁ = 2 et x₂ = 3.`
       : "Aperçu de démonstration de ce document."),
     messages: (_id, callback) => callback(JSON.stringify([
       {role: "assistant", text: "On commence par calculer le discriminant."},
@@ -75,13 +96,39 @@ MOCK_BRIDGE = """
     ])),
     addDocuments: () => {},
     deleteDocument: () => {},
-    openBoard: (title, lines) => { if (location.protocol !== "file:") location.href = "board.html?title=" + encodeURIComponent(title) + "&lines=" + encodeURIComponent(lines); },
+    openBoard: (title, lines) => {
+      let parsed = [];
+      try { parsed = JSON.parse(lines); } catch {}
+      state.session_open = true;
+      state.last_exercise = {title, lines: parsed};
+      persist();
+      if (location.protocol !== "file:") location.href = "board.html?title=" + encodeURIComponent(title) + "&lines=" + encodeURIComponent(lines);
+    },
     openTd: () => { if (location.protocol !== "file:") location.href = "td.html"; },
     requestFocus: () => {},
-    endSession: () => {},
-    openRecap: () => {},
+    endSession: () => {
+      state.recap_pending = true; persist(); signals.stateChanged.emit(JSON.stringify(state));
+      setTimeout(() => {
+        state.session_open = false; state.recap_pending = false; state.recap = "fiche.html";
+        persist(); signals.recapReady.emit(state.recap); signals.stateChanged.emit(JSON.stringify(state));
+      }, 1200);
+    },
+    openRecap: path => { if (location.protocol !== "file:") location.href = path; },
     quit: () => {}
   };
+  let listening = false;
+  window.addEventListener("keydown", event => {
+    if (event.ctrlKey && event.shiftKey && !listening) {
+      listening = true; signals.agentStatus.emit("listening");
+    }
+  });
+  window.addEventListener("keyup", event => {
+    if (listening && ["Control", "Shift"].includes(event.key)) {
+      listening = false; signals.agentStatus.emit("thinking");
+      setTimeout(() => signals.agentStatus.emit("speaking"), 900);
+      setTimeout(() => signals.agentStatus.emit("idle"), 2600);
+    }
+  });
 })();
 """
 
