@@ -7,7 +7,7 @@ import "./board.css";
 import {getBridge} from "./bridge";
 import {Orb} from "./orb";
 import {Reveal} from "./reveal";
-import {annotationLeader, annotationSize, arrowEndpoints, arrowEndpointsAroundTarget, arrowEndpointsFromSource, createCursorMotion, cursorRestBeside, intentColor, placeAnnotation, pointsToPath, seedFrom, sketchArrow, sketchEllipsePoints, type AnnotationRect, type CursorMotion, type CursorPoint, type CursorVisual} from "./annotations";
+import {annotationLeader, annotationSize, arrowEndpointsAroundTarget, arrowEndpointsFromSource, createCursorMotion, cursorRestBeside, intentColor, placeAnnotation, pointsToPath, seedFrom, sketchArrow, sketchEllipsePoints, type AnnotationRect, type CursorMotion, type CursorPoint, type CursorVisual} from "./annotations";
 import {mountNotch} from "./notch";
 import * as pdfjs from "pdfjs-dist";
 import pdfWorker from "pdfjs-dist/build/pdf.worker.min.mjs?url";
@@ -171,6 +171,19 @@ function targetRect(args:Record<string,any>):Rect|null {
   if (!element && typeof args.target_text === "string") {
     const pattern=textPattern(args.target_text);
     element = elements.find(e => pattern.test(e.innerText));
+  }
+  if (!element && typeof args.target_text !== "string" && typeof args.x === "number" && typeof args.y === "number") {
+    if (typeof args.w !== "number" && typeof args.h !== "number") {
+      const containing = elements.filter(item=>item.getClientRects().length).map(item => {
+        const rect=item.getBoundingClientRect();
+        return {element:item,rect:{x:rect.x,y:rect.y,w:rect.width,h:rect.height}};
+      }).filter(item =>
+        args.x >= item.rect.x && args.x <= item.rect.x + item.rect.w
+        && args.y >= item.rect.y && args.y <= item.rect.y + item.rect.h,
+      ).sort((left,right)=>left.rect.w*left.rect.h-right.rect.w*right.rect.h);
+      if(containing[0])return containing[0].rect;
+    }
+    return {x:args.x,y:args.y,w:typeof args.w==="number"?args.w:120,h:typeof args.h==="number"?args.h:38};
   }
   if (!element) return null;
   let rect = element.getBoundingClientRect();
@@ -359,14 +372,24 @@ function TD(){
     const color=intentColor(args.intent);
     const highlightFill=intentColor(args.intent,null,0.16);
     const resolveTarget=(target:Record<string,any>)=>paintMode?paintTargetRect(target):targetRect(target);
-    const from=name==="arrow"?resolveTarget(args.from??{}):resolveTarget(args);
+    const fromArgs=name==="arrow"?args.from??{}:{};
+    const fromIsPoint=name==="arrow"&&typeof fromArgs.x==="number"&&typeof fromArgs.y==="number"
+      &&typeof fromArgs.w!=="number"&&typeof fromArgs.h!=="number"
+      &&typeof fromArgs.target_text!=="string"&&typeof fromArgs.element_id!=="number";
+    const from=name==="arrow"&&fromIsPoint
+      ?{x:fromArgs.x,y:fromArgs.y,w:0,h:0}
+      :name==="arrow"?resolveTarget(fromArgs):resolveTarget(args);
     const to=name==="arrow"?resolveTarget(args.to??{}):null;
     const boardClosedHint=boardOpenRef.current?"":" Le tableau est fermé : ce texte n’existe peut-être que sur le tableau. Vise un élément visible du TD ci-dessus, ou rouvre le tableau avec open_board si l’élève parle de ce qu’il y a écrit.";
     if(name==="arrow"&&!to){
       const visible=elements().slice(0,40).map(e=>`[${e.id}] ${e.text.slice(0,100)}`).join("; ");
       return {ok:false,error:`arrow target was not found. Visible targets: ${visible}${boardClosedHint}`};
     }
-    const containsTarget=!!(from&&to&&to.x>=from.x-2&&to.y>=from.y-2&&to.x+to.w<=from.x+from.w+2&&to.y+to.h<=from.y+from.h+2);
+    const containsTarget=!!(from&&to&&(
+      to.x>=from.x-2&&to.y>=from.y-2&&to.x+to.w<=from.x+from.w+2&&to.y+to.h<=from.y+from.h+2
+      ||from.w===0&&from.h===0&&from.x>=to.x-2&&from.x<=to.x+to.w+2&&from.y>=to.y-2&&from.y<=to.y+to.h+2
+      ||from.x<to.x+to.w&&from.x+from.w>to.x&&from.y<to.y+to.h&&from.y+from.h>to.y
+    ));
     const arrowFrom=name==="arrow"&&to&&(!from||containsTarget)
       ? {x:Math.min(innerWidth-2,to.x+to.w+60),y:Math.max(2,to.y-60),w:1,h:1}
       : from;

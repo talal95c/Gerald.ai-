@@ -3,7 +3,7 @@ import { createRoot } from "react-dom/client";
 import katex from "katex";
 import "katex/dist/katex.min.css";
 import "./board.css";
-import {annotationLeader, annotationSize, arrowEndpoints, arrowEndpointsAroundTarget, arrowEndpointsFromSource, createCursorMotion, cursorRestBeside, intentColor, placeAnnotation, pointsToPath, seedFrom, sketchArrow, sketchEllipsePoints, segmentBoardText, type AnnotationRect, type BoardTextPart, type CursorMotion, type CursorPoint, type CursorVisual} from "./annotations";
+import {annotationLeader, annotationSize, arrowEndpointsAroundTarget, arrowEndpointsFromSource, createCursorMotion, cursorRestBeside, intentColor, placeAnnotation, pointsToPath, seedFrom, sketchArrow, sketchEllipsePoints, segmentBoardText, type AnnotationRect, type BoardTextPart, type CursorMotion, type CursorPoint, type CursorVisual} from "./annotations";
 import { mountNotch } from "./notch";
 
 type Pt = {x: number; y: number; p: number};
@@ -839,6 +839,13 @@ function Board() {
     const ink = elements().find((item) => item.id === elementId && item.id >= 10000);
     if (ink) return ink.rect;
     if (!wanted && isNumber(args.x) && isNumber(args.y)) {
+      if (!isNumber(args.w) && !isNumber(args.h)) {
+        const containing = elements().filter((item) =>
+          args.x >= item.rect.x && args.x <= item.rect.x + item.rect.w
+          && args.y >= item.rect.y && args.y <= item.rect.y + item.rect.h,
+        ).sort((left, right) => left.rect.w * left.rect.h - right.rect.w * right.rect.h);
+        if (containing[0]) return containing[0].rect;
+      }
       return {x: args.x, y: args.y, w: isNumber(args.w) ? args.w : 120, h: isNumber(args.h) ? args.h : 38};
     }
     return null;
@@ -932,11 +939,23 @@ function Board() {
       return {ok: true, target: {x: point.x, y: point.y, w: point.w, h: point.h}, annotation: placement.rect};
     }
     if (name === "arrow") {
-      const from = targetRect((args.from ?? {}) as Record<string, unknown>);
+      const fromArgs = (args.from ?? {}) as Record<string, unknown>;
+      const fromIsPoint = isNumber(fromArgs.x) && isNumber(fromArgs.y)
+        && !isNumber(fromArgs.w) && !isNumber(fromArgs.h)
+        && typeof fromArgs.target_text !== "string" && !isNumber(fromArgs.element_id);
+      const from = fromIsPoint
+        ? {x: Number(fromArgs.x), y: Number(fromArgs.y), w: 0, h: 0}
+        : targetRect(fromArgs);
       const to = targetRect((args.to ?? {}) as Record<string, unknown>);
       if (!to) return {ok: false, error: `target not found. Visible targets: ${visibleTargetSummary()}`};
-      const containsTarget = !!from && to.x >= from.x - 2 && to.y >= from.y - 2
-        && to.x + to.w <= from.x + from.w + 2 && to.y + to.h <= from.y + from.h + 2;
+      const containsTarget = !!from && (
+        to.x >= from.x - 2 && to.y >= from.y - 2
+          && to.x + to.w <= from.x + from.w + 2 && to.y + to.h <= from.y + from.h + 2
+        || from.w === 0 && from.h === 0 && from.x >= to.x - 2 && from.x <= to.x + to.w + 2
+          && from.y >= to.y - 2 && from.y <= to.y + to.h + 2
+        || from.x < to.x + to.w && from.x + from.w > to.x
+          && from.y < to.y + to.h && from.y + from.h > to.y
+      );
       const endpoints = !from || containsTarget
         ? arrowEndpointsAroundTarget(to, elements().map((item) => item.rect), viewport())
         : arrowEndpointsFromSource(from, to, elements().map((item) => item.rect), viewport());

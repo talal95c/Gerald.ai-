@@ -101,6 +101,12 @@ function arrowTouchesRect(start: CursorPoint, end: CursorPoint, rect: Annotation
     || segmentIntersectsRect(end, {x: wing.x - side.x, y: wing.y - side.y}, rect);
 }
 
+function overlapsTargetRect(target: AnnotationRect, rect: AnnotationRect): boolean {
+  const overlapWidth = Math.max(0, Math.min(target.x + target.w, rect.x + rect.w) - Math.max(target.x, rect.x));
+  const overlapHeight = Math.max(0, Math.min(target.y + target.h, rect.y + rect.h) - Math.max(target.y, rect.y));
+  return rect.w * rect.h > 0 && overlapWidth * overlapHeight >= rect.w * rect.h * 0.5;
+}
+
 export function arrowEndpointsAroundTarget(
   target: AnnotationRect,
   obstacles: AnnotationRect[],
@@ -113,10 +119,7 @@ export function arrowEndpointsAroundTarget(
     {x: target.x + target.w + 70, y: target.y - 70},
     {x: center.x, y: target.y + target.h + 70},
   ];
-  const otherRects = obstacles.filter((rect) =>
-    !(target.x >= rect.x && target.y >= rect.y
-      && target.x + target.w <= rect.x + rect.w && target.y + target.h <= rect.y + rect.h),
-  );
+  const otherRects = obstacles.filter((rect) => !overlapsTargetRect(target, rect));
   for (const start of candidates) {
     if (start.x < 0 || start.y < 0 || start.x > viewport.w || start.y > viewport.h) continue;
     const dx = start.x - center.x;
@@ -141,16 +144,23 @@ export function arrowEndpointsFromSource(
   obstacles: AnnotationRect[],
   viewport: {w: number; h: number},
 ): ArrowEndpoints | null {
-  const clipped = arrowEndpoints(source, target, 2, viewport);
-  if (!clipped) return null;
+  const sourceCenter = {x: source.x + source.w / 2, y: source.y + source.h / 2};
   const center = {x: target.x + target.w / 2, y: target.y + target.h / 2};
-  const direction = Math.atan2(clipped.y1 - center.y, clipped.x1 - center.x);
-  const otherRects = obstacles.filter((rect) => {
-    const contains = (inner: AnnotationRect, outer: AnnotationRect) =>
-      inner.x >= outer.x && inner.y >= outer.y
-      && inner.x + inner.w <= outer.x + outer.w && inner.y + inner.h <= outer.y + outer.h;
-    return !contains(target, rect) && !contains(source, rect);
-  }).map((rect) => ({x: rect.x - 4, y: rect.y - 4, w: rect.w + 8, h: rect.h + 8}));
+  const dx = center.x - sourceCenter.x;
+  const dy = center.y - sourceCenter.y;
+  const length = Math.hypot(dx, dy) || 1;
+  const unit = {x: dx / length, y: dy / length};
+  const sourceIsPoint = source.w <= 0 && source.h <= 0;
+  const startDistance = sourceIsPoint ? 0 : Math.min(
+    unit.x === 0 ? Infinity : source.w / 2 / Math.abs(unit.x),
+    unit.y === 0 ? Infinity : source.h / 2 / Math.abs(unit.y),
+  );
+  const start = {x: sourceCenter.x + unit.x * startDistance, y: sourceCenter.y + unit.y * startDistance};
+  if (start.x < 0 || start.y < 0 || start.x > viewport.w || start.y > viewport.h) return null;
+  const direction = Math.atan2(start.y - center.y, start.x - center.x);
+  const otherRects = obstacles.filter((rect) =>
+    !overlapsTargetRect(target, rect) && !overlapsTargetRect(source, rect),
+  ).map((rect) => ({x: rect.x - 4, y: rect.y - 4, w: rect.w + 8, h: rect.h + 8}));
   for (const offset of [0, 0.35, -0.35, 0.7, -0.7]) {
     const angle = direction + offset;
     const unit = {x: Math.cos(angle), y: Math.sin(angle)};
@@ -159,8 +169,8 @@ export function arrowEndpointsFromSource(
       unit.y === 0 ? Infinity : target.h / 2 / Math.abs(unit.y),
     );
     const tip = {x: center.x + unit.x * (edge + 2), y: center.y + unit.y * (edge + 2)};
-    if (otherRects.some((rect) => arrowTouchesRect({x: clipped.x1, y: clipped.y1}, tip, rect))) continue;
-    return {...clipped, x2: tip.x, y2: tip.y};
+    if (otherRects.some((rect) => arrowTouchesRect(start, tip, rect))) continue;
+    return {x1: start.x, y1: start.y, x2: tip.x, y2: tip.y};
   }
   return null;
 }
