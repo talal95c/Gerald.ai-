@@ -1,4 +1,8 @@
-import json, os, subprocess, sys, urllib.request
+import json
+import os
+import subprocess
+import sys
+import urllib.request
 VOICE = sys.argv[1] if len(sys.argv) > 1 else "ash"
 LINES = [
  ("hook",  "11 p.m. One exercise. Stuck. Alone. That ends today."),
@@ -19,7 +23,8 @@ for name, text in LINES:
         with urllib.request.urlopen(req, timeout=120) as r:
             open(f"public/audio/vo/{name}.mp3", "wb").write(r.read())
     except urllib.error.HTTPError as e:
-        print(name, "HTTP", e.code, e.read()[:300]); continue
+        print(name, "HTTP", e.code, e.read()[:300])
+        continue
     d = float(subprocess.run(["ffprobe","-v","error","-show_entries","format=duration","-of","csv=p=0",f"public/audio/vo/{name}.mp3"],capture_output=True,text=True).stdout)
     out[name] = {"text": text, "dur": round(d, 2)}
     print(name, round(d,2), "s")
