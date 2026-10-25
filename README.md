@@ -66,7 +66,7 @@ Captures : [accueil](docs/notch-greeting.png), [encoche réduite](docs/notch-col
 [chat](docs/notch-panel.png), [documents](docs/notch-settings-documents.png),
 [historique](docs/notch-settings-historique.png), [TD](docs/td-exercises.png),
 [exercice au survol](docs/td-hover.png) et
-[exercice au tableau](docs/board-exercise.png).
+[exercice au tableau](docs/board-exercise.png), [tracé](docs/board-plot.png).
 
 ## Free GPU fallback (Colab)
 

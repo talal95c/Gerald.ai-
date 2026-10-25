@@ -14,7 +14,7 @@ from gerald.overlay.window import _system_font_family, screen_mapping_for_qscree
 from gerald.tools.diagram import DiagramCommand
 from gerald.tools.diagram_render import draw_diagram
 from gerald.tools.plot import build_plot
-from gerald.tools.plot_render import draw_plot
+from gerald.tools.plot_render import PlotPalette, draw_plot
 from gerald.tools.registry import (
     ArrowCommand,
     CircleCommand,
@@ -28,6 +28,20 @@ from gerald.tools.registry import (
 
 PAPER = QColor("#F7F6F3")
 BOARD_MARK = QColor("#E8C547")
+PLOT_PALETTE = PlotPalette(
+    curve="#262626",
+    secondary_curves=("#E8C547", "#545454"),
+    point_fill="#E8C547",
+    point_outline="#262626",
+    label_fill="#F7F6F3",
+    label_border="#E1DFDB",
+    label_text="#262626",
+    grid="#ECEBE7",
+    axis="#262626",
+    tick="#6D6D6D",
+    card="#FFFFFF",
+    card_border="#E1DFDB",
+)
 
 
 def group_strokes(strokes: list[list[tuple[float, float, float]]], distance: float = 24) -> list[tuple[float, float, float, float]]:
@@ -93,14 +107,14 @@ class BoardWindow(QWidget):
         self._reveal_timer.timeout.connect(self._advance_reveals)
         self._toolbar = QFrame(self)
         self._toolbar.setStyleSheet(
-            "QFrame { background: #161616; border-radius: 22px; }"
+            "QFrame { background: #161616; border-radius: 28px; }"
             "QPushButton { color: #F7F6F3; background: transparent; border: 0; "
             "padding: 5px 10px; font: 11px 'Google Sans Flex'; }"
-            "QPushButton:hover { background: rgba(255,255,255,0.10); border-radius: 18px; }"
+            "QPushButton:hover { background: rgba(255,255,255,0.10); border-radius: 22px; }"
         )
-        self._toolbar.setFixedHeight(44)
+        self._toolbar.setFixedHeight(56)
         toolbar = QHBoxLayout(self._toolbar)
-        toolbar.setContentsMargins(6, 4, 6, 4)
+        toolbar.setContentsMargins(6, 6, 6, 6)
         toolbar.setSpacing(2)
         self._tool_buttons: dict[str, QPushButton] = {}
         for name, callback in (
@@ -111,7 +125,7 @@ class BoardWindow(QWidget):
             ("Fermer", self.close),
         ):
             button = QPushButton(name, self._toolbar)
-            button.setFixedHeight(36)
+            button.setFixedHeight(44)
             button.clicked.connect(callback)
             toolbar.addWidget(button)
             if name in {"Stylo", "Gomme"}:
@@ -548,8 +562,8 @@ class BoardWindow(QWidget):
                     painter,
                     plot,
                     min(1.0, (time.monotonic() - item["created"]) / 0.6),
-                    _system_font_family(),
-                    ACCENT,
+                    "Google Sans Flex",
+                    PLOT_PALETTE,
                 )
                 painter.restore()
             elif item["kind"] == "command":

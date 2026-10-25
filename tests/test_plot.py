@@ -9,7 +9,7 @@ from PyQt6.QtGui import QColor
 from PyQt6.QtWidgets import QApplication
 
 from gerald.board import BoardWindow
-from gerald.tools.plot import build_plot, parse_expression
+from gerald.tools.plot import PLOT_INSETS, build_plot, parse_expression
 from gerald.tools.registry import BOARD_TOOL_NAMES, TOOL_SCHEMAS
 
 
@@ -99,5 +99,14 @@ def test_board_plot_renders_and_returns_point_image_coordinates():
     image = board.grab().toImage()
     assert not image.isNull()
     assert image.pixelColor(x + 20, y + 20) == QColor("#FFFFFF")
+    plot = board._gerald[0]["plot"]
+    left, top, right, bottom = PLOT_INSETS
+    graph_left, graph_top = left, top
+    graph_width = width - left - right
+    graph_height = height - top - bottom
+    axis_x = round(x + graph_left + (0 - plot.x_min) / (plot.x_max - plot.x_min) * graph_width)
+    curve_y = graph_top + (plot.y_max - 6) / (plot.y_max - plot.y_min) * graph_height
+    probe_y = round(y + (graph_top + curve_y) / 2)
+    assert image.pixelColor(axis_x, probe_y).red() < 100
     board.close()
     app.processEvents()

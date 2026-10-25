@@ -139,9 +139,12 @@ def test_toolbar_is_visible_and_centered_at_top():
 
     toolbar = board._toolbar
     assert toolbar.isVisible()
+    assert toolbar.height() == 56
     assert toolbar.y() == 20
     assert toolbar.x() == (board.width() - toolbar.width()) // 2
-    assert [button.text() for button in toolbar.findChildren(QPushButton)] == [
+    buttons = toolbar.findChildren(QPushButton)
+    assert all(button.height() >= 44 for button in buttons)
+    assert [button.text() for button in buttons] == [
         "Stylo",
         "Gomme",
         "Annuler",
@@ -253,6 +256,41 @@ def test_tablet_eraser_press_uses_eraser_path_without_creating_stroke(monkeypatc
     assert board._current is None
     assert len(board.user_strokes) == 1
     assert event.accepted
+    board.close()
+    app.processEvents()
+
+
+def test_tablet_stroke_retains_pen_pressure():
+    from PyQt6.QtCore import QPointF
+
+    class Event:
+        class Type:
+            TabletPress = 1
+            TabletMove = 2
+
+        def __init__(self, event_type, position, pressure):
+            self._type = event_type
+            self._position = position
+            self._pressure = pressure
+
+        def type(self):
+            return self._type
+
+        def position(self):
+            return self._position
+
+        def pressure(self):
+            return self._pressure
+
+        def accept(self):
+            pass
+
+    app = QApplication.instance() or QApplication([])
+    board = BoardWindow()
+    board.tabletEvent(Event(Event.Type.TabletPress, QPointF(30, 40), 0.7))
+    board.tabletEvent(Event(Event.Type.TabletMove, QPointF(35, 45), 0.4))
+
+    assert board.user_strokes == [[(30.0, 40.0, 0.7), (35.0, 45.0, 0.4)]]
     board.close()
     app.processEvents()
 
