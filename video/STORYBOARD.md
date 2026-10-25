@@ -1,4 +1,4 @@
-# Storyboard — vidéo de lancement Gerald (~53 s, soumission hackathon)
+# Storyboard — Gerald launch video (~55 s, hackathon submission) — copy and voice-over in English (Talal: « en anglais »); the table below keeps the French wording of the previous cut, see `scripts_vo.py` for the current lines
 
 Lisible sans le son (une capsule de texte par scène) + voix off française (OpenAI gpt-4o-mini-tts, voix `ash`, script dans `scripts_vo.py`, normalisée à −16 LUFS). Musique Mixkit *Motivating Mornings* (0.3, ducking ×0.45 sous la voix). DA landing, accents violet #7C3AED. Les trois clips réels du site live (1440×900, muets, bulles de Gerald à l'écran) sont dans `public/footage/` et cadrés en 16:10 dans la scène gradient.
 

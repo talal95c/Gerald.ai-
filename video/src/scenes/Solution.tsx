@@ -19,10 +19,10 @@ export const Meet: React.FC = () => {
     <Bg>
       <AbsoluteFill style={{ alignItems: "center", justifyContent: "center", textAlign: "center" }}>
         <div style={{ opacity: brand, scale: `${0.85 + 0.15 * brand}`, filter: `blur(${(1 - brand) * 12}px)` }}><Brand size={120} /></div>
-        <Reveal at={0.9} style={{ marginTop: 40 }}><Badge dot>Le prof particulier qui vit sur votre écran</Badge></Reveal>
-        <Reveal at={1.2} style={{ marginTop: 30 }}><H size={100}>Il voit. Il parle. Il dessine.<br />Vous apprenez enfin.</H></Reveal>
+        <Reveal at={0.9} style={{ marginTop: 40 }}><Badge dot>The private tutor that lives on your screen</Badge></Reveal>
+        <Reveal at={1.2} style={{ marginTop: 30 }}><H size={100}>It sees. It talks. It draws.<br />You finally learn.</H></Reveal>
         <Reveal at={2.4} style={{ marginTop: 40, display: "flex", alignItems: "center", gap: 14, font: `30px ${FONT.body}`, color: T.mut }}>
-          <Orb size={26} /> Maintenez <Keycap label="Ctrl" pressed={press} size={30} /> + <Keycap label="Shift" pressed={press} size={30} /> et parlez
+          <Orb size={26} /> Hold <Keycap label="Ctrl" pressed={press} size={30} /> + <Keycap label="Shift" pressed={press} size={30} /> and speak
         </Reveal>
       </AbsoluteFill>
     </Bg>
@@ -71,8 +71,8 @@ export const Board: React.FC<{ footage: string | null; trim: number }> = ({ foot
       <Stage style={{ left: 120, right: 120, top: 60, bottom: 170, opacity: p, scale: `${0.97 + 0.03 * p}` }}>
         <Frame><Footage src={footage} trimSeconds={trim} label="board recording"><BoardMock /></Footage></Frame>
       </Stage>
-      <Caption at={0.8} out={5.0}>Vous écrivez au tableau. Gerald suit chaque ligne.</Caption>
-      <Caption at={5.4}>Il trace la courbe exacte — et c'est vous qui trouvez.</Caption>
+      <Caption at={0.8} out={5.0}>You write on the board. Gerald follows every line.</Caption>
+      <Caption at={5.4}>It plots the exact curve — and you find the answer yourself.</Caption>
     </Bg>
   );
 };
@@ -153,8 +153,8 @@ export const Desktop: React.FC<{ footage: string | null; trim: number }> = ({ fo
           )}
         </Frame>
       </Stage>
-      <Caption at={0.6} out={4.4}>Une touche. N'importe quelle appli. Gerald voit ce que vous voyez.</Caption>
-      <Caption at={4.8}>Il vous guide jusqu'au carré rouge. C'est vous qui cliquez.</Caption>
+      <Caption at={0.6} out={4.4}>One key. Any app. Gerald sees what you see.</Caption>
+      <Caption at={4.8}>It guides you all the way to the red square. You do the clicking.</Caption>
     </Bg>
   );
 };
@@ -210,8 +210,8 @@ export const Td: React.FC<{ footage: string | null; trim: number }> = ({ footage
       <Stage style={{ left: 120, right: 120, top: 60, bottom: 170, opacity: p, scale: `${0.97 + 0.03 * p}` }}>
         <Frame><Footage src={footage} trimSeconds={trim} label="TD recording"><TdMock /></Footage></Frame>
       </Stage>
-      <Caption at={0.6} out={3.6}>Déposez vos cours. Gerald les connaît.</Caption>
-      <Caption at={4.0}>Il lit votre TD avec vous et pointe ce qui compte.</Caption>
+      <Caption at={0.6} out={3.6}>Drop your courses. Gerald knows them.</Caption>
+      <Caption at={4.0}>It reads your worksheet with you and points at what matters.</Caption>
     </Bg>
   );
 };

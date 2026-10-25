@@ -8,7 +8,7 @@ npm run dev                      # Remotion Studio → http://localhost:3000/Lau
 npx remotion render Launch out/gerald-launch.mp4
 ```
 
-Structure (`src/Video.tsx`, 1920×1080 · 30 fps · ~53 s, French): problem (stuck alone → chatbots give the answer) → **Voici Gerald** → real clips of the live site (TD, board + parabola, Photoshop guided) → CTA. Voice-over: OpenAI TTS (`python3 scripts_vo.py ash`, needs `OPENAI_API_KEY`; set `voiceOver: false` to mute). See `STORYBOARD.md`.
+Structure (`src/Video.tsx`, 1920×1080 · 30 fps · ~55 s, English): problem (stuck alone → chatbots give the answer) → **Voici Gerald** → real clips of the live site (TD, board + parabola, Photoshop guided) → CTA. Voice-over: OpenAI TTS (`python3 scripts_vo.py ash`, needs `OPENAI_API_KEY`; set `voiceOver: false` to mute). See `STORYBOARD.md`.
 
 ## Real footage
 

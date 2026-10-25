@@ -17,7 +17,7 @@ export type LaunchProps = {
 };
 
 /** Scene durations (s) = voice-over length + breathing room, never below the visual minimum. */
-const MIN = { hook: 6, chat: 5.5, meet: 4.5, td: 7, board: 9, desktop: 8, cta: 6 } as const;
+const MIN = { hook: 6, chat: 5.5, meet: 4.5, td: 7, board: 9, desktop: 10, cta: 6 } as const;
 export const SCENES = (Object.keys(MIN) as (keyof typeof MIN)[]).map((id) => ({ id, s: Math.max(MIN[id], Math.ceil((VO[id].dur + 1.0) * 2) / 2) }));
 export const X = 0.5;
 export const totalSeconds = SCENES.reduce((a, s) => a + s.s, 0) - X * (SCENES.length - 1);

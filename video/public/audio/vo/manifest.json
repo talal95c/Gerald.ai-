@@ -1,30 +1,30 @@
 {
  "hook": {
-  "text": "23 heures. Un exercice. Bloqué. Seul. Ça s'arrête aujourd'hui.",
-  "dur": 7.42
+  "text": "11 p.m. One exercise. Stuck. Alone. That ends today.",
+  "dur": 6.48
  },
  "chat": {
-  "text": "Les chatbots donnent la réponse. On n'apprend rien. Et les profs particuliers coûtent une fortune.",
-  "dur": 7.55
+  "text": "Chatbots hand you the answer. You learn nothing. And private tutors cost a fortune.",
+  "dur": 7.13
  },
  "meet": {
-  "text": "Voici Gerald. Le prof particulier qui vit sur votre écran.",
-  "dur": 5.15
+  "text": "Meet Gerald. The private tutor that lives on your screen.",
+  "dur": 3.66
  },
  "td": {
-  "text": "Déposez vos cours. Gerald les connaît, et lit votre TD avec vous.",
-  "dur": 5.41
+  "text": "Drop your courses. Gerald knows them, and reads your worksheet with you.",
+  "dur": 6.16
  },
  "board": {
-  "text": "Vous écrivez au tableau. Gerald suit chaque ligne, explique à voix haute, trace la courbe exacte. Et c'est vous qui trouvez.",
+  "text": "You write on the board. Gerald follows every line, explains out loud, plots the exact curve. And you find the answer yourself.",
   "dur": 9.61
  },
  "desktop": {
-  "text": "Une touche, n'importe quelle appli. Gerald vous guide pas à pas, jusqu'au carré rouge. Et c'est vous qui cliquez.",
-  "dur": 8.67
+  "text": "One key, any app. Gerald guides you step by step, all the way to the red square. And you do the clicking.",
+  "dur": 7.97
  },
  "cta": {
-  "text": "Gerald. Il ne donne pas la réponse, il vous aide à la trouver.",
-  "dur": 5.09
+  "text": "Gerald. It doesn't give you the answer. It helps you find it.",
+  "dur": 4.75
  }
 }

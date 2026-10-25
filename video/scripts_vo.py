@@ -1,19 +1,19 @@
 import json, os, subprocess, sys, urllib.request
 VOICE = sys.argv[1] if len(sys.argv) > 1 else "ash"
 LINES = [
- ("hook",  "23 heures. Un exercice. Bloqué. Seul. Ça s'arrête aujourd'hui."),
- ("chat",  "Les chatbots donnent la réponse. On n'apprend rien. Et les profs particuliers coûtent une fortune."),
- ("meet",  "Voici Gerald. Le prof particulier qui vit sur votre écran."),
- ("td",    "Déposez vos cours. Gerald les connaît, et lit votre TD avec vous."),
- ("board", "Vous écrivez au tableau. Gerald suit chaque ligne, explique à voix haute, trace la courbe exacte. Et c'est vous qui trouvez."),
- ("desktop","Une touche, n'importe quelle appli. Gerald vous guide pas à pas, jusqu'au carré rouge. Et c'est vous qui cliquez."),
- ("cta",   "Gerald. Il ne donne pas la réponse, il vous aide à la trouver."),
+ ("hook",  "11 p.m. One exercise. Stuck. Alone. That ends today."),
+ ("chat",  "Chatbots hand you the answer. You learn nothing. And private tutors cost a fortune."),
+ ("meet",  "Meet Gerald. The private tutor that lives on your screen."),
+ ("td",    "Drop your courses. Gerald knows them, and reads your worksheet with you."),
+ ("board", "You write on the board. Gerald follows every line, explains out loud, plots the exact curve. And you find the answer yourself."),
+ ("desktop","One key, any app. Gerald guides you step by step, all the way to the red square. And you do the clicking."),
+ ("cta",   "Gerald. It doesn't give you the answer. It helps you find it."),
 ]
 key = os.environ["OPENAI_API_KEY"]
 out = {}
 for name, text in LINES:
     body = json.dumps({"model": "gpt-4o-mini-tts", "voice": VOICE, "input": text, "response_format": "mp3", "speed": 1.1,
-        "instructions": "Narrateur français natif d'une vidéo de lancement de startup. Naturel, humain, chaleureux et confiant, légèrement souriant ; rythme vif mais posé, vraies respirations, jamais robotique ni voix d'annonceur."}).encode()
+        "instructions": "Native English narrator of a startup launch video. Natural, human, warm and confident, slight smile in the voice; brisk but relaxed pace, real breaths, never robotic or announcer-like."}).encode()
     req = urllib.request.Request("https://api.openai.com/v1/audio/speech", data=body, headers={"Authorization": f"Bearer {key}", "Content-Type": "application/json"})
     try:
         with urllib.request.urlopen(req, timeout=120) as r:
