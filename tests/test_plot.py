@@ -152,7 +152,7 @@ def test_board_plot_renders_and_returns_point_image_coordinates():
     app.processEvents()
     image = board.grab().toImage()
     assert not image.isNull()
-    assert image.pixelColor(x + 20, y + 20) == QColor("#FFFFFF")
+    assert image.pixelColor(x + 20, y + 20) == QColor("#F7F6F3")
     plot = board._gerald[0]["plot"]
     left, top, right, bottom = PLOT_INSETS
     graph_left, graph_top = left, top

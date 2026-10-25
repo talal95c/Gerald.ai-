@@ -26,6 +26,11 @@ from gerald.tools.registry import (
     UnderlineCommand,
 )
 
+PLOT_TITLEBAR_HEIGHT = 28.0
+PLOT_CONTROL_SIZE = 28.0
+PLOT_MIN_LOCAL_WIDTH = 260.0
+PLOT_MIN_LOCAL_HEIGHT = 180.0
+
 PAPER = QColor("#F7F6F3")
 BOARD_MARK = QColor("#E8C547")
 PLOT_PALETTE = PlotPalette(
@@ -99,6 +104,7 @@ class BoardWindow(QWidget):
         self.user_strokes: list[list[tuple[float, float, float]]] = []
         self._current: list[tuple[float, float, float]] | None = None
         self._gerald: list[dict] = []
+        self._plot_interaction: dict | None = None
         self._exercise_title = ""
         self._exercise_lines: list[str] = []
         self._capture: Capture | None = None
@@ -279,6 +285,20 @@ class BoardWindow(QWidget):
         screen_x, screen_y = self._capture.img_to_screen(x, y)
         return self._screen_to_local(screen_x, screen_y)
 
+    def _local_to_image(self, x: float, y: float) -> tuple[float, float]:
+        if self._capture is None:
+            return x, y
+        ratio = self.screen().devicePixelRatio() if self.screen() else 1.0
+        screen_x = x * ratio + self._capture.monitor.left
+        screen_y = y * ratio + self._capture.monitor.top
+        screen_to_img = getattr(self._capture, "screen_to_img", None)
+        if screen_to_img is not None:
+            return screen_to_img(screen_x, screen_y)
+        return (
+            (screen_x - self._capture.monitor.left) * self._capture.scale,
+            (screen_y - self._capture.monitor.top) * self._capture.scale,
+        )
+
     def _screen_to_local(self, screen_x: float, screen_y: float) -> tuple[float, float]:
         if self._capture is None:
             return screen_x, screen_y
@@ -292,6 +312,145 @@ class BoardWindow(QWidget):
         ratio = self.screen().devicePixelRatio() if self.screen() else 1.0
         scale = self._capture.scale if self._capture is not None else 1.0
         return size / max(0.01, scale * ratio)
+
+    def _plot_local_rect(self, plot) -> QRectF:
+        x, y = self._image_to_local(plot.box[0], plot.box[1])
+        scale = self._image_size_to_logical(1)
+        return QRectF(x, y, plot.box[2] * scale, plot.box[3] * scale)
+
+    def _plot_chrome_hit(self, point: QPointF) -> tuple[dict, str] | None:
+        for item in reversed(self._gerald):
+            if item["kind"] != "plot":
+                continue
+            rect = self._plot_local_rect(item["plot"])
+            if not rect.contains(point):
+                continue
+            control_size = min(PLOT_CONTROL_SIZE, rect.width(), rect.height())
+            close_rect = QRectF(
+                rect.right() - control_size,
+                rect.top(),
+                control_size,
+                min(PLOT_TITLEBAR_HEIGHT, rect.height()),
+            )
+            grip_rect = QRectF(
+                rect.right() - control_size,
+                rect.bottom() - control_size,
+                control_size,
+                control_size,
+            )
+            title_rect = QRectF(
+                rect.left(),
+                rect.top(),
+                rect.width(),
+                min(PLOT_TITLEBAR_HEIGHT, rect.height()),
+            )
+            if close_rect.contains(point):
+                return item, "close"
+            if grip_rect.contains(point):
+                return item, "resize"
+            if title_rect.contains(point):
+                return item, "move"
+            return item, "body"
+        return None
+
+    def _update_plot_cursor(self, point: QPointF) -> None:
+        hit = self._plot_chrome_hit(point)
+        mode = hit[1] if hit is not None else None
+        if mode == "move":
+            self.setCursor(Qt.CursorShape.SizeAllCursor)
+        elif mode == "resize":
+            self.setCursor(Qt.CursorShape.SizeFDiagCursor)
+        else:
+            self.setCursor(Qt.CursorShape.ArrowCursor)
+
+    def _begin_plot_interaction(self, point: QPointF) -> bool:
+        hit = self._plot_chrome_hit(point)
+        if hit is None:
+            return False
+        item, mode = hit
+        if mode == "close":
+            self._gerald.remove(item)
+            self._plot_interaction = None
+            self._current = None
+            self.setCursor(Qt.CursorShape.ArrowCursor)
+            self.update()
+            return True
+        if mode in {"move", "resize"}:
+            self._current = None
+            self._plot_interaction = {
+                "item": item,
+                "mode": mode,
+                "press": QPointF(point),
+                "box": item["plot"].box,
+            }
+            self._update_plot_cursor(point)
+            return True
+        return False
+
+    def _set_plot_box(
+        self,
+        item: dict,
+        box: tuple[float, float, float, float],
+    ) -> None:
+        args = dict(item["args"])
+        args.update(zip(("x", "y", "w", "h"), box))
+        image_size = (
+            self._capture.image.size
+            if self._capture is not None
+            else (max(1, self.width()), max(1, self.height()))
+        )
+        plot, _result = build_plot(args, image_size)
+        item["args"] = args
+        item["plot"] = plot
+
+    def _move_plot_interaction(self, point: QPointF) -> None:
+        interaction = self._plot_interaction
+        if interaction is None:
+            return
+        item = interaction["item"]
+        if not any(existing is item for existing in self._gerald):
+            self._plot_interaction = None
+            return
+
+        x, y, width, height = interaction["box"]
+        press = interaction["press"]
+        dx, dy = point.x() - press.x(), point.y() - press.y()
+        scale = self._image_size_to_logical(1)
+        local_x, local_y = self._image_to_local(x, y)
+        local_width, local_height = width * scale, height * scale
+
+        if interaction["mode"] == "move":
+            local_x = min(max(0.0, local_x + dx), max(0.0, self.width() - local_width))
+            local_y = min(max(0.0, local_y + dy), max(0.0, self.height() - local_height))
+            image_x, image_y = self._local_to_image(local_x, local_y)
+            box = (image_x, image_y, width, height)
+        else:
+            max_width = max(0.0, self.width() - local_x)
+            max_height = max(0.0, self.height() - local_y)
+            min_width = min(PLOT_MIN_LOCAL_WIDTH, max_width)
+            min_height = min(PLOT_MIN_LOCAL_HEIGHT, max_height)
+            resized_width = min(
+                max_width,
+                max(min_width, local_width + dx),
+            )
+            resized_height = min(
+                max_height,
+                max(min_height, local_height + dy),
+            )
+            image_x, image_y = self._local_to_image(local_x, local_y)
+            image_right, image_bottom = self._local_to_image(
+                local_x + resized_width,
+                local_y + resized_height,
+            )
+            box = (
+                image_x,
+                image_y,
+                image_right - image_x,
+                image_bottom - image_y,
+            )
+
+        self._set_plot_box(item, box)
+        self.update()
 
     def execute_tool(self, name: str, args: dict) -> str:
         import json
@@ -366,7 +525,12 @@ class BoardWindow(QWidget):
                         )
                 plot, result = build_plot(args, image_size, occupied)
                 self._gerald.append(
-                    {"kind": "plot", "plot": plot, "created": time.monotonic()}
+                    {
+                        "kind": "plot",
+                        "plot": plot,
+                        "args": dict(args),
+                        "created": time.monotonic(),
+                    }
                 )
                 self._reveal_timer.start()
                 self.update()
@@ -454,6 +618,9 @@ class BoardWindow(QWidget):
 
     def mousePressEvent(self, event) -> None:
         if event.button() == Qt.MouseButton.LeftButton:
+            if self._begin_plot_interaction(event.position()):
+                event.accept()
+                return
             if self._tool == "eraser":
                 self._append_point(event.position())
                 event.accept()
@@ -463,25 +630,40 @@ class BoardWindow(QWidget):
             event.accept()
 
     def mouseMoveEvent(self, event) -> None:
-        if event.buttons() & Qt.MouseButton.LeftButton:
+        if self._plot_interaction is not None:
+            self._move_plot_interaction(event.position())
+        elif event.buttons() & Qt.MouseButton.LeftButton:
             self._append_point(event.position())
+        else:
+            self._update_plot_cursor(event.position())
         event.accept()
 
     def mouseReleaseEvent(self, event) -> None:
         self._current = None
+        self._plot_interaction = None
+        self._update_plot_cursor(event.position())
         event.accept()
 
     def tabletEvent(self, event) -> None:
         if event.type() == event.Type.TabletPress:
+            if self._begin_plot_interaction(event.position()):
+                event.accept()
+                return
             if self._tool == "eraser":
                 self._append_point(event.position(), event.pressure())
             else:
                 self._current = [(event.position().x(), event.position().y(), max(0.15, event.pressure()))]
                 self.user_strokes.append(self._current)
         elif event.type() == event.Type.TabletMove:
-            self._append_point(event.position(), event.pressure())
+            if self._plot_interaction is not None:
+                self._move_plot_interaction(event.position())
+            else:
+                self._append_point(event.position(), event.pressure())
+                self._update_plot_cursor(event.position())
         elif event.type() == event.Type.TabletRelease:
             self._current = None
+            self._plot_interaction = None
+            self._update_plot_cursor(event.position())
         event.accept()
 
     def keyPressEvent(self, event) -> None:
@@ -556,6 +738,19 @@ class BoardWindow(QWidget):
                 x, y = self._image_to_local(plot.box[0], plot.box[1])
                 scale = self._image_size_to_logical(1)
                 painter.save()
+                titlebar_bottom = y + min(
+                    PLOT_TITLEBAR_HEIGHT,
+                    plot.box[3] * scale,
+                )
+                painter.setClipRect(
+                    QRectF(
+                        0,
+                        titlebar_bottom,
+                        self.width(),
+                        max(0.0, self.height() - titlebar_bottom),
+                    ),
+                    Qt.ClipOperation.IntersectClip,
+                )
                 painter.translate(x, y)
                 painter.scale(scale, scale)
                 draw_plot(
@@ -567,6 +762,7 @@ class BoardWindow(QWidget):
                     scale,
                 )
                 painter.restore()
+                self._paint_plot_chrome(painter, item)
             elif item["kind"] == "command":
                 command = item["command"]
                 painter.setPen(QPen(BOARD_MARK, 3, Qt.PenStyle.SolidLine, Qt.PenCapStyle.RoundCap, Qt.PenJoinStyle.RoundJoin))
@@ -606,6 +802,86 @@ class BoardWindow(QWidget):
         if self._exercise_title:
             self._paint_exercise(painter)
         painter.end()
+
+    def _paint_plot_chrome(self, painter: QPainter, item: dict) -> None:
+        plot = item["plot"]
+        rect = self._plot_local_rect(plot)
+        titlebar = QRectF(
+            rect.left(),
+            rect.top(),
+            rect.width(),
+            min(PLOT_TITLEBAR_HEIGHT, rect.height()),
+        )
+        radius = min(16.0, titlebar.width() / 2, titlebar.height() / 2)
+        path = QPainterPath()
+        path.moveTo(titlebar.left(), titlebar.bottom())
+        path.lineTo(titlebar.left(), titlebar.top() + radius)
+        path.quadTo(titlebar.left(), titlebar.top(), titlebar.left() + radius, titlebar.top())
+        path.lineTo(titlebar.right() - radius, titlebar.top())
+        path.quadTo(
+            titlebar.right(),
+            titlebar.top(),
+            titlebar.right(),
+            titlebar.top() + radius,
+        )
+        path.lineTo(titlebar.right(), titlebar.bottom())
+        path.closeSubpath()
+
+        painter.save()
+        painter.setPen(QPen(QColor(38, 38, 38, 26), 1))
+        painter.setBrush(QColor("#F7F6F3"))
+        painter.drawPath(path)
+        painter.drawLine(
+            QPointF(titlebar.left() + 1, titlebar.bottom()),
+            QPointF(titlebar.right() - 1, titlebar.bottom()),
+        )
+
+        title_font = QFont("Abel")
+        title_font.setPixelSize(12)
+        painter.setFont(title_font)
+        painter.setPen(QColor("#262626"))
+        painter.drawText(
+            QRectF(
+                titlebar.left() + 12,
+                titlebar.top(),
+                max(0.0, titlebar.width() - PLOT_CONTROL_SIZE - 20),
+                titlebar.height(),
+            ),
+            Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter,
+            plot.curves[0].label,
+        )
+
+        close_rect = QRectF(
+            titlebar.right() - min(PLOT_CONTROL_SIZE, titlebar.width()),
+            titlebar.top(),
+            min(PLOT_CONTROL_SIZE, titlebar.width()),
+            titlebar.height(),
+        )
+        close_font = QFont("Google Sans Flex")
+        close_font.setPixelSize(16)
+        painter.setFont(close_font)
+        painter.drawText(close_rect, Qt.AlignmentFlag.AlignCenter, "×")
+
+        grip_rect = QRectF(
+            rect.right() - min(PLOT_CONTROL_SIZE, rect.width()),
+            rect.bottom() - min(PLOT_CONTROL_SIZE, rect.height()),
+            min(PLOT_CONTROL_SIZE, rect.width()),
+            min(PLOT_CONTROL_SIZE, rect.height()),
+        )
+        painter.setPen(QPen(QColor(38, 38, 38, 110), 1))
+        painter.drawLine(
+            QPointF(grip_rect.right() - 4, grip_rect.bottom() - 14),
+            QPointF(grip_rect.right() - 14, grip_rect.bottom() - 4),
+        )
+        painter.drawLine(
+            QPointF(grip_rect.right() - 4, grip_rect.bottom() - 10),
+            QPointF(grip_rect.right() - 10, grip_rect.bottom() - 4),
+        )
+        painter.drawLine(
+            QPointF(grip_rect.right() - 4, grip_rect.bottom() - 6),
+            QPointF(grip_rect.right() - 6, grip_rect.bottom() - 4),
+        )
+        painter.restore()
 
     def _paint_exercise(self, painter: QPainter) -> None:
         width = min(420, max(280, self.width() - 32))
