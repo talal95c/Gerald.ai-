@@ -1,12 +1,16 @@
+import json
 import sys
 from types import ModuleType, SimpleNamespace
 
 from PIL import Image
+from PIL import ImageDraw
+import numpy as np
 import pytest
 
 from gerald.capture.screen import MonitorRect, capture_from_image
-from gerald.perception.elements import Element, OCRProvider, collect_elements
-from gerald.perception.grounding import ScreenRect, resolve_target
+from gerald.perception.elements import Element, OCRProvider, _split_ocr_words, collect_elements
+from gerald.perception.grounding import GroundingResolution, ScreenRect, resolve_target
+from gerald.tools.registry import execute_tool
 
 
 def make_capture():
@@ -68,9 +72,80 @@ def test_ocr_text_match_narrows_to_matched_word_boxes():
     assert resolve_target({"text": "shortcut"}, capture, elements) == ScreenRect(-904, 88, 96, 40)
 
 
+def test_ocr_splits_a_line_at_large_horizontal_word_gaps():
+    words = [
+        ("Store", (35, 10, 30, 12)),
+        ("shortcut", (425, 10, 50, 12)),
+        ("Web", (0, 10, 30, 12)),
+        ("Add", (400, 10, 20, 12)),
+    ]
+
+    groups = _split_ocr_words(words)
+
+    assert [[word for word, _rect in group] for group in groups] == [
+        ["Web", "Store"],
+        ["Add", "shortcut"],
+    ]
+
+
 def test_unmatched_text_without_coordinates_returns_retryable_error():
     with pytest.raises(ValueError, match="text not found on screen: Missing"):
         resolve_target({"text": "Missing"}, make_capture(), [])
+
+
+def test_visual_snap_selects_a_small_icon_component():
+    image = Image.new("RGB", (300, 200), "white")
+    ImageDraw.Draw(image).rectangle((132, 82, 147, 102), fill="black")
+    capture = capture_from_image(image, MonitorRect(0, 0, 300, 200), max_width=300)
+
+    result = resolve_target(
+        {"x": 139, "y": 92},
+        capture,
+        [],
+        np.asarray(image),
+        with_details=True,
+    )
+
+    assert isinstance(result, GroundingResolution)
+    assert result.layer == "snap"
+    assert result.rect.x < 132 and result.rect.y < 82
+    assert result.rect.x + result.rect.w > 147
+    assert result.rect.y + result.rect.h > 102
+
+
+def test_visual_snap_uses_raw_box_when_the_crop_is_flat():
+    image = Image.new("RGB", (300, 200), "white")
+    capture = capture_from_image(image, MonitorRect(0, 0, 300, 200), max_width=300)
+
+    result = resolve_target(
+        {"x": 140, "y": 100},
+        capture,
+        [],
+        np.asarray(image),
+        with_details=True,
+    )
+
+    assert result == GroundingResolution(ScreenRect(110, 70, 60, 60), "raw")
+
+
+def test_distant_xy_overrides_ocr_element_id_and_adds_tool_result_note():
+    image = Image.new("RGB", (300, 200), "white")
+    ImageDraw.Draw(image).rectangle((242, 92, 257, 112), fill="black")
+    capture = capture_from_image(image, MonitorRect(0, 0, 300, 200), max_width=300)
+    element = Element(9, "text", "Search Google", (10, 10, 100, 20), "ocr")
+
+    commands, output = execute_tool(
+        "point",
+        {"element_id": 9, "x": 250, "y": 102},
+        capture,
+        [element],
+        np.asarray(image),
+    )
+
+    result = json.loads(output)
+    assert commands
+    assert result["grounding"] == "snap"
+    assert "element_id ignored" in result["note"]
 
 
 def test_ocr_uses_full_resolution_and_retains_word_boxes(monkeypatch):
@@ -106,6 +181,7 @@ def test_ocr_uses_full_resolution_and_retains_word_boxes(monkeypatch):
         assert observed["size"] == (400, 200)
         assert observed["lang"] == "fra+eng"
         assert observed["timeout"] <= 0.7
+        assert found[0].role == "text"
         assert found[0].name == "Add shortcut"
         assert found[0].word_boxes == (
             ("Add", (-990, 60, 15, 12)),

@@ -45,7 +45,7 @@ def test_tool_handlers_validate_and_map_image_sized_arguments():
     capture = capture_from_image(Image.new("RGB", (200, 100)), MonitorRect(20, 10, 200, 100), 100)
     elements = [Element(7, "Button", "Run", (10, 8, 20, 10), "uia")]
     commands, result = execute_tool("circle", {"element_id": 7, "w": 30, "h": 12}, capture, elements)
-    assert json.loads(result) == {"ok": True}
+    assert json.loads(result) == {"ok": True, "grounding": "element"}
     assert commands == [CircleCommand(ScreenRect(40, 26, 60, 24))]
     commands, result = execute_tool("circle", {"element_id": "7"}, capture, elements)
     assert commands == []
@@ -54,7 +54,7 @@ def test_tool_handlers_validate_and_map_image_sized_arguments():
         "point", {"element_id": 7, "x": 10, "y": 10, "label": "conflict"}, capture, elements
     )
     assert commands == [PointCommand(ScreenRect(40, 26, 40, 20), "conflict")]
-    assert json.loads(result) == {"ok": True}
+    assert json.loads(result) == {"ok": True, "grounding": "element"}
 
 
 def test_unknown_elements_and_clear_tool():

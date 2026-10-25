@@ -10,6 +10,8 @@ from pathlib import Path
 from typing import Any
 from urllib.parse import quote
 
+import numpy as np
+
 from gerald.audio.player import AudioPlayer
 from gerald.capture.screen import Capture
 from gerald.perception.elements import Element
@@ -41,6 +43,7 @@ class RealtimeClient:
         self.usage_log = usage_log if usage_log is not None else Path.home() / ".gerald" / "usage.jsonl"
         self.websocket = None
         self.capture: Capture | None = None
+        self.image_array: np.ndarray | None = None
         self.elements: list[Element] = []
         self._tool_rounds = 0
         self._executed_call_ids: set[str] = set()
@@ -132,6 +135,7 @@ class RealtimeClient:
         has_audio: bool = True,
     ) -> None:
         self.capture = capture
+        self.image_array = np.asarray(capture.full_image or capture.image)
         self.elements = elements
         if has_audio:
             await self._send({"type": "input_audio_buffer.commit"})
@@ -241,6 +245,7 @@ class RealtimeClient:
                 args,
                 self.capture,  # type: ignore[arg-type]
                 self.elements,
+                self.image_array,
             )
             if commands:
                 self.on_commands(commands)

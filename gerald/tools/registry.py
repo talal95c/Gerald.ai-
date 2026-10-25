@@ -4,9 +4,11 @@ import json
 from dataclasses import dataclass
 from typing import Any
 
+import numpy as np
+
 from gerald.capture.screen import Capture
 from gerald.perception.elements import Element
-from gerald.perception.grounding import ScreenRect, resolve_target
+from gerald.perception.grounding import GroundingResolution, ScreenRect, resolve_target
 
 TARGET_SCHEMA = {
     "type": "object",
@@ -123,13 +125,19 @@ class ClearCommand(DrawCommand):
     pass
 
 
-def _target(args: dict[str, Any], key: str, capture: Capture, elements: list[Element]) -> ScreenRect:
+def _target(
+    args: dict[str, Any],
+    key: str,
+    capture: Capture,
+    elements: list[Element],
+    image_array: np.ndarray | None,
+) -> GroundingResolution:
     value = args.get(key)
     if not isinstance(value, dict):
         raise ValueError(f"{key} must be a target object")
     if set(value) - {"element_id", "x", "y", "text"}:
         raise ValueError(f"{key} contains unexpected properties")
-    return resolve_target(value, capture, elements)
+    return resolve_target(value, capture, elements, image_array, with_details=True)
 
 
 def _validate_root_target(
@@ -170,11 +178,13 @@ def execute_tool(
     args: dict[str, Any],
     capture: Capture,
     elements: list[Element],
+    image_array: np.ndarray | None = None,
 ) -> tuple[list[DrawCommand], str]:
     try:
         if not isinstance(args, dict):
             raise ValueError("arguments must be an object")
         command: DrawCommand
+        resolutions: list[tuple[str, GroundingResolution]] = []
         if name == "clear":
             if args:
                 raise ValueError("clear accepts no arguments")
@@ -201,7 +211,15 @@ def execute_tool(
                     target_text = args.get("text")
                 if target_text is not None:
                     target_args["text"] = target_text
-            rect = resolve_target(target_args, capture, elements)
+            resolution = resolve_target(
+                target_args,
+                capture,
+                elements,
+                image_array,
+                with_details=True,
+            )
+            resolutions.append(("target", resolution))
+            rect = resolution.rect
             if name == "point":
                 label = args.get("label", "")
                 if not isinstance(label, str):
@@ -226,20 +244,36 @@ def execute_tool(
         elif name == "arrow":
             if set(args) != {"from", "to"}:
                 raise ValueError("arrow requires from and to targets")
-            command = ArrowCommand(_center(_target(args, "from", capture, elements)), _center(_target(args, "to", capture, elements)))
+            from_resolution = _target(args, "from", capture, elements, image_array)
+            to_resolution = _target(args, "to", capture, elements, image_array)
+            resolutions.extend((("from", from_resolution), ("to", to_resolution)))
+            command = ArrowCommand(_center(from_resolution.rect), _center(to_resolution.rect))
         elif name == "link":
             if not {"a", "b"} <= args.keys() or set(args) - {"a", "b", "label"}:
                 raise ValueError("link requires a and b targets")
             label = args.get("label", "")
             if not isinstance(label, str):
                 raise ValueError("label must be a string")
+            a_resolution = _target(args, "a", capture, elements, image_array)
+            b_resolution = _target(args, "b", capture, elements, image_array)
+            resolutions.extend((("a", a_resolution), ("b", b_resolution)))
             command = LinkCommand(
-                _center(_target(args, "a", capture, elements)),
-                _center(_target(args, "b", capture, elements)),
+                _center(a_resolution.rect),
+                _center(b_resolution.rect),
                 label[:80],
             )
         else:
             raise ValueError(f"unknown tool: {name}")
-        return [command], json.dumps({"ok": True})
+        result: dict[str, Any] = {"ok": True}
+        if resolutions:
+            result["grounding"] = (
+                resolutions[0][1].layer
+                if len(resolutions) == 1
+                else {key: resolution.layer for key, resolution in resolutions}
+            )
+            notes = [resolution.note for _key, resolution in resolutions if resolution.note]
+            if notes:
+                result["note"] = "; ".join(notes)
+        return [command], json.dumps(result)
     except (KeyError, TypeError, ValueError) as error:
         return [], json.dumps({"ok": False, "error": str(error)})

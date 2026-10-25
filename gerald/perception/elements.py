@@ -5,6 +5,7 @@ from functools import lru_cache
 import logging
 import os
 import shutil
+from statistics import median
 import subprocess
 import time
 from dataclasses import dataclass
@@ -16,6 +17,22 @@ logger = logging.getLogger(__name__)
 
 ElementSource = Literal["uia", "ocr"]
 Rect = tuple[int, int, int, int]
+WordBox = tuple[str, Rect]
+
+
+def _split_ocr_words(words: list[WordBox]) -> list[list[WordBox]]:
+    ordered = sorted(words, key=lambda item: item[1][0])
+    if not ordered:
+        return []
+    gap_limit = 1.2 * median(max(1, rect[3]) for _word, rect in ordered)
+    groups: list[list[WordBox]] = [[ordered[0]]]
+    for word, rect in ordered[1:]:
+        previous = groups[-1][-1][1]
+        gap = rect[0] - (previous[0] + previous[2])
+        if gap > gap_limit:
+            groups.append([])
+        groups[-1].append((word, rect))
+    return groups
 
 
 @dataclass(frozen=True)
@@ -139,24 +156,25 @@ class OCRProvider:
                 )
                 grouped.setdefault(key, []).append((text, rect))
             result = []
-            for index, words in enumerate(grouped.values()):
-                left = min(rect[0] for _word, rect in words)
-                top = min(rect[1] for _word, rect in words)
-                right = max(rect[0] + rect[2] for _word, rect in words)
-                bottom = max(rect[1] + rect[3] for _word, rect in words)
-                result.append(
-                    Element(
-                        index,
-                        "Text",
-                        " ".join(word for word, _rect in words),
-                        capture.full_rect_to_screen((left, top, right - left, bottom - top)),
-                        "ocr",
-                        tuple(
-                            (word, capture.full_rect_to_screen(rect))
-                            for word, rect in words
-                        ),
+            for words in grouped.values():
+                for segment in _split_ocr_words(words):
+                    left = min(rect[0] for _word, rect in segment)
+                    top = min(rect[1] for _word, rect in segment)
+                    right = max(rect[0] + rect[2] for _word, rect in segment)
+                    bottom = max(rect[1] + rect[3] for _word, rect in segment)
+                    result.append(
+                        Element(
+                            len(result),
+                            "text",
+                            " ".join(word for word, _rect in segment),
+                            capture.full_rect_to_screen((left, top, right - left, bottom - top)),
+                            "ocr",
+                            tuple(
+                                (word, capture.full_rect_to_screen(rect))
+                                for word, rect in segment
+                            ),
+                        )
                     )
-                )
             return result
         except Exception:
             logger.debug("OCR provider unavailable", exc_info=True)
@@ -188,40 +206,37 @@ class OCRProvider:
                 return []
             result = await engine.recognize_async(bitmap)
             output = []
-            for index, line in enumerate(result.lines):
-                words = list(line.words)
-                if not words:
-                    continue
-                left = min(word.bounding_rect.x for word in words)
-                top = min(word.bounding_rect.y for word in words)
-                right = max(word.bounding_rect.x + word.bounding_rect.width for word in words)
-                bottom = max(word.bounding_rect.y + word.bounding_rect.height for word in words)
-                word_boxes = tuple(
+            for line in result.lines:
+                words = [
                     (
                         str(word.text),
-                        capture.full_rect_to_screen(
-                            (
-                                word.bounding_rect.x,
-                                word.bounding_rect.y,
-                                word.bounding_rect.width,
-                                word.bounding_rect.height,
-                            )
+                        (
+                            int(word.bounding_rect.x),
+                            int(word.bounding_rect.y),
+                            int(word.bounding_rect.width),
+                            int(word.bounding_rect.height),
                         ),
                     )
-                    for word in words
-                )
-                output.append(
-                    Element(
-                        index,
-                        "Text",
-                        str(line.text),
-                        capture.full_rect_to_screen(
-                            (left, top, right - left, bottom - top)
-                        ),
-                        "ocr",
-                        word_boxes,
+                    for word in line.words
+                ]
+                for segment in _split_ocr_words(words):
+                    left = min(rect[0] for _word, rect in segment)
+                    top = min(rect[1] for _word, rect in segment)
+                    right = max(rect[0] + rect[2] for _word, rect in segment)
+                    bottom = max(rect[1] + rect[3] for _word, rect in segment)
+                    output.append(
+                        Element(
+                            len(output),
+                            "text",
+                            " ".join(word for word, _rect in segment),
+                            capture.full_rect_to_screen((left, top, right - left, bottom - top)),
+                            "ocr",
+                            tuple(
+                                (word, capture.full_rect_to_screen(rect))
+                                for word, rect in segment
+                            ),
+                        )
                     )
-                )
             return output
 
         return asyncio.run(recognize())
