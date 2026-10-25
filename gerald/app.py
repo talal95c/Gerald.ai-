@@ -133,7 +133,29 @@ def _activate_hold_turn(
     return True
 
 
-def _show_runtime_error(overlay, message: str) -> None:
+def _restore_capture_visual_state(app_state: dict, overlay, set_capture_overlay_visibility) -> None:
+    if app_state.get("capture_overlay_hidden"):
+        app_state["capture_overlay_hidden"] = False
+        set_capture_overlay_visibility(True)
+    if app_state.get("capture_marks_hidden"):
+        app_state["capture_marks_hidden"] = False
+        overlay.set_marks_visible(True)
+
+
+def _show_offline_status(overlay) -> None:
+    overlay.show()
+    overlay.set_status("offline")
+
+
+def _show_runtime_error(
+    overlay,
+    message: str,
+    app_state: dict | None = None,
+    set_capture_overlay_visibility=None,
+) -> None:
+    if app_state is not None:
+        _restore_capture_visual_state(app_state, overlay, set_capture_overlay_visibility)
+    overlay.show()
     if overlay.show_timed_error(message):
         logger.warning("Runtime capture/audio error: %s", message)
 
@@ -288,6 +310,8 @@ def main() -> int:
             if not visible:
                 raise TimeoutError("Overlay mark hide timed out")
             logger.warning("Overlay mark restore timed out")
+        else:
+            app_state["capture_marks_hidden"] = not visible
 
     def capture_after_action():
         ready = threading.Event()
@@ -367,6 +391,7 @@ def main() -> int:
         "capture_request": None,
         "capture_generation": 0,
         "capture_overlay_hidden": False,
+        "capture_marks_hidden": False,
         "connected": False,
         "typed": False,
         "response_active": False,
@@ -378,10 +403,19 @@ def main() -> int:
 
     def show_runtime_error(message: str) -> None:
         if app_state["connected"]:
-            _show_runtime_error(overlay, message)
-        elif overlay._status != "offline":
-            overlay.show()
-            overlay.set_status("offline")
+            _show_runtime_error(
+                overlay,
+                message,
+                app_state,
+                set_capture_overlay_visibility,
+            )
+        else:
+            _restore_capture_visual_state(
+                app_state,
+                overlay,
+                set_capture_overlay_visibility,
+            )
+            _show_offline_status(overlay)
 
     required = {part.strip().lower() for part in settings.hotkey.split("+") if part.strip()}
     if "altgr" in required or {"ctrl", "alt"} <= required:

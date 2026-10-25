@@ -11,6 +11,7 @@ from gerald.app import (
     _finalize_board_collection,
     _include_board_ink,
     _key_name,
+    _show_offline_status,
     _show_runtime_error,
 )
 from gerald.capture.screen import MonitorRect, capture_from_image
@@ -191,6 +192,7 @@ def test_runtime_capture_error_uses_timed_overlay_without_message_box(monkeypatc
     monkeypatch.setattr(QMessageBox, "warning", unexpected_dialog)
     events = []
     overlay = SimpleNamespace(
+        show=lambda: events.append("show"),
         show_timed_error=lambda message: (
             events.append(("error", message)),
             True,
@@ -199,7 +201,76 @@ def test_runtime_capture_error_uses_timed_overlay_without_message_box(monkeypatc
 
     _show_runtime_error(overlay, "Realtime disconnected")
 
-    assert events == [("error", "Realtime disconnected")]
+    assert events == ["show", ("error", "Realtime disconnected")]
+
+
+def test_repeated_capture_errors_restore_overlay_and_marks_before_dedup(caplog):
+    class Overlay:
+        visible = False
+        marks_visible = False
+        calls = 0
+        renders = 0
+        shows = 0
+
+        def show(self):
+            self.visible = True
+            self.shows += 1
+
+        def hide(self):
+            self.visible = False
+
+        def set_marks_visible(self, visible):
+            self.marks_visible = visible
+
+        def show_timed_error(self, _message):
+            self.calls += 1
+            if self.calls == 1:
+                self.renders += 1
+                return True
+            return False
+
+    overlay = Overlay()
+    state = {"capture_overlay_hidden": True, "capture_marks_hidden": True}
+
+    def set_visibility(visible):
+        overlay.show() if visible else overlay.hide()
+
+    caplog.set_level("WARNING", logger="gerald.app")
+    for attempt in range(2):
+        if attempt:
+            overlay.hide()
+            overlay.set_marks_visible(False)
+            state.update(capture_overlay_hidden=True, capture_marks_hidden=True)
+        _show_runtime_error(
+            overlay,
+            "Capture failed",
+            state,
+            set_visibility,
+        )
+        assert overlay.visible
+        assert overlay.marks_visible
+        assert not state["capture_overlay_hidden"]
+        assert not state["capture_marks_hidden"]
+
+    assert overlay.calls == 2
+    assert overlay.renders == 1
+    assert overlay.shows == 4
+    assert caplog.text.count("Runtime capture/audio error") == 1
+
+
+def test_offline_status_shows_overlay_even_when_already_offline():
+    overlay = SimpleNamespace(
+        show=lambda: setattr(overlay, "shows", overlay.shows + 1),
+        set_status=lambda status: setattr(overlay, "status", status),
+        shows=0,
+        status="offline",
+    )
+
+    _show_offline_status(overlay)
+    _show_offline_status(overlay)
+
+    assert overlay.shows == 2
+    assert overlay.status == "offline"
 
 
 def test_board_ink_rect_maps_from_screen_to_image_and_back():
