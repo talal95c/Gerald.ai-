@@ -298,6 +298,7 @@ function TD(){
     };
     const candidates=nodes.filter(element=>{
       if(element.id==="canvas_minipaint")return true;
+      if(/^ok$/i.test(element.innerText?.trim()??"")&&dialogs.some(dialog=>dialog.contains(element)&&dialog.querySelector(".effectsPreview")))return false;
       const semantic=element.matches("button,a,input,select,[role='button'],[role='menuitem'],[title],[class*='layer']");
       return (semantic||clickable.has(element))&&!hasClickableAncestor(element);
     });
