@@ -168,9 +168,52 @@ TOOL_SCHEMAS = [
     _schema("write", "Write text on the open teaching board.", {"text": {"type": "string"}, "x": {"type": "number"}, "y": {"type": "number"}, "size": {"type": "number"}}, ["text", "x", "y"]),
     _schema("write_math", "Write a math expression on the open teaching board.", {"latex": {"type": "string"}, "x": {"type": "number"}, "y": {"type": "number"}, "size": {"type": "number"}}, ["latex", "x", "y"]),
     _schema("draw_path", "Draw a path on the open teaching board.", {"points": {"type": "array", "items": {"type": "array", "items": {"type": "number"}, "minItems": 2, "maxItems": 2}}, "closed": {"type": "boolean"}}, ["points"]),
+    _schema(
+        "plot",
+        "Plot exact graphs of one or more functions of x on the board, with axes, ticks and labelled points (roots, vertex, intersections).",
+        {
+            "functions": {
+                "type": "array",
+                "minItems": 1,
+                "maxItems": 3,
+                "items": {
+                    "type": "object",
+                    "properties": {
+                        "expr": {"type": "string"},
+                        "label": {"type": "string", "maxLength": 24},
+                    },
+                    "required": ["expr"],
+                    "additionalProperties": False,
+                },
+            },
+            "x_min": {"type": "number"},
+            "x_max": {"type": "number"},
+            "y_min": {"type": "number"},
+            "y_max": {"type": "number"},
+            "points": {
+                "type": "array",
+                "maxItems": 8,
+                "items": {
+                    "type": "object",
+                    "properties": {
+                        "x": {"type": "number"},
+                        "y": {"type": "number"},
+                        "label": {"type": "string", "maxLength": 24},
+                    },
+                    "required": ["x", "y"],
+                    "additionalProperties": False,
+                },
+            },
+            "x": {"type": "number"},
+            "y": {"type": "number"},
+            "w": {"type": "number"},
+            "h": {"type": "number"},
+        },
+        ["functions", "x_min", "x_max"],
+    ),
     _schema("clear_gerald", "Clear Gerald's board layer without changing user ink.", {}, []),
 ]
-BOARD_TOOL_NAMES = frozenset({"write", "write_math", "draw_path", "clear_gerald"})
+BOARD_TOOL_NAMES = frozenset({"write", "write_math", "draw_path", "plot", "clear_gerald"})
 
 
 @dataclass(frozen=True)

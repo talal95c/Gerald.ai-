@@ -13,6 +13,8 @@ from gerald.capture.screen import Capture, MonitorRect, capture_from_image
 from gerald.overlay.window import ACCENT, _system_font_family, screen_mapping_for_qscreen
 from gerald.tools.diagram import DiagramCommand
 from gerald.tools.diagram_render import draw_diagram
+from gerald.tools.plot import build_plot
+from gerald.tools.plot_render import draw_plot
 from gerald.tools.registry import (
     ArrowCommand,
     CircleCommand,
@@ -256,6 +258,66 @@ class BoardWindow(QWidget):
                     self.add_write(text, x, y, size)
                 else:
                     self.add_math(text, x, y, size)
+            elif name == "plot":
+                image_size = (
+                    self._capture.image.size
+                    if self._capture is not None
+                    else (self.width(), self.height())
+                )
+                image_scale_x = image_size[0] / max(1, self.width())
+                image_scale_y = image_size[1] / max(1, self.height())
+                occupied = []
+                for stroke in self.user_strokes:
+                    if stroke:
+                        xs = [point[0] * image_scale_x for point in stroke]
+                        ys = [point[1] * image_scale_y for point in stroke]
+                        occupied.append(
+                            (min(xs), min(ys), max(xs) - min(xs), max(ys) - min(ys))
+                        )
+                for item in self._gerald:
+                    kind = item["kind"]
+                    if kind == "diagram":
+                        occupied.append(
+                            (
+                                item["x"] * image_scale_x,
+                                item["y"] * image_scale_y,
+                                item["layout"].width * item["scale"] * image_scale_x,
+                                item["layout"].height * item["scale"] * image_scale_y,
+                            )
+                        )
+                    elif kind == "plot":
+                        occupied.append(item["plot"].box)
+                    elif kind == "path" and item["points"]:
+                        xs = [point[0] * image_scale_x for point in item["points"]]
+                        ys = [point[1] * image_scale_y for point in item["points"]]
+                        occupied.append(
+                            (min(xs), min(ys), max(xs) - min(xs), max(ys) - min(ys))
+                        )
+                    elif kind == "text":
+                        occupied.append(
+                            (
+                                item["x"] * image_scale_x,
+                                (item["y"] - item["size"]) * image_scale_y,
+                                len(item["text"]) * item["size"] * 0.65 * image_scale_x,
+                                item["size"] * image_scale_y,
+                            )
+                        )
+                    elif kind == "image":
+                        occupied.append(
+                            (
+                                item["x"] * image_scale_x,
+                                (item["y"] - item["image"].height()) * image_scale_y,
+                                item["image"].width() * image_scale_x,
+                                item["image"].height() * image_scale_y,
+                            )
+                        )
+                plot, result = build_plot(args, image_size, occupied)
+                self._gerald.append(
+                    {"kind": "plot", "plot": plot, "created": time.monotonic()}
+                )
+                self._reveal_timer.start()
+                self.update()
+                return json.dumps(result, ensure_ascii=False)
             elif name == "draw_path":
                 points = args.get("points")
                 if (
@@ -278,6 +340,10 @@ class BoardWindow(QWidget):
         for item in self._gerald:
             if item.get("kind") == "diagram":
                 if time.monotonic() - item["created"] < len(item["layout"].nodes) * 0.09 + 0.2:
+                    active = True
+                continue
+            if item.get("kind") == "plot":
+                if time.monotonic() - item["created"] < 0.6:
                     active = True
                 continue
             if item.get("progress", 1) < 1:
@@ -432,6 +498,21 @@ class BoardWindow(QWidget):
                     time.monotonic() - item["created"],
                     _system_font_family(),
                 )
+            elif item["kind"] == "plot":
+                plot = item["plot"]
+                x, y = self._image_to_local(plot.box[0], plot.box[1])
+                scale = self._image_size_to_logical(1)
+                painter.save()
+                painter.translate(x, y)
+                painter.scale(scale, scale)
+                draw_plot(
+                    painter,
+                    plot,
+                    min(1.0, (time.monotonic() - item["created"]) / 0.6),
+                    _system_font_family(),
+                    ACCENT,
+                )
+                painter.restore()
             elif item["kind"] == "command":
                 command = item["command"]
                 painter.setPen(QPen(ACCENT, 3, Qt.PenStyle.SolidLine, Qt.PenCapStyle.RoundCap, Qt.PenJoinStyle.RoundJoin))

@@ -8,6 +8,21 @@ from PyQt6.QtGui import QColor, QFont, QFontMetricsF, QPainter, QPainterPath, QP
 from gerald.tools.diagram import DiagramLayout
 
 
+def draw_diagram_card(
+    painter: QPainter,
+    bounds: QRectF,
+    background_alpha: int = 235,
+) -> None:
+    for outset, alpha in ((12, 3), (10, 4), (8, 4), (6, 5), (4, 5), (2, 6)):
+        shadow = bounds.translated(0, 2).adjusted(-outset, -outset, outset, outset)
+        painter.setPen(Qt.PenStyle.NoPen)
+        painter.setBrush(QColor(0, 0, 0, alpha))
+        painter.drawRoundedRect(shadow, 16 + outset, 16 + outset)
+    painter.setPen(QPen(QColor("#E5E5EA"), 1))
+    painter.setBrush(QColor(255, 255, 255, background_alpha))
+    painter.drawRoundedRect(bounds, 16, 16)
+
+
 def draw_diagram(
     painter: QPainter,
     layout: DiagramLayout,
@@ -22,14 +37,7 @@ def draw_diagram(
     painter.translate(x, y)
     painter.scale(scale, scale)
     bounds = QRectF(0, 0, layout.width, layout.height)
-    for outset, alpha in ((12, 3), (10, 4), (8, 4), (6, 5), (4, 5), (2, 6)):
-        shadow = bounds.translated(0, 2).adjusted(-outset, -outset, outset, outset)
-        painter.setPen(Qt.PenStyle.NoPen)
-        painter.setBrush(QColor(0, 0, 0, alpha))
-        painter.drawRoundedRect(shadow, 16 + outset, 16 + outset)
-    painter.setPen(QPen(QColor("#E5E5EA"), 1))
-    painter.setBrush(QColor(255, 255, 255, background_alpha))
-    painter.drawRoundedRect(bounds, 16, 16)
+    draw_diagram_card(painter, bounds, background_alpha)
     if layout.title:
         title_font = QFont(font_family)
         title_font.setPixelSize(17)

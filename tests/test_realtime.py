@@ -428,6 +428,25 @@ def test_tip_and_diagram_tools_are_dispatched_to_overlay_commands():
     asyncio.run(scenario())
 
 
+def test_plot_tool_is_dispatched_to_board_callback():
+    async def scenario():
+        client, _capture = make_client()
+        calls = []
+        client.on_board_tool = lambda name, args: calls.append((name, args)) or '{"ok":true}'
+        args = {"functions": [{"expr": "x**2"}], "x_min": -1, "x_max": 1}
+
+        output = await client._execute_function_call(
+            "plot-call",
+            "plot",
+            json.dumps(args),
+        )
+
+        assert output == '{"ok":true}'
+        assert calls == [("plot", args)]
+
+    asyncio.run(scenario())
+
+
 def test_agent_history_records_typed_and_transcribed_turns_but_not_recap(tmp_path):
     from gerald.library.store import Store
 
