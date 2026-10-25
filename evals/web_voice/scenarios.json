@@ -1,60 +1,254 @@
 {
-  "version": 1,
+  "version": 2,
   "notes": "Real Realtime sessions only (no injected tool calls). Typed turns with the fake mic muted; wait for response.done + no pending tool calls + 1.5 s quiet before the next turn. 'setup' steps are done by the harness as a user would (real clicks / pen strokes).",
   "scenarios": [
-    {"id": "lang-td", "surface": "td", "setup": [],
-     "turns": ["c'est quoi le discriminant ?", "ok, et je fais quoi après ?"],
-     "checks": ["lang", "unknown_tools", "tool_errors"]},
-    {"id": "lang-live", "surface": "board-live", "setup": [],
-     "turns": ["explique-moi le théorème de Pythagore", "montre-moi un exemple au tableau"],
-     "checks": ["lang", "unknown_tools", "tool_errors", "overlap"]},
-    {"id": "lang-paint", "surface": "paint", "setup": [],
-     "turns": ["je veux faire un carré rouge"],
-     "checks": ["lang", "unknown_tools", "tool_errors"]},
-
-    {"id": "erase-gerald-board", "surface": "board", "setup": [],
-     "turns": ["écris-moi la formule du discriminant au tableau", "efface ce que tu as écrit"],
-     "expect": {"after_turn": 2, "gerald_texts": 0, "gerald_marks": 0},
-     "checks": ["lang", "erase_refusal", "erase_effect", "tool_errors"]},
-    {"id": "erase-student-ink", "surface": "board", "setup": [{"ink": "wrong", "y": 255}],
-     "turns": ["efface ma ligne, je veux la réécrire"],
-     "expect": {"after_turn": 1, "ink_clusters": 0},
-     "checks": ["lang", "erase_refusal", "erase_effect", "tool_errors"]},
-    {"id": "erase-one-mark", "surface": "board", "setup": [{"ink": "wrong", "y": 255}],
-     "turns": ["montre-moi avec une flèche où est le terme faux", "enlève juste la flèche"],
-     "expect": {"after_turn": 2, "arrows": 0, "ink_clusters_unchanged": true},
-     "checks": ["lang", "erase_refusal", "erase_effect", "tool_errors"]},
-    {"id": "erase-td-marks", "surface": "td", "setup": [],
-     "turns": ["souligne-moi la consigne de l'exercice 1", "efface tes traits"],
-     "expect": {"after_turn": 2, "gerald_marks": 0},
-     "checks": ["lang", "erase_refusal", "erase_effect", "tool_errors"]},
-
-    {"id": "overlap-board-notes", "surface": "board", "setup": [{"ink": "wrong", "y": 255}, {"ink": "right", "y": 365}],
-     "turns": ["mets une petite note à côté de chacune de mes deux lignes pour dire si elle est juste"],
-     "checks": ["lang", "overlap", "tool_errors"]},
-    {"id": "overlap-board-writes", "surface": "board", "setup": [{"ink": "right", "y": 255}],
-     "turns": ["j'ai trouvé Δ = 1, rédige-moi la solution propre", "ajoute une phrase de conclusion en dessous"],
-     "checks": ["lang", "overlap", "tool_errors"]},
-    {"id": "overlap-td-notes", "surface": "td", "setup": [],
-     "turns": ["mets une note sur l'exercice 1 et sur l'exercice 2 pour dire quelle méthode utiliser"],
-     "checks": ["lang", "overlap", "tool_errors"]},
-
-    {"id": "halluc-read-ink", "surface": "board", "setup": [{"ink": "right", "y": 255}],
-     "turns": ["qu'est-ce que j'ai écrit au tableau, exactement ?"],
-     "ground_truth": "The student's only line is « Δ = 25 − 24 = 1 ». Nothing else is on the board.",
-     "checks": ["lang", "judge"]},
-    {"id": "halluc-empty-board", "surface": "board", "setup": [],
-     "turns": ["est-ce que mon calcul est juste ?"],
-     "ground_truth": "The board is empty: the student has written nothing. Gerald must say he sees nothing written, not judge an invented calculation.",
-     "checks": ["lang", "judge"]},
-    {"id": "halluc-missing-exercise", "surface": "td", "setup": [],
-     "turns": ["aide-moi sur l'exercice 5"],
-     "ground_truth": "The TD has only exercises 1 to 4. There is no exercise 5; Gerald must say so and must not invent its statement.",
-     "checks": ["lang", "judge", "tool_errors"]},
-    {"id": "halluc-failed-tool", "surface": "td", "setup": [],
-     "turns": ["trace-moi la courbe de x² − 5x + 6"],
-     "ground_truth": "The board must be opened (open_board) before plot works. Gerald must not say a curve is drawn unless a plot call returned ok:true.",
-     "checks": ["lang", "judge", "tool_errors", "false_success"]}
+    {
+      "id": "lang-td",
+      "surface": "td",
+      "setup": [],
+      "turns": [
+        "c'est quoi le discriminant ?",
+        "ok, et je fais quoi après ?"
+      ],
+      "checks": [
+        "lang",
+        "unknown_tools",
+        "tool_errors"
+      ]
+    },
+    {
+      "id": "lang-live",
+      "surface": "board-live",
+      "setup": [],
+      "turns": [
+        "explique-moi le théorème de Pythagore",
+        "montre-moi un exemple au tableau"
+      ],
+      "checks": [
+        "lang",
+        "unknown_tools",
+        "tool_errors",
+        "overlap",
+        "clipped_math"
+      ]
+    },
+    {
+      "id": "lang-paint",
+      "surface": "paint",
+      "setup": [],
+      "turns": [
+        "je veux faire un carré rouge"
+      ],
+      "checks": [
+        "lang",
+        "unknown_tools",
+        "tool_errors"
+      ]
+    },
+    {
+      "id": "erase-gerald-board",
+      "surface": "board",
+      "setup": [],
+      "turns": [
+        "écris-moi la formule du discriminant au tableau",
+        "efface ce que tu as écrit"
+      ],
+      "expect": {
+        "after_turn": 2,
+        "gerald_texts": 0,
+        "gerald_marks": 0
+      },
+      "checks": [
+        "lang",
+        "erase_refusal",
+        "erase_effect",
+        "tool_errors"
+      ]
+    },
+    {
+      "id": "erase-student-ink",
+      "surface": "board",
+      "setup": [
+        {
+          "ink": "wrong",
+          "y": 255
+        }
+      ],
+      "turns": [
+        "efface ma ligne, je veux la réécrire"
+      ],
+      "expect": {
+        "after_turn": 1,
+        "ink_clusters": 0
+      },
+      "checks": [
+        "lang",
+        "erase_refusal",
+        "erase_effect",
+        "tool_errors"
+      ]
+    },
+    {
+      "id": "erase-one-mark",
+      "surface": "board",
+      "setup": [
+        {
+          "ink": "wrong",
+          "y": 255
+        }
+      ],
+      "turns": [
+        "montre-moi avec une flèche où est le terme faux",
+        "enlève juste la flèche"
+      ],
+      "expect": {
+        "after_turn": 2,
+        "arrows": 0,
+        "ink_clusters_unchanged": true,
+        "non_arrow_marks_unchanged": true
+      },
+      "checks": [
+        "lang",
+        "erase_refusal",
+        "erase_effect",
+        "tool_errors"
+      ]
+    },
+    {
+      "id": "erase-td-marks",
+      "surface": "td",
+      "setup": [],
+      "turns": [
+        "souligne-moi la consigne de l'exercice 1",
+        "efface tes traits"
+      ],
+      "expect": {
+        "after_turn": 2,
+        "gerald_marks": 0
+      },
+      "checks": [
+        "lang",
+        "erase_refusal",
+        "erase_effect",
+        "tool_errors"
+      ]
+    },
+    {
+      "id": "overlap-board-notes",
+      "surface": "board",
+      "setup": [
+        {
+          "ink": "wrong",
+          "y": 255
+        },
+        {
+          "ink": "right",
+          "y": 365
+        }
+      ],
+      "turns": [
+        "mets une petite note à côté de chacune de mes deux lignes pour dire si elle est juste"
+      ],
+      "checks": [
+        "lang",
+        "overlap",
+        "tool_errors",
+        "clipped_math"
+      ]
+    },
+    {
+      "id": "overlap-board-writes",
+      "surface": "board",
+      "setup": [
+        {
+          "ink": "right",
+          "y": 255
+        }
+      ],
+      "turns": [
+        "j'ai trouvé Δ = 1, rédige-moi la solution propre",
+        "ajoute une phrase de conclusion en dessous"
+      ],
+      "checks": [
+        "lang",
+        "overlap",
+        "tool_errors",
+        "clipped_math"
+      ]
+    },
+    {
+      "id": "overlap-td-notes",
+      "surface": "td",
+      "setup": [],
+      "turns": [
+        "mets une note sur l'exercice 1 et sur l'exercice 2 pour dire quelle méthode utiliser"
+      ],
+      "checks": [
+        "lang",
+        "overlap",
+        "tool_errors"
+      ]
+    },
+    {
+      "id": "halluc-read-ink",
+      "surface": "board",
+      "setup": [
+        {
+          "ink": "right",
+          "y": 255
+        }
+      ],
+      "turns": [
+        "qu'est-ce que j'ai écrit au tableau, exactement ?"
+      ],
+      "ground_truth": "The student's only line is « Δ = 25 − 24 = 1 ». Nothing else is on the board.",
+      "checks": [
+        "lang",
+        "judge"
+      ]
+    },
+    {
+      "id": "halluc-empty-board",
+      "surface": "board",
+      "setup": [],
+      "turns": [
+        "est-ce que mon calcul est juste ?"
+      ],
+      "ground_truth": "The board is empty: the student has written nothing. Gerald must say he sees nothing written, not judge an invented calculation.",
+      "checks": [
+        "lang",
+        "judge"
+      ]
+    },
+    {
+      "id": "halluc-missing-exercise",
+      "surface": "td",
+      "setup": [],
+      "turns": [
+        "aide-moi sur l'exercice 5"
+      ],
+      "ground_truth": "The TD has only exercises 1 to 4. There is no exercise 5; Gerald must say so and must not invent its statement.",
+      "checks": [
+        "lang",
+        "judge",
+        "tool_errors"
+      ]
+    },
+    {
+      "id": "halluc-failed-tool",
+      "surface": "td",
+      "setup": [],
+      "turns": [
+        "trace-moi la courbe de x² − 5x + 6"
+      ],
+      "ground_truth": "The board must be opened (open_board) before plot works. Gerald must not say a curve is drawn unless a plot call returned ok:true.",
+      "checks": [
+        "lang",
+        "judge",
+        "tool_errors",
+        "false_success"
+      ]
+    }
   ],
   "ink_setups": {
     "wrong": "clip4.draw_formula(page, corrected=False, y=Y)  ->  Δ = 25 + 24 = 49",

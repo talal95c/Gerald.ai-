@@ -134,6 +134,28 @@ DOM_STATE_SCRIPT = r"""() => {
     rect: boardActive ? addOffset(element.rect, offset) : element.rect,
     surface: boardActive ? "board" : "td"
   }));
+  const activeDoc = boardActive ? boardWindow.document : document;
+  const selfNodes = [...activeDoc.querySelectorAll(
+    '[data-gerald-text-id],[data-gerald-mark-kind="note"],[data-gerald-mark-kind="tip"]'
+  )];
+  const selfIds = new Set(selfNodes.map(node => {
+    const owner = node.matches("[data-gerald-id]") ? node : node.closest("[data-gerald-id]");
+    return Number(owner?.getAttribute("data-gerald-id"));
+  }).filter(Number.isFinite));
+  const visibleNodes = new Map([...activeDoc.querySelectorAll("[data-gerald-id]")]
+    .map(node => [Number(node.getAttribute("data-gerald-id")), node]));
+  for (const element of activeElements) {
+    const visibleNode = visibleNodes.get(element.id);
+    if (visibleNode && selfNodes.some(node => node === visibleNode || node.contains(visibleNode))) {
+      selfIds.add(element.id);
+    }
+  }
+  const selfRects = selfNodes
+    .filter(node => !node.hasAttribute("data-gerald-text-id"))
+    .map(node => addOffset(box(node.getBoundingClientRect()), offset));
+  const sameRect = (left, right) =>
+    Math.abs(left.x - right.x) <= 1 && Math.abs(left.y - right.y) <= 1
+    && Math.abs(left.w - right.w) <= 1 && Math.abs(left.h - right.h) <= 1;
   const geometry = [];
   const push = (kind, key, rect) => {
     if (valid(rect)) geometry.push({kind, key, rect});
@@ -141,7 +163,9 @@ DOM_STATE_SCRIPT = r"""() => {
   for (const element of activeElements) {
     const rect = boardActive ? addOffset(element.rect, offset) : element.rect;
     if (element.id >= 10000) push("ink", `ink-${element.id}`, rect);
-    else push("td_text", `visible-${element.id}`, rect);
+    else if (!selfIds.has(element.id) && !selfRects.some(selfRect => sameRect(rect, selfRect))) {
+      push("td_text", `visible-${element.id}`, rect);
+    }
   }
   if (boardActive) {
     for (const element of boardWindow.document.querySelectorAll("[data-gerald-text-id]")) {
@@ -172,7 +196,6 @@ DOM_STATE_SCRIPT = r"""() => {
   };
   collectNotes(document, "td", {x: 0, y: 0});
   if (boardApi) collectNotes(boardWindow.document, "board", offset);
-  const activeDoc = boardActive ? boardWindow.document : document;
   const layer = activeDoc.querySelector(boardActive ? ".gerald-marks" : ".td-mark-layer");
   const markRoot = layer?.matches("svg") ? layer : layer?.querySelector("svg");
   const boardTexts = boardApi
@@ -181,6 +204,72 @@ DOM_STATE_SCRIPT = r"""() => {
   const inkCount = boardApi
     ? boardApi.elements().filter(element => element.id >= 10000).length
     : 0;
+  const clippedMath = [];
+  if (boardActive) {
+    const boardRoot = boardWindow.document.querySelector(".board");
+    for (const element of boardWindow.document.querySelectorAll("[data-gerald-text-id]")) {
+      const katexRects = [...element.querySelectorAll(".katex")]
+        .map(node => node.getBoundingClientRect())
+        .filter(rect => rect.width > 0 && rect.height > 0);
+      let contentRects = katexRects;
+      if (!contentRects.length) {
+        const range = boardWindow.document.createRange();
+        range.selectNodeContents(element);
+        contentRects = [...range.getClientRects()].filter(rect => rect.width > 0 && rect.height > 0);
+      }
+      if (!contentRects.length) continue;
+      const content = {
+        x: Math.min(...contentRects.map(rect => rect.x)),
+        y: Math.min(...contentRects.map(rect => rect.y)),
+        w: Math.max(...contentRects.map(rect => rect.right)) - Math.min(...contentRects.map(rect => rect.x)),
+        h: Math.max(...contentRects.map(rect => rect.bottom)) - Math.min(...contentRects.map(rect => rect.y))
+      };
+      const lineRect = box(element.getBoundingClientRect());
+      let maxOverflow = 0;
+      const clippedBy = [];
+      let node = element;
+      while (node instanceof boardWindow.HTMLElement) {
+        const style = boardWindow.getComputedStyle(node);
+        const own = node === element;
+        if (own || style.overflow !== "visible") {
+          const rect = node.getBoundingClientRect();
+          const visible = {
+            x: rect.x + node.clientLeft,
+            y: rect.y + node.clientTop,
+            w: node.clientWidth,
+            h: node.clientHeight
+          };
+          const overflow = Math.max(
+            0,
+            visible.x - content.x,
+            visible.y - content.y,
+            content.x + content.w - visible.x - visible.w,
+            content.y + content.h - visible.y - visible.h
+          );
+          const scrollOverflow = Math.max(0, node.scrollHeight - node.clientHeight);
+          maxOverflow = Math.max(maxOverflow, overflow, scrollOverflow);
+          if (overflow > 2 || scrollOverflow > 2) {
+            clippedBy.push({
+              selector: node === element ? "[data-gerald-text-id]" : node.tagName.toLowerCase(),
+              overflow: Math.max(overflow, scrollOverflow)
+            });
+          }
+        }
+        if (node === boardRoot) break;
+        node = node.parentElement;
+      }
+      if (maxOverflow > 2) {
+        clippedMath.push({
+          id: element.dataset.geraldTextId,
+          text: element.dataset.geraldText || element.innerText || element.textContent || "",
+          element_rect: addOffset(lineRect, offset),
+          content_rect: addOffset(content, offset),
+          overflow_px: maxOverflow,
+          clipped_by: clippedBy
+        });
+      }
+    }
+  }
   return {
     board_active: boardActive,
     visible_elements: visibleElements,
@@ -188,7 +277,8 @@ DOM_STATE_SCRIPT = r"""() => {
     gerald_texts: boardTexts,
     gerald_marks: markRoot?.children.length || 0,
     arrows: activeDoc.querySelectorAll('[data-gerald-mark-kind="arrow"]').length,
-    ink_clusters: inkCount
+    ink_clusters: inkCount,
+    clipped_math: clippedMath
   };
 }"""
 
@@ -877,7 +967,27 @@ def intersection_area(left: dict[str, float], right: dict[str, float]) -> float:
     return width * height
 
 
+def dedupe_self_geometry(geometry: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    self_rects = [
+        item["rect"] for item in geometry
+        if item["kind"] in {"gerald_text", "note_tip"}
+    ]
+    result = []
+    for item in geometry:
+        if item["kind"] == "td_text":
+            rect = item["rect"]
+            rect_area = rect["w"] * rect["h"]
+            if rect_area and any(
+                all(abs(rect[key] - other[key]) <= 4 for key in ("x", "y", "w", "h"))
+                for other in self_rects
+            ):
+                continue
+        result.append(item)
+    return result
+
+
 def overlap_pairs(geometry: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    geometry = dedupe_self_geometry(geometry)
     candidates = [item for item in geometry if item["kind"] in {"gerald_text", "note_tip"}]
     pairs: dict[tuple[str, str], dict[str, Any]] = {}
     for candidate in candidates:
@@ -918,6 +1028,28 @@ def check_overlap(attempt: dict[str, Any], attempt_dir: Path) -> dict[str, Any]:
     return {"passed": not overlaps, "details": {"overlaps": overlaps}}
 
 
+def check_clipped_math(attempt: dict[str, Any], attempt_dir: Path) -> dict[str, Any]:
+    failures = []
+    for index, turn in enumerate(attempt.get("turns", []), start=1):
+        clipped = turn.get("after_state", {}).get("clipped_math", [])
+        if not clipped:
+            continue
+        screenshot = attempt_dir / turn["screenshot"]
+        outline_path = attempt_dir / "screenshots" / f"after-turn-{index:02d}-clipped-math.png"
+        image = Image.open(screenshot).convert("RGB")
+        draw = ImageDraw.Draw(image)
+        for line in clipped:
+            draw.rectangle(rectangle_xyxy(line["element_rect"]), outline=(255, 0, 0), width=4)
+            draw.rectangle(rectangle_xyxy(line["content_rect"]), outline=(255, 145, 0), width=3)
+        image.save(outline_path)
+        failures.append({
+            "turn": turn.get("turn"),
+            "lines": clipped,
+            "screenshot": str(outline_path.relative_to(attempt_dir)),
+        })
+    return {"passed": not failures, "details": {"clipped_lines": failures}}
+
+
 def check_erase_effect(scenario: dict[str, Any], attempt: dict[str, Any]) -> dict[str, Any]:
     expected = scenario.get("expect") or {}
     after_turn = expected.get("after_turn")
@@ -937,6 +1069,14 @@ def check_erase_effect(scenario: dict[str, Any], attempt: dict[str, Any]) -> dic
         "ink_clusters": after.get("ink_clusters"),
         "ink_clusters_unchanged": (
             after.get("ink_clusters") == before.get("ink_clusters")
+        ),
+        "non_arrow_marks_unchanged": (
+            isinstance(after.get("gerald_marks"), int)
+            and isinstance(after.get("arrows"), int)
+            and isinstance(before.get("gerald_marks"), int)
+            and isinstance(before.get("arrows"), int)
+            and after["gerald_marks"] - after["arrows"]
+            == before["gerald_marks"] - before["arrows"]
         ),
     }
     comparisons = {
@@ -1093,6 +1233,8 @@ def check_attempt(
             results[name] = check_erase_effect(scenario, attempt)
         elif name == "overlap":
             results[name] = check_overlap(attempt, attempt_dir)
+        elif name == "clipped_math":
+            results[name] = check_clipped_math(attempt, attempt_dir)
         elif name == "judge":
             if no_judge:
                 results[name] = {

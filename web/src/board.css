@@ -25,7 +25,7 @@ html,body,#root{margin:0;height:100%;overflow:hidden}
 .board-tools button.swatch[aria-pressed="true"]::before{outline:1px solid #F7F6F3;outline-offset:2px}
 .plot-win{z-index:4}
 .gerald-text-layer,.gerald-marks{position:absolute;inset:0;z-index:3;pointer-events:none}
-.gerald-write{position:absolute;color:#111;font-family:"KaTeX_Main","Times New Roman",serif;font-weight:400;line-height:1.25;white-space:pre}
+.gerald-write{position:absolute;color:#111;font-family:"KaTeX_Main","Times New Roman",serif;font-weight:400;line-height:1.8;padding-block:.15em;overflow:visible;white-space:pre}
 .gerald-write .katex{font-size:1em}
 .gerald-marks{overflow:visible}
 .gerald-marks ellipse,.gerald-marks line{fill:none;stroke:#7C3AED;stroke-width:3;stroke-linecap:round;stroke-linejoin:round}

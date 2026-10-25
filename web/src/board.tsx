@@ -7,7 +7,7 @@ import {annotationLeader, annotationSize, arrowEndpointsAroundTarget, arrowEndpo
 import { mountNotch } from "./notch";
 
 type Pt = {x: number; y: number; p: number};
-type Stroke = {pts: Pt[]; erase: boolean; color: string};
+type Stroke = {pts: Pt[]; erase: boolean; color: string; undo?: {indices: number[]; strokes: Stroke[]}};
 type Win = {x: number; y: number; w: number; h: number};
 type PlotCurveData = {expr: string; label: string; samples: (number[] | null)[]};
 type PlotPointData = {label: string; x: number; y: number; x_img: number; y_img: number};
@@ -648,10 +648,9 @@ function Board() {
       };
     });
   };
-  const elements = () => {
-    const domElements = visibleDomTargets().map(({id, text, rect}) => ({id, text, rect}));
-    const strokeBoxes = strokes.current.flatMap((stroke) => {
-      if (stroke.erase || !stroke.pts.length) return [];
+  const inkClusters = () => {
+    const strokeBoxes = strokes.current.flatMap((stroke, strokeIndex) => {
+      if (stroke.erase || stroke.undo || !stroke.pts.length) return [];
       const xs = stroke.pts.map((point) => point.x);
       const ys = stroke.pts.map((point) => point.y);
       const x = Math.min(...xs);
@@ -659,11 +658,12 @@ function Board() {
       return [{
         rect: {x: x - 5, y: y - 5, w: Math.max(12, Math.max(...xs) - x + 10), h: Math.max(12, Math.max(...ys) - y + 10)},
         color: stroke.color ?? penColors[0].value,
+        strokeIndices: [strokeIndex],
       }];
     });
-    const clusters: Array<{rect: AnnotationRect; colors: Set<string>}> = [];
-    for (const {rect, color} of strokeBoxes) {
-      const merged = {rect: {...rect}, colors: new Set([color])};
+    const clusters: Array<{rect: AnnotationRect; colors: Set<string>; strokeIndices: number[]}> = [];
+    for (const {rect, color, strokeIndices} of strokeBoxes) {
+      const merged = {rect: {...rect}, colors: new Set([color]), strokeIndices: [...strokeIndices]};
       for (let index = 0; index < clusters.length;) {
         const item = clusters[index];
         const nearby = merged.rect.x <= item.rect.x + item.rect.w + 14 && item.rect.x <= merged.rect.x + merged.rect.w + 14
@@ -679,12 +679,13 @@ function Board() {
         merged.rect.w = right - merged.rect.x;
         merged.rect.h = bottom - merged.rect.y;
         item.colors.forEach((itemColor) => merged.colors.add(itemColor));
+        merged.strokeIndices.push(...item.strokeIndices);
         clusters.splice(index, 1);
         index = 0;
       }
       clusters.push(merged);
     }
-    const inkElements = clusters.map(({rect, colors}, index) => {
+    return clusters.map(({rect, colors, strokeIndices}, index) => {
       const colorName = colors.size === 1
         ? penColors.find(({value}) => value === [...colors][0])?.name
         : undefined;
@@ -692,8 +693,13 @@ function Board() {
         id: 10000 + index,
         text: `encre élève #${index + 1}${colorName ? ` (${colorName})` : ""}`,
         rect,
+        strokeIndices,
       };
     });
+  };
+  const elements = () => {
+    const domElements = visibleDomTargets().map(({id, text, rect}) => ({id, text, rect}));
+    const inkElements = inkClusters().map(({id, text, rect}) => ({id, text, rect}));
     return [...domElements, ...inkElements];
   };
   const annotationOccupants = (target?: AnnotationRect, extra: AnnotationRect[] = []) => [
@@ -859,12 +865,157 @@ function Board() {
     }
     return null;
   };
+  const rectsIntersect = (left: AnnotationRect, right: AnnotationRect) =>
+    left.x < right.x + right.w && left.x + left.w > right.x
+      && left.y < right.y + right.h && left.y + left.h > right.y;
+  const markRect = (mark: typeof marks[number]): AnnotationRect => {
+    if (mark.target) return mark.target;
+    if (mark.kind === "note" || mark.kind === "tip") {
+      return {x: mark.x, y: mark.y, w: mark.w, h: mark.h};
+    }
+    if (mark.kind === "arrow") {
+      const points = [...(mark.shaftPoints ?? []), ...(mark.headPoints ?? [])];
+      return points.length ? boundsOfPoints(points, 2) : {x: mark.x, y: mark.y, w: mark.w, h: mark.h};
+    }
+    if (mark.kind === "point") return {x: mark.x - 5, y: mark.y - 5, w: 10, h: 10};
+    return {x: mark.x - mark.w / 2, y: mark.y - mark.h / 2, w: mark.w, h: mark.h};
+  };
+  const eraseError = (kind: string) => {
+    const counts = new Map<string, number>();
+    for (const mark of marks) counts.set(mark.kind, (counts.get(mark.kind) ?? 0) + 1);
+    if (geraldTexts.length) counts.set("write", (counts.get("write") ?? 0) + geraldTexts.length);
+    if (plotVisible && plotData) counts.set("plot", 1);
+    const inkCount = inkClusters().length;
+    if (inkCount) counts.set("ink", inkCount);
+    const present = [...counts].map(([name, count]) => `${name} (${count})`).join(", ") || "aucune";
+    return {ok: false, error: `rien à effacer pour kind=${kind}. Marques présentes : ${present}`};
+  };
   const executeWebTool = async (name: string, args: Record<string, unknown>) => {
     const id = crypto.randomUUID();
     const target = targetRect(args);
     const motion = cursorMotion.current!;
     const color = intentColor(args.intent);
     const highlightFill = intentColor(args.intent, null, 0.16);
+    if (name === "erase") {
+      const kind = typeof args.kind === "string" ? args.kind : "";
+      const hasTarget = isNumber(args.element_id)
+        || (typeof args.target_text === "string" && args.target_text.length > 0);
+      const targetBounds = hasTarget ? targetRect(args) : null;
+      const scope = args.scope === "all" ? "all" : "last";
+      if (kind === "ink") {
+        const clusters = inkClusters();
+        let selected = hasTarget
+          ? isNumber(args.element_id) && args.element_id >= 10000
+            ? clusters.filter((cluster) => cluster.id === args.element_id)
+            : targetBounds
+              ? clusters.filter((cluster) => rectsIntersect(cluster.rect, targetBounds))
+              : []
+          : scope === "all"
+            ? clusters
+            : clusters.slice().sort((left, right) =>
+              Math.max(...right.strokeIndices) - Math.max(...left.strokeIndices),
+            ).slice(0, 1);
+        if (!selected.length) return eraseError(kind);
+        const removed = selected.length;
+        const selectedIndices = new Set(selected.flatMap((cluster) => cluster.strokeIndices));
+        const previous = strokes.current;
+        const removedIndices = scope === "all" && !hasTarget
+          ? previous.map((_stroke, index) => index)
+          : [...selectedIndices].sort((left, right) => left - right);
+        const removedIndexSet = new Set(removedIndices);
+        const removedStrokes = previous.filter((_stroke, index) => removedIndexSet.has(index));
+        strokes.current = previous.filter((_stroke, index) => !removedIndexSet.has(index));
+        strokes.current.push({
+          pts: [],
+          erase: false,
+          color: penColor,
+          undo: {indices: removedIndices, strokes: removedStrokes},
+        });
+        redraw();
+        tick((value) => value + 1);
+        await motion.waitForAnimations();
+        await waitForPaint();
+        return {ok: true, removed};
+      }
+      const matches = (mark: typeof marks[number]) =>
+        (kind === "write" || kind === "write_math" ? false : mark.kind === kind)
+        && (!hasTarget || (targetBounds !== null && rectsIntersect(markRect(mark), targetBounds)));
+      const matchedMarks = marks.filter(matches);
+      const matchedTexts = kind === "write" || kind === "write_math"
+        ? geraldTexts.filter((item) => {
+          const element = document.querySelector<HTMLElement>(`[data-gerald-text-id="${item.id}"]`);
+          const bounds = element ? measuredWriteBounds(element) : null;
+          return !hasTarget || (bounds !== null && targetBounds !== null && rectsIntersect(bounds, targetBounds));
+        })
+        : [];
+      const plotElement = plotVisible && plotData
+        ? document.querySelector<HTMLElement>(".plot-win")
+        : null;
+      const plotBounds = plotElement
+        ? (() => {
+          const rect = plotElement.getBoundingClientRect();
+          return {x: rect.x, y: rect.y, w: rect.width, h: rect.height};
+        })()
+        : plotBox;
+      const matchedPlot = kind === "plot" && plotVisible && plotData
+        && (!hasTarget || (targetBounds !== null && rectsIntersect(plotBounds, targetBounds)));
+      if (hasTarget) {
+        if (matchedMarks.length || matchedTexts.length || matchedPlot) {
+          if (matchedMarks.length) {
+            const ids = new Set(matchedMarks.map((mark) => mark.id));
+            setMarks((items) => items.filter((mark) => !ids.has(mark.id)));
+          }
+          if (matchedTexts.length) {
+            const ids = new Set(matchedTexts.map((item) => item.id));
+            setGeraldTexts((items) => items.filter((item) => !ids.has(item.id)));
+          }
+          if (matchedPlot) {
+            setPlotData(null);
+            setPlotVisible(false);
+          }
+          await motion.waitForAnimations();
+          await waitForPaint();
+          return {ok: true, removed: matchedMarks.length + matchedTexts.length + Number(matchedPlot)};
+        }
+        return eraseError(kind);
+      }
+      if (scope === "all") {
+        const removed = matchedMarks.length + matchedTexts.length + Number(matchedPlot);
+        if (!removed) return eraseError(kind);
+        setMarks((items) => items.filter((mark) => !matches(mark)));
+        setGeraldTexts((items) => items.filter((item) => !matchedTexts.some((matched) => matched.id === item.id)));
+        if (matchedPlot) {
+          setPlotData(null);
+          setPlotVisible(false);
+        }
+        await motion.waitForAnimations();
+        await waitForPaint();
+        return {ok: true, removed};
+      }
+      const lastMark = matchedMarks[matchedMarks.length - 1];
+      const lastText = matchedTexts[matchedTexts.length - 1];
+      const removeText = lastText && (!lastMark || geraldTexts.indexOf(lastText) > marks.indexOf(lastMark));
+      if (removeText) {
+        setGeraldTexts((items) => items.filter((item) => item.id !== lastText.id));
+        await motion.waitForAnimations();
+        await waitForPaint();
+        return {ok: true, removed: 1};
+      }
+      if (lastMark) {
+        setMarks((items) => items.filter((mark) => mark.id !== lastMark.id));
+        await motion.waitForAnimations();
+        await waitForPaint();
+        return {ok: true, removed: 1};
+      }
+      if (matchedPlot) {
+        setPlotData(null);
+        setPlotVisible(false);
+        await motion.waitForAnimations();
+        await waitForPaint();
+        return {ok: true, removed: 1};
+      }
+      return eraseError(kind);
+    }
     if (name === "clear_gerald") {
       pendingAnnotations.current.clear();
       motion.enqueue(() => {
@@ -884,7 +1035,7 @@ function Board() {
     if (name === "write" || name === "write_math") {
       const text = name === "write" ? args.text : args.latex;
       if (typeof text !== "string" || !isNumber(args.x) || (args.y !== undefined && !isNumber(args.y))) {
-        return {ok: false, error: "write requires text or latex and numeric x coordinates"};
+        return {ok: false, error: "write demande un texte (ou latex pour write_math) et une coordonnée x numérique"};
       }
       const size = isNumber(args.size) ? args.size : 32;
       const requestedY = isNumber(args.y) ? Number(args.y) : null;
@@ -927,10 +1078,10 @@ function Board() {
       return {ok: true};
     }
     if (name === "tip") {
-      if (typeof args.text !== "string") return {ok: false, error: "tip requires text"};
+      if (typeof args.text !== "string") return {ok: false, error: "tip demande un texte"};
       const point = target ?? {x: innerWidth / 2, y: innerHeight - 130, w: 0, h: 0};
       const placement = placeBeside(point, args.text, "tip");
-      if (!placement) return {ok: false, error: "no free space to place the tip beside its target"};
+      if (!placement) return {ok: false, error: "pas de place libre à côté de la cible pour cette bulle ; choisis une autre cible ou efface d'abord une note"};
       pendingAnnotations.current.set(id, placement.rect);
       motion.enqueue(async (queue) => {
         await queue.moveTo({x: point.x + point.w / 2, y: point.y + point.h / 2});
@@ -953,7 +1104,7 @@ function Board() {
         ? {x: Number(fromArgs.x), y: Number(fromArgs.y), w: 0, h: 0}
         : targetRect(fromArgs);
       const to = targetRect((args.to ?? {}) as Record<string, unknown>);
-      if (!to) return {ok: false, error: `target not found. Visible targets: ${visibleTargetSummary()}`};
+      if (!to) return {ok: false, error: `cible introuvable. Cibles visibles : ${visibleTargetSummary()}`};
       const containsTarget = !!from && (
         to.x >= from.x - 2 && to.y >= from.y - 2
           && to.x + to.w <= from.x + from.w + 2 && to.y + to.h <= from.y + from.h + 2
@@ -965,7 +1116,7 @@ function Board() {
       const endpoints = !from || containsTarget
         ? arrowEndpointsAroundTarget(to, elements().map((item) => item.rect), viewport())
         : arrowEndpointsFromSource(from, to, elements().map((item) => item.rect), viewport());
-      if (!endpoints) return {ok: false, error: "arrow endpoints could not be calculated"};
+      if (!endpoints) return {ok: false, error: "impossible de tracer la flèche sans traverser un autre élément ; vise la cible avec underline ou circle"};
       const {x1, y1, x2, y2} = endpoints;
       const {shaft, head} = sketchArrow(x1, y1, x2, y2, seedFrom(id));
       const arrowBounds = boundsOfPoints([...shaft, ...head], 2);
@@ -982,14 +1133,14 @@ function Board() {
     }
     if (["underline", "circle", "highlight", "point", "note"].includes(name)) {
       if (!target) {
-        return {ok: false, error: `target not found. Visible targets: ${visibleTargetSummary()}`};
+        return {ok: false, error: `cible introuvable. Cibles visibles : ${visibleTargetSummary()}`};
       }
       const text = typeof args.text === "string"
         ? args.text
         : typeof args.label === "string" ? args.label : "";
       if (name === "note") {
         const placement = placeBeside(target, text, "note");
-        if (!placement) return {ok: false, error: "no free space to place the note beside its target"};
+        if (!placement) return {ok: false, error: "pas de place libre à côté de la cible pour cette bulle ; choisis une autre cible ou efface d'abord une note"};
         const size = annotationSize(text, "note");
         const mark = {
           id, kind: name, x: placement.rect.x, y: placement.rect.y, ...size, text,
@@ -1046,7 +1197,7 @@ function Board() {
       }
       return {ok: true, target: {x, y}};
     }
-    return {ok: false, error: `unknown board tool: ${name}`};
+    return {ok: false, error: `outil indisponible ici : ${name}`};
   };
   useEffect(() => {
     window.geraldBoard = {snapshot, elements, exec: executeWebTool, waitForAnimations: () => cursorMotion.current!.waitForAnimations()};
@@ -1070,7 +1221,15 @@ function Board() {
     redraw();
   };
   const act = (id: string) => {
-    if (id === "undo") { strokes.current.pop(); redraw(); }
+    if (id === "undo") {
+      const last = strokes.current.pop();
+      if (last?.undo) {
+        const restored = strokes.current.slice();
+        last.undo.indices.forEach((index, offset) => restored.splice(index, 0, last.undo!.strokes[offset]));
+        strokes.current = restored;
+      }
+      redraw();
+    }
     else if (id === "clear") { strokes.current = []; redraw(); }
     else if (id === "plot") setPlotVisible((visible) => !visible);
     else setTool(id);
@@ -1085,7 +1244,7 @@ function Board() {
     <canvas ref={canvas} className={tool} onPointerDown={down} onPointerMove={move}/>
     {!liveMode&&<aside className="ex-card" ref={exerciseCard} data-gerald-id="100"><div className="ex-label"><i/>{title.toUpperCase()}</div>{lines.map((line, index) => <p key={index} data-gerald-id={101 + index}>{line}</p>)}</aside>}
     <div className="gerald-text-layer">
-      {geraldTexts.map((item,index) => <div key={item.id} className="gerald-write" data-gerald-id={300+index} data-gerald-text-id={item.id} style={{left: item.x, top: item.y, fontSize: item.size, color: item.color}}>
+      {geraldTexts.map((item,index) => <div key={item.id} className="gerald-write" data-gerald-id={300+index} data-gerald-text-id={item.id} data-gerald-text={item.text} style={{left: item.x, top: item.y, fontSize: item.size, color: item.color}}>
         {item.html ? <span dangerouslySetInnerHTML={{__html: item.html}}/> : item.parts
           ? item.parts.map((part, partIndex) => part.html
             ? <span key={partIndex} dangerouslySetInnerHTML={{__html: part.html}}/>
