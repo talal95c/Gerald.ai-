@@ -1,0 +1,58 @@
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "gerald-screen-tutor"
+version = "0.1.0"
+description = "A push-to-talk teaching assistant that draws on your screen."
+readme = "README.md"
+requires-python = ">=3.11"
+license = { file = "LICENSE" }
+dependencies = [
+  "mss>=9.0",
+  "matplotlib>=3.8",
+  "numpy>=1.26",
+  "Pillow>=10.0",
+  "pypdf>=5.0",
+  "psutil>=5.9",
+  "pynput>=1.7",
+  "PyQt6>=6.6",
+  "python-dotenv>=1.0",
+  "python-docx>=1.1",
+  "pytesseract>=0.3.10",
+  "sounddevice>=0.4.6",
+  "websockets>=14.0",
+]
+
+[project.optional-dependencies]
+dev = ["pytest>=8.0", "ruff>=0.6"]
+windows = [
+  "uiautomation>=2.0.20; sys_platform == 'win32'",
+  "winrt-runtime>=4.0.3; sys_platform == 'win32'",
+  "winrt-Windows.Media.Ocr>=4!10.0.0; sys_platform == 'win32'",
+  "winrt-Windows.Graphics.Imaging>=4!10.0.0; sys_platform == 'win32'",
+  "winrt-Windows.Storage.Streams>=4!10.0.0; sys_platform == 'win32'",
+]
+grounder-local = ["torch>=2.2", "transformers>=4.46,<5"]
+
+[project.scripts]
+gerald = "gerald.app:main"
+
+[tool.setuptools.packages.find]
+include = ["gerald*"]
+
+[tool.setuptools.package-data]
+"gerald.prompts" = ["*.md"]
+"gerald.home.fonts" = ["*.otf", "OFL.txt"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "-ra"
+
+[tool.ruff]
+target-version = "py311"
+line-length = 100
+
+[tool.ruff.lint]
+select = ["E4", "E7", "E9", "F"]
