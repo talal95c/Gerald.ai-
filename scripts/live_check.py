@@ -8,6 +8,7 @@ from pathlib import Path
 
 from PIL import Image
 
+from gerald.audio.player import AudioPlayer
 from gerald.brain.realtime import RealtimeClient
 from gerald.capture.screen import MonitorRect, capture_from_image, capture_screen
 from gerald.config import load_settings, set_physical_dpi_awareness
@@ -15,11 +16,23 @@ from gerald.perception.elements import collect_elements, serialize_context
 from gerald.tools.registry import CircleCommand, PointCommand
 
 
+class NullPlayer:
+    def enqueue(self, _audio: bytes) -> None:
+        pass
+
+    def stop(self) -> None:
+        pass
+
+    def close(self) -> None:
+        pass
+
+
 def _parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Run one live Realtime teaching turn without a microphone.")
     parser.add_argument("image", nargs="?", help="PNG or other image file (omit to capture the current monitor)")
     parser.add_argument("--question", required=True)
     parser.add_argument("--expect", nargs=2, type=float, metavar=("X", "Y"))
+    parser.add_argument("--play", action="store_true", help="play the assistant's audio response")
     return parser.parse_args()
 
 
@@ -64,7 +77,15 @@ async def run() -> int:
                 point_commands.append(command)
             print(f"resolved: {command}")
 
-    client = RealtimeClient(settings.api_key, settings.model, settings.voice, instructions, on_event=on_event, on_commands=on_commands)
+    client = RealtimeClient(
+        settings.api_key,
+        settings.model,
+        settings.voice,
+        instructions,
+        player=AudioPlayer() if args.play else NullPlayer(),
+        on_event=on_event,
+        on_commands=on_commands,
+    )
     try:
         await client.connect()
         runner = asyncio.create_task(client.run())

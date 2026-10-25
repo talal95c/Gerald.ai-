@@ -270,3 +270,53 @@ def test_barge_in_cancels_response_and_stops_player():
             await server.wait_closed()
 
     asyncio.run(scenario())
+
+
+def test_event_handler_exception_keeps_the_connection_open():
+    async def scenario():
+        incoming = asyncio.Queue()
+        handled_second_event = asyncio.Event()
+        player = RecordingPlayer()
+        client = RealtimeClient(
+            "test-key",
+            "gpt-realtime-2",
+            "marin",
+            "exact instructions",
+            player=player,
+            usage_log=None,
+        )
+        connection_count = 0
+
+        class FakeWebSocket:
+            async def recv(self):
+                return json.dumps(await incoming.get())
+
+            async def close(self):
+                pass
+
+        async def connect_once():
+            nonlocal connection_count
+            connection_count += 1
+            client.websocket = FakeWebSocket()
+
+        async def handle_event(event):
+            if event["type"] == "bad":
+                raise RuntimeError("simulated handler failure")
+            handled_second_event.set()
+
+        client.connect = connect_once
+        client.handle_event = handle_event
+        await incoming.put({"type": "bad"})
+        await incoming.put({"type": "good"})
+        runner = asyncio.create_task(client.run())
+        try:
+            await asyncio.wait_for(handled_second_event.wait(), 2)
+        finally:
+            runner.cancel()
+            with pytest.raises(asyncio.CancelledError):
+                await runner
+            await client.close()
+
+        assert connection_count == 1
+
+    asyncio.run(scenario())

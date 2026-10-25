@@ -178,7 +178,6 @@ class RealtimeClient:
                     await self.connect()
                     delay = 1.0
                 event = await self._receive()
-                await self.handle_event(event)
             except asyncio.CancelledError:
                 raise
             except Exception:
@@ -192,6 +191,13 @@ class RealtimeClient:
                         pass
                 await asyncio.sleep(delay)
                 delay = min(delay * 2, 15)
+                continue
+            try:
+                await self.handle_event(event)
+            except asyncio.CancelledError:
+                raise
+            except Exception:
+                logger.exception("Realtime event handler failed; keeping connection open")
 
     async def handle_event(self, event: dict[str, Any]) -> None:
         event_type = event.get("type")
