@@ -164,6 +164,32 @@ const textPattern = (value:string) => new RegExp([...value.trim()].map(char => {
   const escaped=char.replace(/[.*+?^${}()|[\]\\]/g,"\\$&");
   return /\s/.test(char)?"\\s+":/[()[\]{}.,:+−\-\/]/.test(char)?`\\s*${escaped}\\s*`:escaped;
 }).join(""),"i");
+const mathKey = (value:string) => value.normalize("NFKC").replace(/[−–]/g,"-").replace(/[\s$\\{}^_]/g,"").toLowerCase();
+function elementText(element:HTMLElement):string {
+  const parts:string[]=[];
+  const visit=(node:Node):void=>{
+    if(node.nodeType===Node.TEXT_NODE){parts.push(node.textContent??"");return;}
+    if(!(node instanceof HTMLElement)||node.matches(".katex-mathml"))return;
+    if(node.classList.contains("katex")){
+      const tex=node.querySelector('annotation[encoding="application/x-tex"]')?.textContent;
+      if(tex!==null&&tex!==undefined){parts.push(` $${tex}$ `);return;}
+      const htmlText=node.querySelector(".katex-html")?.textContent;
+      if(htmlText){parts.push(` ${htmlText} `);return;}
+    }
+    if(node.tagName==="BR"){parts.push(" ");return;}
+    const block=node===element||/^(ARTICLE|DIV|H[1-6]|HEADER|LI|P|SECTION|UL|OL)$/.test(node.tagName);
+    const separatedChildren=["flex","grid","inline-flex"].includes(getComputedStyle(node).display);
+    if(block)parts.push(" ");
+    node.childNodes.forEach(child=>{
+      if(separatedChildren)parts.push(" ");
+      visit(child);
+      if(separatedChildren)parts.push(" ");
+    });
+    if(block)parts.push(" ");
+  };
+  visit(element);
+  return parts.join("").replace(/\s+/g," ").trim();
+}
 const voiceState = () => window.__geraldState ??= {turn:0,settledTurn:0,pendingTools:0,settledAt:0,responsesCreated:0,responsesDone:0};
 const voiceLog = () => window.__geraldLog ??= [];
 
@@ -171,6 +197,21 @@ function targetRect(args:Record<string,any>):Rect|null {
   const elements = [...document.querySelectorAll<HTMLElement>("[data-gerald-id]")];
   let element = elements.find(e => e.dataset.geraldId === String(args.element_id));
   if (!element && typeof args.target_text === "string") {
+    const targetKey=mathKey(args.target_text);
+    const mathMatches=[...document.querySelectorAll<HTMLElement>(".katex")]
+      .filter(node=>node.getClientRects().length>0)
+      .map(node=>{
+        const tex=node.querySelector('annotation[encoding="application/x-tex"]')?.textContent??"";
+        const htmlText=node.querySelector(".katex-html")?.textContent??"";
+        const rect=node.getBoundingClientRect();
+        return {rect,keys:[mathKey(tex),mathKey(htmlText)]};
+      })
+      .filter(({keys})=>keys.some(key=>key===targetKey||(targetKey.length>=3&&key.includes(targetKey))))
+      .sort((left,right)=>left.rect.width*left.rect.height-right.rect.width*right.rect.height);
+    if(mathMatches[0]){
+      const {rect}=mathMatches[0];
+      return {x:rect.x,y:rect.y,w:rect.width,h:rect.height};
+    }
     const pattern=textPattern(args.target_text);
     element = elements.find(e => pattern.test(e.innerText));
   }
@@ -400,7 +441,7 @@ function TD(){
     const scaleX=frameRect.width/Math.max(1,iframe.clientWidth),scaleY=frameRect.height/Math.max(1,iframe.clientHeight);
     return {x:frameRect.x+rect.x*scaleX,y:frameRect.y+rect.y*scaleY,w:rect.width*scaleX,h:rect.height*scaleY};
   };
-  const elements=():ViewElement[]=>paintMode?paintElements():[...document.querySelectorAll<HTMLElement>("[data-gerald-id]")].filter(e=>e.getClientRects().length).map(e=>{const r=e.getBoundingClientRect();return {id:Number(e.dataset.geraldId),text:(e instanceof HTMLInputElement?e.value||e.placeholder:e.innerText||"").trim(),rect:{x:r.x,y:r.y,w:r.width,h:r.height}};});
+  const elements=():ViewElement[]=>paintMode?paintElements():[...document.querySelectorAll<HTMLElement>("[data-gerald-id]")].filter(e=>e.getClientRects().length).map(e=>{const r=e.getBoundingClientRect();return {id:Number(e.dataset.geraldId),text:(e instanceof HTMLInputElement?e.value||e.placeholder:elementText(e)),rect:{x:r.x,y:r.y,w:r.width,h:r.height}};});
   const annotationOccupants=(target?:AnnotationRect,extra:AnnotationRect[]=[]):AnnotationRect[]=>[
       ...elements().map(element=>element.rect),
       ...marks.filter(mark=>mark.kind==="note"||mark.kind==="tip").map(mark=>mark.rect),

@@ -38,7 +38,7 @@ body.desktop-page{min-width:320px;min-height:100vh;overflow:hidden;background:#2
 .demo-guide-point .guide-point .gp-core{fill:var(--gp);opacity:.92;filter:blur(.5px);animation:gp-in .35s cubic-bezier(.2,.8,.2,1) both}
 .demo-guide-point .guide-point .gp-ripple{fill:none;stroke:var(--gp);stroke-width:1.5;opacity:0;animation:gp-ripple 2.4s cubic-bezier(.2,.7,.3,1) .25s infinite}
 .demo-guide-point .guide-point .gp-late{animation-delay:1.45s}
-.guided-demo{position:absolute;right:24px;bottom:106px;z-index:21;width:min(350px,calc(100vw - 48px));box-sizing:border-box;border-radius:20px;background:#fff;color:#262626;box-shadow:0 14px 36px rgba(0,0,0,.24),0 2px 6px rgba(0,0,0,.12);font-family:"Google Sans Flex",sans-serif}
+.guided-demo{position:absolute;left:24px;bottom:24px;z-index:21;width:min(280px,calc(100vw - 48px));box-sizing:border-box;border-radius:20px;background:#fff;color:#262626;box-shadow:0 14px 36px rgba(0,0,0,.24),0 2px 6px rgba(0,0,0,.12);font-family:"Google Sans Flex",sans-serif}
 .guided-demo-content{padding:16px 17px 13px;animation:guided-demo-in 200ms cubic-bezier(.2,.8,.2,1) both}
 .guided-demo-head{display:flex;align-items:center;gap:9px;min-height:30px}.guided-demo-counter{font-size:12px;color:#777}
 .guided-demo p{margin:10px 0 14px;font-size:14px;line-height:1.4;font-weight:500}
