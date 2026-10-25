@@ -2,12 +2,14 @@ import asyncio
 import json
 
 from PIL import Image
+import pytest
 from websockets.asyncio.client import connect
 from websockets.asyncio.server import serve
 
 from gerald.brain.realtime import RealtimeClient
 from gerald.capture.screen import MonitorRect, capture_from_image
 from gerald.perception.elements import Element
+from gerald.tools.registry import ClearCommand
 
 
 class RecordingPlayer:
@@ -99,10 +101,25 @@ def test_function_round_trip_sends_one_followup_after_output():
                 "conversation.item.create",
                 "response.create",
             ]
+            drawn = []
+            client.on_commands = drawn.extend
+            await client.handle_event(
+                {
+                    "type": "response.function_call_arguments.done",
+                    "response_id": "response-1",
+                    "call_id": "call-1",
+                    "name": "clear",
+                    "arguments": "{}",
+                }
+            )
+            assert drawn == [ClearCommand()]
+            assert received.empty()
             await client.handle_event(
                 {
                     "type": "response.done",
                     "response": {
+                        "id": "response-1",
+                        "status": "completed",
                         "output": [
                             {
                                 "type": "function_call",
@@ -120,7 +137,59 @@ def test_function_round_trip_sends_one_followup_after_output():
             assert output["item"]["call_id"] == "call-1"
             assert json.loads(output["item"]["output"]) == {"ok": True}
             assert followup["type"] == "response.create"
+            assert drawn == [ClearCommand()]
             assert client._tool_rounds == 1
+        finally:
+            await client.close()
+            server.close()
+            await server.wait_closed()
+
+    asyncio.run(scenario())
+
+
+def test_cancelled_tool_response_does_not_create_followup():
+    async def scenario():
+        received = asyncio.Queue()
+
+        async def server_handler(websocket):
+            await websocket.recv()
+            await websocket.send(json.dumps({"type": "session.updated"}))
+            async for message in websocket:
+                await received.put(json.loads(message))
+
+        server, client, capture = await connected_client(server_handler)
+        try:
+            await client.finish_turn(capture, client.elements, "context", has_audio=False)
+            initial = [await asyncio.wait_for(received.get(), 2) for _ in range(3)]
+            assert [event["type"] for event in initial] == [
+                "input_audio_buffer.clear",
+                "conversation.item.create",
+                "response.create",
+            ]
+            await client.handle_event(
+                {
+                    "type": "response.done",
+                    "response": {
+                        "status": "cancelled",
+                        "output": [
+                            {
+                                "type": "function_call",
+                                "name": "clear",
+                                "call_id": "cancelled-call",
+                                "arguments": "{}",
+                            }
+                        ],
+                    },
+                }
+            )
+            output = await asyncio.wait_for(received.get(), 2)
+            assert output["item"]["type"] == "function_call_output"
+            assert json.loads(output["item"]["output"]) == {
+                "ok": False,
+                "error": "response cancelled",
+            }
+            with pytest.raises(asyncio.TimeoutError):
+                await asyncio.wait_for(received.get(), 0.05)
         finally:
             await client.close()
             server.close()

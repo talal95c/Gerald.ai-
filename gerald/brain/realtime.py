@@ -43,6 +43,8 @@ class RealtimeClient:
         self.capture: Capture | None = None
         self.elements: list[Element] = []
         self._tool_rounds = 0
+        self._executed_call_ids: set[str] = set()
+        self._tool_outputs: dict[str, str] = {}
         self._turn_started_at: float | None = None
         self._closed = False
         self._response_active = False
@@ -59,7 +61,7 @@ class RealtimeClient:
                 "instructions": self.instructions,
                 "tools": TOOL_SCHEMAS,
                 "tool_choice": "auto",
-                "output_modalities": ["audio", "text"],
+                "output_modalities": ["audio"],
                 "audio": {
                     "input": {
                         "format": {"type": "audio/pcm", "rate": 24000},
@@ -205,6 +207,13 @@ class RealtimeClient:
             "conversation.item.input_audio_transcription.completed",
         }:
             self.on_event(event)
+        elif event_type == "response.function_call_arguments.done":
+            self._execute_function_call(
+                str(event.get("call_id") or ""),
+                str(event.get("name") or ""),
+                event.get("arguments") or "{}",
+            )
+            self.on_event(event)
         elif event_type == "response.done":
             response = event.get("response", {})
             self._response_active = False
@@ -213,6 +222,27 @@ class RealtimeClient:
             self.on_event(event)
         else:
             self.on_event(event)
+
+    def _execute_function_call(self, call_id: str, name: str, arguments: str) -> str:
+        if call_id in self._executed_call_ids:
+            return self._tool_outputs[call_id]
+        try:
+            args = json.loads(arguments or "{}")
+            if not isinstance(args, dict):
+                raise ValueError("function arguments must be an object")
+            commands, output = execute_tool(
+                name,
+                args,
+                self.capture,  # type: ignore[arg-type]
+                self.elements,
+            )
+            if commands:
+                self.on_commands(commands)
+        except Exception as error:
+            output = json.dumps({"ok": False, "error": str(error)})
+        self._executed_call_ids.add(call_id)
+        self._tool_outputs[call_id] = output
+        return output
 
     async def _handle_response_done(self, response: dict[str, Any]) -> None:
         calls = [
@@ -223,32 +253,32 @@ class RealtimeClient:
             return
         self._tool_rounds += 1
         for call in calls:
-            try:
-                args = json.loads(call.get("arguments") or "{}")
-                if not isinstance(args, dict):
-                    raise ValueError("function arguments must be an object")
-                commands, output = execute_tool(
+            call_id = call.get("call_id", "")
+            if not isinstance(call_id, str) or not call_id:
+                continue
+            if call_id in self._executed_call_ids:
+                output = self._tool_outputs[call_id]
+            elif response.get("status") == "cancelled":
+                output = json.dumps({"ok": False, "error": "response cancelled"})
+                self._executed_call_ids.add(call_id)
+                self._tool_outputs[call_id] = output
+            else:
+                output = self._execute_function_call(
+                    call_id,
                     call.get("name", ""),
-                    args,
-                    self.capture,  # type: ignore[arg-type]
-                    self.elements,
+                    call.get("arguments") or "{}",
                 )
-            except Exception as error:
-                commands = []
-                output = json.dumps({"ok": False, "error": str(error)})
-            if commands:
-                self.on_commands(commands)
             await self._send(
                 {
                     "type": "conversation.item.create",
                     "item": {
                         "type": "function_call_output",
-                        "call_id": call["call_id"],
+                        "call_id": call_id,
                         "output": output,
                     },
                 }
             )
-        if self._tool_rounds < 4:
+        if response.get("status") != "cancelled" and self._tool_rounds < 4:
             await self._send({"type": "response.create"})
             self._response_active = True
 

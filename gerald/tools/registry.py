@@ -15,10 +15,6 @@ TARGET_SCHEMA = {
         "x": {"type": "number"},
         "y": {"type": "number"},
     },
-    "oneOf": [
-        {"required": ["element_id"]},
-        {"required": ["x", "y"]},
-    ],
     "additionalProperties": False,
 }
 
@@ -47,10 +43,6 @@ def _targeted_schema(
     parameters: dict[str, Any] = {
         "type": "object",
         "properties": properties,
-        "oneOf": [
-            {"required": ["element_id"]},
-            {"required": ["x", "y"]},
-        ],
         "additionalProperties": False,
     }
     if required:

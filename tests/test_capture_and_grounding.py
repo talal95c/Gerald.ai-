@@ -1,7 +1,11 @@
+import sys
+from types import ModuleType, SimpleNamespace
+
 from PIL import Image
+from PIL import ImageGrab
 import pytest
 
-from gerald.capture.screen import MonitorRect, capture_from_image
+from gerald.capture.screen import MonitorRect, capture_from_image, capture_screen
 from gerald.perception.elements import Element, serialize_context
 from gerald.perception.grounding import ScreenRect, resolve_target
 
@@ -55,3 +59,37 @@ def test_element_context_truncates_names_and_obeys_character_cap():
     assert "x" * 61 not in context
     assert "x" * 60 in context
     assert context.startswith("SCREEN CONTEXT\nActive app: demo.exe")
+
+
+def test_capture_screen_uses_imagegrab_when_mss_grab_fails(monkeypatch):
+    selected = {"left": 100, "top": 50, "width": 640, "height": 480}
+
+    class FakeMSS:
+        monitors = [{"left": 0, "top": 0, "width": 800, "height": 600}, selected]
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *_args):
+            return None
+
+        def grab(self, _monitor):
+            raise OSError("drawable's visual not found in screen's supported visuals")
+
+    mouse_module = ModuleType("pynput.mouse")
+    mouse_module.Controller = lambda: SimpleNamespace(position=(120, 80))
+    monkeypatch.setitem(sys.modules, "mss", SimpleNamespace(MSS=FakeMSS))
+    monkeypatch.setitem(sys.modules, "pynput.mouse", mouse_module)
+    calls = []
+
+    def grab(**kwargs):
+        calls.append(kwargs)
+        return Image.new("RGB", (640, 480), "white")
+
+    monkeypatch.setattr(ImageGrab, "grab", grab)
+
+    capture = capture_screen(max_width=320)
+
+    assert capture.monitor == MonitorRect(100, 50, 640, 480)
+    assert (capture.image_width, capture.image_height) == (320, 240)
+    assert calls == [{"bbox": (100, 50, 740, 530), "all_screens": True}]

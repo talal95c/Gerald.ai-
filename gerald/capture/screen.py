@@ -4,7 +4,7 @@ import base64
 import io
 from dataclasses import dataclass
 
-from PIL import Image
+from PIL import Image, ImageGrab
 
 
 @dataclass(frozen=True)
@@ -71,31 +71,52 @@ def capture_from_image(
 
 def capture_screen(max_width: int = 1280) -> Capture:
     import mss
-    from pynput.mouse import Controller
 
-    with mss.mss() as screen:
-        monitors = screen.monitors[1:]
-        if not monitors:
-            raise RuntimeError("No screen monitors are available")
-        try:
-            cursor_x, cursor_y = Controller().position
-            selected = next(
-                (
-                    monitor
-                    for monitor in monitors
-                    if monitor["left"] <= cursor_x < monitor["left"] + monitor["width"]
-                    and monitor["top"] <= cursor_y < monitor["top"] + monitor["height"]
-                ),
-                monitors[0],
-            )
-        except Exception:
-            selected = monitors[0]
-        shot = screen.grab(selected)
-        image = Image.frombytes("RGB", shot.size, shot.rgb)
-        rect = MonitorRect(
-            int(selected["left"]),
-            int(selected["top"]),
-            int(selected["width"]),
-            int(selected["height"]),
-        )
+    try:
+        from pynput.mouse import Controller
+
+        cursor_x, cursor_y = Controller().position
+    except Exception:
+        cursor_x = cursor_y = None
+
+    image = None
+    rect = None
+    try:
+        with mss.MSS() as screen:
+            monitors = screen.monitors[1:]
+            if monitors:
+                selected = next(
+                    (
+                        monitor
+                        for monitor in monitors
+                        if cursor_x is not None
+                        and cursor_y is not None
+                        and monitor["left"] <= cursor_x < monitor["left"] + monitor["width"]
+                        and monitor["top"] <= cursor_y < monitor["top"] + monitor["height"]
+                    ),
+                    monitors[0],
+                )
+                rect = MonitorRect(
+                    int(selected["left"]),
+                    int(selected["top"]),
+                    int(selected["width"]),
+                    int(selected["height"]),
+                )
+                try:
+                    shot = screen.grab(selected)
+                except Exception:
+                    pass
+                else:
+                    image = Image.frombytes("RGB", shot.size, shot.rgb)
+    except Exception:
+        pass
+
+    if rect is None:
+        image = ImageGrab.grab(all_screens=True).convert("RGB")
+        rect = MonitorRect(0, 0, image.width, image.height)
+    elif image is None:
+        image = ImageGrab.grab(
+            bbox=(rect.left, rect.top, rect.left + rect.width, rect.top + rect.height),
+            all_screens=True,
+        ).convert("RGB")
     return capture_from_image(image, rect, max_width)
