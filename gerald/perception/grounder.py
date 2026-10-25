@@ -171,51 +171,47 @@ class MoondreamCloudGrounder:
     endpoint: str = "https://api.moondream.ai/v1/point"
 
     def locate(self, image: Image.Image, description: str) -> tuple[float, float] | None:
-        try:
-            original = image.convert("RGB")
-            resized = original
-            if original.width > 1568:
-                height = max(1, round(original.height * 1568 / original.width))
-                resized = original.resize((1568, height), Image.Resampling.LANCZOS)
-            output = io.BytesIO()
-            resized.save(output, format="JPEG", quality=90)
-            data_url = "data:image/jpeg;base64," + base64.b64encode(output.getvalue()).decode("ascii")
-            payload = {
-                "model": self.model,
-                "image_url": data_url,
-                "object": description,
-            }
-            request = urllib.request.Request(
-                self.endpoint,
-                data=json.dumps(payload).encode("utf-8"),
-                headers={
-                    "Content-Type": "application/json",
-                    "X-Moondream-Auth": self.api_key,
-                },
-                method="POST",
-            )
-            with urllib.request.urlopen(request, timeout=self.timeout) as response:
-                status = getattr(response, "status", None)
-                if status is None:
-                    status = response.getcode()
-                if status != 200:
-                    return None
-                result = json.loads(response.read())
-            points = result.get("points", [])
-            if not points:
-                return None
-            point = points[0]
-            if not isinstance(point, dict):
-                return None
-            x, y = point.get("x"), point.get("y")
-            if not isinstance(x, (int, float)) or not isinstance(y, (int, float)):
-                return None
-            if not math.isfinite(x) or not math.isfinite(y):
-                return None
-            return float(x) * image.width, float(y) * image.height
-        except Exception:
-            logger.debug("Moondream Cloud grounding failed", exc_info=True)
+        original = image.convert("RGB")
+        resized = original
+        if original.width > 1568:
+            height = max(1, round(original.height * 1568 / original.width))
+            resized = original.resize((1568, height), Image.Resampling.LANCZOS)
+        output = io.BytesIO()
+        resized.save(output, format="JPEG", quality=90)
+        data_url = "data:image/jpeg;base64," + base64.b64encode(output.getvalue()).decode("ascii")
+        payload = {
+            "model": self.model,
+            "image_url": data_url,
+            "object": description,
+        }
+        request = urllib.request.Request(
+            self.endpoint,
+            data=json.dumps(payload).encode("utf-8"),
+            headers={
+                "Content-Type": "application/json",
+                "X-Moondream-Auth": self.api_key,
+            },
+            method="POST",
+        )
+        with urllib.request.urlopen(request, timeout=self.timeout) as response:
+            status = getattr(response, "status", None)
+            if status is None:
+                status = response.getcode()
+            if status != 200:
+                raise RuntimeError(f"Moondream Cloud returned HTTP {status}")
+            result = json.loads(response.read())
+        points = result.get("points", []) if isinstance(result, dict) else []
+        if not points:
             return None
+        point = points[0]
+        if not isinstance(point, dict):
+            return None
+        x, y = point.get("x"), point.get("y")
+        if not isinstance(x, (int, float)) or not isinstance(y, (int, float)):
+            return None
+        if not math.isfinite(x) or not math.isfinite(y) or not (0 <= x <= 1 and 0 <= y <= 1):
+            return None
+        return float(x) * image.width, float(y) * image.height
 
 
 def configured_grounder(backend: str | None = None) -> Grounder | None:

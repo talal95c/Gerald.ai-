@@ -4,6 +4,7 @@ import json
 
 import numpy as np
 from PIL import Image
+import pytest
 
 from gerald.capture.screen import MonitorRect, capture_from_image
 from gerald.perception import grounder as grounder_module
@@ -137,11 +138,9 @@ def test_moondream_cloud_request_and_normalized_point_mapping(monkeypatch):
     assert Image.open(io.BytesIO(jpeg)).size == (1568, 697)
 
 
-def test_moondream_cloud_empty_points_and_http_error_return_none(monkeypatch):
+def test_moondream_cloud_empty_points_return_none(monkeypatch):
     class Response:
-        def __init__(self, status, body=b'{"points":[]}'):
-            self.status = status
-            self.body = body
+        status = 200
 
         def __enter__(self):
             return self
@@ -150,15 +149,52 @@ def test_moondream_cloud_empty_points_and_http_error_return_none(monkeypatch):
             return None
 
         def read(self):
-            return self.body
+            return b'{"points":[]}'
 
-    responses = iter((Response(200), Response(401)))
-    monkeypatch.setattr(grounder_module.urllib.request, "urlopen", lambda *_args, **_kwargs: next(responses))
+    monkeypatch.setattr(grounder_module.urllib.request, "urlopen", lambda *_args, **_kwargs: Response())
     grounder = grounder_module.MoondreamCloudGrounder("secret-key")
     image = Image.new("RGB", (200, 100))
 
     assert grounder.locate(image, "login") is None
-    assert grounder.locate(image, "login") is None
+
+
+def test_moondream_cloud_http_401_raises_and_timeout_wrapper_returns_none(monkeypatch):
+    class Response:
+        status = 401
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *_args):
+            return None
+
+    monkeypatch.setattr(grounder_module.urllib.request, "urlopen", lambda *_args, **_kwargs: Response())
+    grounder = grounder_module.MoondreamCloudGrounder("secret-key")
+    image = Image.new("RGB", (200, 100))
+
+    with pytest.raises(RuntimeError, match="HTTP 401"):
+        grounder.locate(image, "login")
+    assert grounder_module.locate_with_timeout(grounder, image, "login") is None
+
+
+@pytest.mark.parametrize("point", [{"x": 1.1, "y": 0.5}, {"x": 0.5, "y": -0.1}])
+def test_moondream_cloud_rejects_points_outside_normalized_range(monkeypatch, point):
+    class Response:
+        status = 200
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *_args):
+            return None
+
+        def read(self):
+            return json.dumps({"points": [point]}).encode()
+
+    monkeypatch.setattr(grounder_module.urllib.request, "urlopen", lambda *_args, **_kwargs: Response())
+    grounder = grounder_module.MoondreamCloudGrounder("secret-key")
+
+    assert grounder.locate(Image.new("RGB", (200, 100)), "login") is None
 
 
 def test_configured_moondream_cloud_requires_key_and_uses_model_override(monkeypatch):
