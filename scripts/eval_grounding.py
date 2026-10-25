@@ -18,6 +18,7 @@ from gerald.capture.screen import MonitorRect, capture_from_image
 from gerald.config import load_settings
 from gerald.perception.eval_metrics import annotate_screenshot, center_distance, prediction_hit, scale_box
 from gerald.perception.elements import collect_elements_detailed, serialize_context
+from gerald.perception.grounder import configured_grounder
 from gerald.tools.registry import (
     ArrowCommand,
     CircleCommand,
@@ -232,6 +233,13 @@ def _summary(results: list[dict[str, Any]]) -> None:
         median_distance = f"{statistics.median(values):.1f}px" if values else "n/a"
         print(f"{kind:<10} {rate:>6.1%}      {median_distance}")
     print(f"mean t_first_audio: {statistics.mean(audio):.3f}s" if audio else "mean t_first_audio: n/a")
+    grounder_times = [
+        row["latencies"]["grounder"]
+        for row in results
+        if row.get("latencies", {}).get("grounder") is not None
+    ]
+    if grounder_times:
+        print(f"mean grounder latency: {statistics.mean(grounder_times):.3f}s")
     print(f"total tokens: {token_total}")
 
 
@@ -246,8 +254,11 @@ async def _evaluate(args: argparse.Namespace) -> int:
             raise SystemExit(f"unknown case id(s): {', '.join(sorted(missing))}")
         cases = [case for case in cases if case["id"] in selected]
     settings = load_settings()
-    if not args.dry_gt and not settings.api_key:
+    if not args.dry_gt and not args.grounder_only and not settings.api_key:
         raise SystemExit("OPENAI_API_KEY is required unless --dry-gt is used")
+    grounder = configured_grounder(args.grounder_only) if args.grounder_only else None
+    if args.grounder_only and grounder is None:
+        raise SystemExit(f"unknown grounder backend: {args.grounder_only}")
 
     from playwright.async_api import async_playwright
 
@@ -287,7 +298,7 @@ async def _evaluate(args: argparse.Namespace) -> int:
                             image = Image.open(io.BytesIO(screenshot)).convert("RGB")
                         except Exception as error:
                             reason = reason or f"screenshot decode failed: {error}"
-                    if image is not None:
+                    if image is not None and not args.grounder_only:
                         capture = capture_from_image(
                             image,
                             MonitorRect(0, 0, image.width, image.height),
@@ -331,7 +342,36 @@ async def _evaluate(args: argparse.Namespace) -> int:
                     }
                     if gt is not None and image is None:
                         row["status"] = "SCREENSHOT_ERROR"
-                    if gt is not None and image is not None and not args.dry_gt:
+                    if gt is not None and image is not None and args.grounder_only:
+                        description = case.get("description")
+                        if not isinstance(description, str) or not description:
+                            row["status"] = "DESCRIPTION_MISSING"
+                            row["reason"] = "case has no grounder description"
+                        else:
+                            started = time.monotonic()
+                            try:
+                                point = grounder.locate(image, description)
+                                latency = time.monotonic() - started
+                                row["tool_args"] = [{"description": description}]
+                                row["latencies"]["grounder"] = latency
+                                row["grounding_layer"] = "grounder" if point is not None else None
+                                row["layer"] = row["grounding_layer"]
+                                if point is None:
+                                    row["status"] = "NO_MARK"
+                                else:
+                                    prediction = (float(point[0]), float(point[1]), 0.0, 0.0)
+                                    row["prediction"] = prediction
+                                    row["hit"] = prediction_hit(
+                                        prediction,
+                                        gt,
+                                        data["hit_margin_px"] * dpr,
+                                    )
+                                    row["distance"] = center_distance(prediction, gt)
+                                    row["status"] = "OK"
+                            except Exception as error:
+                                row["status"] = "GROUNDER_ERROR"
+                                row["reason"] = str(error)
+                    elif gt is not None and image is not None and not args.dry_gt:
                         context_text = serialize_context(
                             elements,
                             capture.image_width,
@@ -403,9 +443,12 @@ async def _evaluate(args: argparse.Namespace) -> int:
 def _parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Evaluate visual grounding against browser ground truth.")
     parser.add_argument("--dry-gt", action="store_true", help="resolve target boxes and take screenshots only")
+    parser.add_argument("--grounder-only", choices=("openrouter", "moondream"), help="evaluate a visual grounder without Realtime")
     parser.add_argument("--only", help="comma-separated case IDs")
     parser.add_argument("--repeat", type=int, default=1)
     args = parser.parse_args()
+    if args.dry_gt and args.grounder_only:
+        parser.error("--dry-gt and --grounder-only cannot be used together")
     if args.repeat < 1:
         parser.error("--repeat must be at least 1")
     return args

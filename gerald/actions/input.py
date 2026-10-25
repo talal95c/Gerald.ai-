@@ -87,11 +87,16 @@ class InputActions:
         if "confirmed" in args and not isinstance(args["confirmed"], bool):
             return error("confirmed must be a boolean")
         try:
-            target_fields = {"element_id", "x", "y", "text"}
+            target_fields = {"element_id", "x", "y", "text", "description"}
             if name == "click":
                 if set(args) - target_fields - {"button", "confirmed"}:
                     raise ValueError("unexpected click argument")
-                if not ({"element_id"} <= args.keys() or {"x", "y"} <= args.keys() or args.get("text")):
+                if not (
+                    {"element_id"} <= args.keys()
+                    or {"x", "y"} <= args.keys()
+                    or args.get("text")
+                    or args.get("description")
+                ):
                     raise ValueError("click requires a target")
                 button = args.get("button", "left")
                 if button not in {"left", "right", "double"}:
@@ -221,7 +226,7 @@ class InputActions:
         elements: list[Element],
         image_array: np.ndarray | None,
     ) -> GroundingResolution:
-        fields = {"element_id", "x", "y", "text"}
+        fields = {"element_id", "x", "y", "text", "description"}
         target_args = {key: value for key, value in args.items() if key in fields}
         if not target_args:
             raise ValueError("target requires element_id, text, or x and y")

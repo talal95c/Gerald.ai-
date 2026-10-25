@@ -2,18 +2,18 @@
   "viewport": {"width": 1440, "height": 900},
   "hit_margin_px": 8,
   "cases": [
-    {"id": "wiki-search", "url": "https://en.wikipedia.org/wiki/Transformer_(deep_learning_architecture)", "question": "Où est le champ de recherche ?", "target": {"css": "input[name=search]"}, "kind": "field"},
-    {"id": "wiki-lang", "url": "https://en.wikipedia.org/wiki/Transformer_(deep_learning_architecture)", "question": "Comment je lis cette page dans une autre langue ?", "target": {"css": "#p-lang-btn"}, "kind": "button"},
-    {"id": "wiki-history", "url": "https://en.wikipedia.org/wiki/Transformer_(deep_learning_architecture)", "question": "Où je clique pour voir l'historique des modifications ?", "target": {"role": "link", "name": "View history"}, "kind": "link"},
-    {"id": "wiki-menu", "url": "https://en.wikipedia.org/wiki/Transformer_(deep_learning_architecture)", "question": "Où est le menu principal du site ?", "target": {"css": "#vector-main-menu-dropdown-checkbox + label, label[for=vector-main-menu-dropdown-checkbox]"}, "kind": "icon"},
-    {"id": "hn-login", "url": "https://news.ycombinator.com", "question": "Où je me connecte ?", "target": {"role": "link", "name": "login"}, "kind": "link"},
-    {"id": "hn-submit", "url": "https://news.ycombinator.com", "question": "Comment je publie un article ?", "target": {"role": "link", "name": "submit"}, "kind": "link"},
-    {"id": "hn-past", "url": "https://news.ycombinator.com", "question": "Où je vois les anciens articles populaires ?", "target": {"role": "link", "name": "past"}, "kind": "link"},
-    {"id": "gh-code", "url": "https://github.com/python/cpython", "question": "Comment je télécharge le code de ce projet ?", "target": {"role": "button", "name": "Code"}, "kind": "button"},
+    {"id": "wiki-search", "url": "https://en.wikipedia.org/wiki/Transformer_(deep_learning_architecture)", "question": "Où est le champ de recherche ?", "target": {"css": "input[name=search]"}, "kind": "field", "description": "Search Wikipedia input field at the top"},
+    {"id": "wiki-lang", "url": "https://en.wikipedia.org/wiki/Transformer_(deep_learning_architecture)", "question": "Comment je lis cette page dans une autre langue ?", "target": {"css": "#p-lang-btn"}, "kind": "button", "description": "languages button (e.g. '37 languages') at top right of the article"},
+    {"id": "wiki-history", "url": "https://en.wikipedia.org/wiki/Transformer_(deep_learning_architecture)", "question": "Où je clique pour voir l'historique des modifications ?", "target": {"role": "link", "name": "View history"}, "kind": "link", "description": "View history tab"},
+    {"id": "wiki-menu", "url": "https://en.wikipedia.org/wiki/Transformer_(deep_learning_architecture)", "question": "Où est le menu principal du site ?", "target": {"css": "#vector-main-menu-dropdown-checkbox + label, label[for=vector-main-menu-dropdown-checkbox]"}, "kind": "icon", "description": "main menu hamburger button at top left"},
+    {"id": "hn-login", "url": "https://news.ycombinator.com", "question": "Où je me connecte ?", "target": {"role": "link", "name": "login"}, "kind": "link", "description": "login link at top right"},
+    {"id": "hn-submit", "url": "https://news.ycombinator.com", "question": "Comment je publie un article ?", "target": {"role": "link", "name": "submit"}, "kind": "link", "description": "submit link in the top orange bar"},
+    {"id": "hn-past", "url": "https://news.ycombinator.com", "question": "Où je vois les anciens articles populaires ?", "target": {"role": "link", "name": "past"}, "kind": "link", "description": "past link in the top orange bar"},
+    {"id": "gh-code", "url": "https://github.com/python/cpython", "question": "Comment je télécharge le code de ce projet ?", "target": {"role": "button", "name": "Code"}, "kind": "button", "description": "Code tab of the repository"},
     {"id": "gh-issues", "url": "https://github.com/python/cpython", "question": "Où sont les bugs signalés ?", "target": {"css": "#issues-tab"}, "kind": "tab"},
     {"id": "gh-pr", "url": "https://github.com/python/cpython", "question": "Où je vois les propositions de modification du code ?", "target": {"css": "#pull-requests-tab"}, "kind": "tab"},
     {"id": "gh-readme", "url": "https://github.com/python/cpython", "question": "Où est le fichier qui explique le projet ?", "target": {"role": "link", "name": "README.rst"}, "kind": "link"},
-    {"id": "pydoc-search", "url": "https://docs.python.org/3/library/asyncio.html", "question": "Où je cherche dans la documentation ?", "target": {"css": "input[name=q]"}, "kind": "field"},
-    {"id": "pydoc-next", "url": "https://docs.python.org/3/library/asyncio.html", "question": "Comment je passe au chapitre suivant ?", "target": {"role": "link", "name": "next"}, "kind": "link"}
+    {"id": "pydoc-search", "url": "https://docs.python.org/3/library/asyncio.html", "question": "Où je cherche dans la documentation ?", "target": {"css": "input[name=q]"}, "kind": "field", "description": "search input box"},
+    {"id": "pydoc-next", "url": "https://docs.python.org/3/library/asyncio.html", "question": "Comment je passe au chapitre suivant ?", "target": {"role": "link", "name": "next"}, "kind": "link", "description": "next link in the top navigation bar"}
   ]
 }

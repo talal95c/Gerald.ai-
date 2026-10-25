@@ -24,7 +24,7 @@ class ScreenRect:
         return self.x + self.w / 2, self.y + self.h / 2
 
 
-GroundingLayer = Literal["element", "text", "snap", "raw"]
+GroundingLayer = Literal["element", "text", "snap", "raw", "grounder"]
 
 
 @dataclass(frozen=True)
@@ -296,6 +296,53 @@ def resolve_target(
                 return resolved(_screen_rect(capture, element.rect), "text")
         else:
             return resolved(_screen_rect(capture, element.rect), _element_layer(element))
+
+    description = args.get("description")
+    if description is not None and not isinstance(description, str):
+        raise ValueError("description must be a string")
+    target_text = args.get("text")
+    should_ground = "element_id" not in args or force_coordinates
+    query = description or (target_text if isinstance(target_text, str) else "")
+    if should_ground and query:
+        from gerald.perception.grounder import configured_grounder, locate_with_timeout
+
+        grounder = configured_grounder()
+        if grounder is not None:
+            image = capture.full_image or capture.image
+            if image_array is not None:
+                from PIL import Image
+
+                image = Image.fromarray(image_array)
+            point = locate_with_timeout(grounder, image, query, timeout=4.0)
+            if point is not None:
+                grounder_x, grounder_y = point
+                full_image = capture.full_image or capture.image
+                image_x = grounder_x * capture.image.width / max(1, full_image.width)
+                image_y = grounder_y * capture.image.height / max(1, full_image.height)
+                containing = [
+                    element
+                    for element in elements
+                    if element.rect[0] <= image_x <= element.rect[0] + element.rect[2]
+                    and element.rect[1] <= image_y <= element.rect[1] + element.rect[3]
+                ]
+                if containing:
+                    element = min(containing, key=lambda item: item.rect[2] * item.rect[3])
+                    return resolved(_screen_rect(capture, element.rect), "grounder", coordinate_note)
+                if image_array is None:
+                    image_array = np.asarray(image)
+                snapped = _visual_snap(
+                    image_x,
+                    image_y,
+                    capture,
+                    image_array,
+                )
+                if snapped is not None:
+                    return resolved(snapped, "grounder", coordinate_note)
+                return resolved(
+                    _raw_rect(capture, image_x, image_y),
+                    "grounder",
+                    coordinate_note,
+                )
 
     query = None if force_coordinates else args.get("text")
     if query is not None:

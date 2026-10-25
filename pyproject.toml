@@ -29,6 +29,7 @@ windows = [
   "uiautomation>=2.0.20; sys_platform == 'win32'",
   "winsdk>=1.0.0b10; sys_platform == 'win32'",
 ]
+grounder-local = ["torch>=2.2", "transformers>=4.46,<5"]
 
 [project.scripts]
 gerald = "gerald.app:main"

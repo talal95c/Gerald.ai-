@@ -17,6 +17,10 @@ TARGET_SCHEMA = {
         "x": {"type": "number"},
         "y": {"type": "number"},
         "text": {"type": "string"},
+        "description": {
+            "type": "string",
+            "description": "visual description of the target for precise localization, e.g. 'microphone icon at right of search bar'",
+        },
     },
     "additionalProperties": False,
 }
@@ -176,7 +180,7 @@ def _target(
     value = args.get(key)
     if not isinstance(value, dict):
         raise ValueError(f"{key} must be a target object")
-    if set(value) - {"element_id", "x", "y", "text"}:
+    if set(value) - {"element_id", "x", "y", "text", "description"}:
         raise ValueError(f"{key} contains unexpected properties")
     return resolve_target(value, capture, elements, image_array, with_details=True)
 
@@ -187,7 +191,7 @@ def _validate_root_target(
     optional: set[str] | None = None,
     required: set[str] | None = None,
 ) -> None:
-    target_fields = {"element_id", "x", "y", "text"}
+    target_fields = {"element_id", "x", "y", "text", "description"}
     allowed = target_fields | (optional or set())
     extra = set(args) - allowed
     if extra:
@@ -197,6 +201,7 @@ def _validate_root_target(
     has_target = (
         "element_id" in args
         or (isinstance(args.get("text"), str) and bool(args.get("text")))
+        or (isinstance(args.get("description"), str) and bool(args.get("description")))
         or {"x", "y"} <= args.keys()
     )
     if not has_target:
@@ -245,7 +250,7 @@ def execute_tool(
                 target_args = {
                     key: value
                     for key, value in args.items()
-                    if key in {"element_id", "x", "y"}
+                    if key in {"element_id", "x", "y", "description"}
                 }
                 target_text = args.get("target_text")
                 if target_text is None and not target_args:
