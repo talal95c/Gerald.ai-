@@ -359,7 +359,7 @@ function TD(){
     <div className="td-mark-layer" aria-hidden="true">
       <svg width={innerWidth} height={innerHeight}>
         <defs>
-          <marker id="td-arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto"><path d="M 0 0 L 10 5 L 0 10 z" fill="#0067D9"/></marker>
+          <marker id="td-arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto"><path d="M 0 0 L 10 5 L 0 10 z" fill="#7C3AED"/></marker>
           {marks.filter(m=>m.kind==="arrow"&&m.color).map(m=><marker key={m.id} id={`td-arrow-${m.id}`} viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto"><path d="M 0 0 L 10 5 L 0 10 z" style={{fill:m.color!}}/></marker>)}
         </defs>
         {marks.filter(m=>m.kind==="circle").map(m=>{
@@ -381,7 +381,7 @@ function TD(){
           </foreignObject>)}
         {marks.filter(m=>m.kind==="write"||m.kind==="write_math").map(m=><text key={m.id} data-gerald-mark-kind={m.kind} x={m.rect.x} y={m.rect.y} className="td-note" style={{fill:m.color??"#111"}}>{m.text}</text>)}
       </svg>
-      <div className="gerald-pointer" aria-hidden="true" style={{left:cursor.x,top:cursor.y,opacity:cursor.visible?1:0}}>➤</div>
+      <div className="gerald-pointer" aria-hidden="true" style={{left:cursor.x,top:cursor.y,opacity:cursor.visible?1:0}}><i/>Gerald</div>
     </div>
     <div className="td-assist">
       {!voiceMode&&answer&&<div className="td-answer" key={answer.q}><span className="td-q">{answer.q}</span><p>{answer.text||"…"}</p><button className="td-go" onClick={()=>clickExercise(answer.ex)}>Viens, on va au tableau · {answer.ex.title} →</button></div>}

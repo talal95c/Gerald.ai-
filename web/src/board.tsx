@@ -424,14 +424,14 @@ function Board() {
     }
     if (canvas.current) ctx.drawImage(canvas.current, 0, 0, width, height);
     for (const text of current.texts) {
-      ctx.fillStyle = "#0067D9";
+      ctx.fillStyle = "#7C3AED";
       ctx.font = `500 ${text.size}px sans-serif`;
       ctx.fillText(text.text, text.x, text.y, Math.max(100, width - text.x));
     }
     for (const mark of current.marks) {
       const progress = mark.progress ?? 1;
-      ctx.strokeStyle = mark.color ?? "#0067D9";
-      ctx.fillStyle = mark.color ?? "#0067D9";
+      ctx.strokeStyle = mark.color ?? "#7C3AED";
+      ctx.fillStyle = mark.color ?? "#7C3AED";
       ctx.lineWidth = 3;
       if (mark.kind === "circle") {
         ctx.beginPath();
@@ -450,9 +450,9 @@ function Board() {
         ctx.font = "12px sans-serif";
         ctx.fillText(mark.text, mark.x + 8, mark.y - 8);
       } else if (mark.kind === "highlight") {
-        ctx.fillStyle = "rgba(10,132,255,.16)";
+        ctx.fillStyle = "rgba(124,58,237,.12)";
         ctx.fillRect(mark.x - mark.w / 2, mark.y - mark.h / 2, mark.w * progress, mark.h);
-        ctx.strokeStyle = "#0067D9";
+        ctx.strokeStyle = "#7C3AED";
         ctx.strokeRect(mark.x - mark.w / 2, mark.y - mark.h / 2, mark.w * progress, mark.h);
       } else if (mark.kind === "arrow") {
         ctx.beginPath();
@@ -465,7 +465,7 @@ function Board() {
           ctx.beginPath();
           ctx.moveTo(line.x1, line.y1);
           ctx.lineTo(line.x2, line.y2);
-          ctx.strokeStyle = "#0067D9";
+          ctx.strokeStyle = "#7C3AED";
           ctx.stroke();
         }
         ctx.fillStyle = "#FFFDBD";
@@ -479,7 +479,7 @@ function Board() {
           ctx.beginPath();
           ctx.moveTo(line.x1, line.y1);
           ctx.lineTo(line.x2, line.y2);
-          ctx.strokeStyle = "#0067D9";
+          ctx.strokeStyle = "#7C3AED";
           ctx.stroke();
         }
         ctx.fillStyle = "#161616";
@@ -816,7 +816,7 @@ function Board() {
       <div key={mark.id} className="gerald-tip" data-gerald-tip={mark.id}
         data-gerald-mark-kind="tip"
         style={{left: mark.x, top: mark.y, width: mark.w, height: mark.h, color: mark.color ?? undefined, border: mark.color ? `1px solid ${mark.color}` : undefined}}>{mark.text}</div>)}
-    <div className="gerald-pointer" aria-hidden="true" style={{left:cursor.x,top:cursor.y,opacity:cursor.visible?1:0}}>➤</div>
+    <div className="gerald-pointer" aria-hidden="true" style={{left:cursor.x,top:cursor.y,opacity:cursor.visible?1:0}}><i/>Gerald</div>
     {plotVisible && plotData && <PlotWindow key={plotRevision} data={plotData} initialBox={plotBox}
       onClose={() => setPlotVisible(false)} onBoxChange={setPlotBox}/>}
     <nav className="board-tools">
