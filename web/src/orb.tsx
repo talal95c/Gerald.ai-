@@ -57,7 +57,7 @@ export function Orb({status, size = 26}: {status: string; size?: number}) {
   const id = `orb${size}`;
   const idle = status === "idle";
   const speaking = status === "speaking";
-  return <span className={`orb-wrap ${idle ? "orb-idle" : ""} ${speaking ? "orb-speaking" : ""}`} style={{width:size * 40 / 24, height:size}}>
+  return <span className={`orb-wrap ${idle ? "orb-idle" : ""} ${speaking ? "orb-speaking" : ""}`} style={{width:size, height:size}}>
   <svg style={{overflow:"visible", flex:"none"}} className={`orb orb-shape o-${status}`} width={size} height={size} viewBox={`0 0 ${size} ${size}`} aria-hidden="true">
     <defs>
       <linearGradient id={`${id}h`} x1="0" y1="0" x2="1" y2="1"><stop offset="0" stopColor="#5E6BFF"/><stop offset=".5" stopColor="#A99BFF"/><stop offset="1" stopColor="#F2C4F0"/></linearGradient>
@@ -77,7 +77,7 @@ export function Orb({status, size = 26}: {status: string; size?: number}) {
     <g filter={`url(#${id}g)`}><path ref={core} fill={`url(#${id}c)`}/></g>
     <path ref={rim} fill="none" stroke={`url(#${id}r)`} strokeWidth={Math.max(0.8, size * 0.025)}/>
   </svg>
-  <GeraldMark size={size}/>
+  <GeraldMark size={Math.round(size * .55)}/>
   {speaking && <VoiceRing active size={size}/>}
   </span>;
 }
