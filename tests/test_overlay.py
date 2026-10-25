@@ -85,6 +85,94 @@ def test_timed_error_status_returns_to_idle():
     app.processEvents()
 
 
+def test_level_updates_preserve_timed_error_until_new_hold_status():
+    app = QApplication.instance() or QApplication([])
+    overlay = OverlayWindow()
+    overlay.setGeometry(0, 0, 640, 400)
+    overlay.show_timed_error("Realtime disconnected", duration_ms=10000)
+
+    for level in (0.1, 0.4, 0.8):
+        overlay.set_status("listening", mic_level=level, level_only=True)
+
+    assert overlay._status == "error"
+    assert overlay._status_message == "Realtime disconnected"
+    assert overlay._timed_error_timer.isActive()
+
+    overlay.set_status("listening")
+
+    assert overlay._status == "listening"
+    assert overlay._status_message == ""
+    assert not overlay._timed_error_timer.isActive()
+    overlay.close()
+    app.processEvents()
+
+
+def test_long_timed_error_text_fits_or_middle_elides_and_keeps_tooltip():
+    from PyQt6.QtGui import QFont, QFontMetrics
+
+    app = QApplication.instance() or QApplication([])
+    overlay = OverlayWindow()
+    message = (
+        "Connexion Realtime indisponible. Vérifiez votre réseau puis réessayez "
+        "dans quelques instants depuis les réglages de Gerald."
+    )
+    overlay.show_timed_error(message, duration_ms=10000)
+    font = QFont(overlay._font_family)
+    font.setPixelSize(13)
+    font.setWeight(QFont.Weight.Medium)
+    metrics = QFontMetrics(font)
+
+    width, display_text = overlay._status_label_layout(
+        message,
+        available_width=800,
+        caption_width=0,
+        level_indicators=False,
+    )
+
+    assert width <= 520
+    assert metrics.horizontalAdvance(message) <= width - 36 or "…" in display_text
+    assert overlay.toolTip() == message
+    overlay.close()
+    app.processEvents()
+
+
+def test_repeated_timed_error_is_rendered_once_within_thirty_seconds():
+    class CountingOverlay(OverlayWindow):
+        def __init__(self):
+            self.show_count = 0
+            super().__init__()
+
+        def show(self):
+            self.show_count += 1
+            super().show()
+
+    app = QApplication.instance() or QApplication([])
+    overlay = CountingOverlay()
+
+    assert overlay.show_timed_error("Realtime disconnected")
+    assert not overlay.show_timed_error("Realtime disconnected")
+    assert not overlay.show_timed_error("Realtime disconnected")
+
+    assert overlay.show_count == 1
+    overlay.close()
+    app.processEvents()
+
+
+def test_offline_status_survives_level_updates_and_clears_on_idle():
+    app = QApplication.instance() or QApplication([])
+    overlay = OverlayWindow()
+    overlay.set_status("offline")
+    for level in (0.1, 0.4, 0.8):
+        overlay.set_status("listening", mic_level=level, level_only=True)
+
+    assert overlay._status == "offline"
+
+    overlay.set_status("idle")
+    assert overlay._status == "idle"
+    overlay.close()
+    app.processEvents()
+
+
 def test_mixed_dpi_screen_maps_from_native_physical_origins():
     mappings = _build_screen_mappings(
         [

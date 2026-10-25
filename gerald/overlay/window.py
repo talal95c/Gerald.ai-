@@ -451,6 +451,7 @@ class OverlayWindow(QWidget):
         self._timed_error_timer.setSingleShot(True)
         self._timed_error_timer.timeout.connect(self._expire_timed_error)
         self._timed_error_message: str | None = None
+        self._recent_timed_errors: dict[str, float] = {}
         self._set_capture_exclusion()
 
     def _set_capture_exclusion(self) -> None:
@@ -479,7 +480,12 @@ class OverlayWindow(QWidget):
         mic_level: float | None = None,
         output_level: float | None = None,
         message: str | None = None,
+        level_only: bool = False,
     ) -> None:
+        if level_only and (
+            self._timed_error_timer.isActive() or self._status == "offline"
+        ):
+            return
         if self._timed_error_timer.isActive() and (
             status != "error" or message != self._timed_error_message
         ):
@@ -491,6 +497,7 @@ class OverlayWindow(QWidget):
             self._status_visible = True
         self._status = status
         self._status_message = message or ""
+        self.setToolTip(message or "")
         if mic_level is not None:
             self._mic_level = max(0.0, min(1.0, mic_level))
         if output_level is not None:
@@ -499,10 +506,24 @@ class OverlayWindow(QWidget):
             self._ensure_timer()
         self.update()
 
-    def show_timed_error(self, message: str, duration_ms: int = 5000) -> None:
+    def show_timed_error(self, message: str, duration_ms: int = 5000) -> bool:
+        now = time.monotonic()
+        self._recent_timed_errors = {
+            text: shown_at
+            for text, shown_at in self._recent_timed_errors.items()
+            if now - shown_at < 30
+        }
+        if (
+            (self._status == "error" and self._status_message == message)
+            or message in self._recent_timed_errors
+        ):
+            return False
+        self._recent_timed_errors[message] = now
+        self.show()
         self._timed_error_message = message
         self.set_status("error", message=message)
         self._timed_error_timer.start(duration_ms)
+        return True
 
     def _expire_timed_error(self) -> None:
         if (
@@ -681,13 +702,16 @@ class OverlayWindow(QWidget):
         status_age = now - self._status_changed
         animating = animating or (
             self._status in {"thinking"}
-            or (self._status != "idle" and status_age < (0.15 if self._reduced_motion else 0.2))
+            or (
+                self._status not in {"idle", "offline"}
+                and status_age < (0.15 if self._reduced_motion else 0.2)
+            )
             or (self._status == "idle" and status_age < 0.15)
         )
         caption_active = bool(self._caption) and now - self._caption_time < 6
         if animating and self._timer.interval() != 16:
             self._timer.start(16)
-        elif self._marks or caption_active or self._status != "idle":
+        elif self._marks or caption_active or self._status not in {"idle", "offline"}:
             if self._timer.interval() != 200:
                 self._timer.start(200)
         else:
@@ -981,6 +1005,29 @@ class OverlayWindow(QWidget):
             lines.append(line)
         return lines[-2:]
 
+    def _status_label_layout(
+        self,
+        label: str,
+        available_width: int,
+        caption_width: int,
+        level_indicators: bool,
+    ) -> tuple[int, str]:
+        font = QFont(self._font_family)
+        font.setPixelSize(13)
+        font.setWeight(QFont.Weight.Medium)
+        metrics = QFontMetrics(font)
+        horizontal_padding = 72 if level_indicators else 36
+        max_width = min(520, max(1, available_width - 24))
+        caption_requirement = int(min(560, caption_width) + 132) if caption_width else 0
+        required_width = max(
+            210,
+            metrics.horizontalAdvance(label) + horizontal_padding,
+            caption_requirement,
+        )
+        width = min(max_width, required_width)
+        label_width = max(1, width - horizontal_padding)
+        return width, metrics.elidedText(label, Qt.TextElideMode.ElideMiddle, label_width)
+
     def _paint_status(self, painter: QPainter, now: float) -> None:
         caption_age = now - self._caption_time
         caption_active = bool(self._caption) and caption_age < 6
@@ -997,8 +1044,8 @@ class OverlayWindow(QWidget):
         else:
             duration = 0.15 if self._reduced_motion else 0.2
             amount = min(1.0, age / duration)
-            alpha = 1 - (1 - amount) ** 3
-            scale = 0.96 + 0.04 * alpha
+            alpha = 0.62 if self._status == "offline" else 1 - (1 - amount) ** 3
+            scale = 1.0 if self._status == "offline" else 0.96 + 0.04 * alpha
         if alpha <= 0:
             return
         lines = self._caption_lines()
@@ -1006,7 +1053,20 @@ class OverlayWindow(QWidget):
         caption_font.setPixelSize(15)
         line_width = max((QFontMetrics(caption_font).horizontalAdvance(line) for line in lines), default=0)
         area = self._local_available_geometry()
-        width = min(area.width() - 24, max(210, int(min(560, line_width) + 132)))
+        label = self._status_message or {
+            "listening": "Écoute",
+            "thinking": "Réflexion",
+            "speaking": "Gerald parle",
+            "error": "audio indisponible",
+            "offline": "Hors ligne",
+        }.get(self._status, "")
+        level_indicators = self._status in {"listening", "speaking"}
+        width, label = self._status_label_layout(
+            label,
+            area.width(),
+            line_width,
+            level_indicators,
+        )
         height = 50 + (38 if lines else 0)
         pill = QRectF(
             area.center().x() - width / 2,
@@ -1026,15 +1086,10 @@ class OverlayWindow(QWidget):
         font.setPixelSize(13)
         font.setWeight(QFont.Weight.Medium)
         painter.setFont(font)
-        label = self._status_message or {
-            "listening": "Écoute",
-            "thinking": "Réflexion",
-            "speaking": "Gerald parle",
-            "error": "audio indisponible",
-        }.get(self._status, "")
         painter.setPen(label_color)
+        label_width = max(1, width - (72 if level_indicators else 36))
         painter.drawText(
-            QRectF(pill.left() + 18, pill.top() + 6, pill.width() - 72, 22),
+            QRectF(pill.left() + 18, pill.top() + 6, label_width, 22),
             Qt.AlignmentFlag.AlignVCenter | Qt.AlignmentFlag.AlignLeft,
             label,
         )

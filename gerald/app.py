@@ -50,6 +50,9 @@ def _dispatch_key_after_hold_conflict(
     cancel_hold,
     dispatch,
 ) -> bool:
+    if name == "esc":
+        dispatch()
+        return True
     if app_state.get("active") and not app_state.get("typed") and name not in {
         "ctrl",
         "shift",
@@ -63,6 +66,27 @@ def _dispatch_key_after_hold_conflict(
         cancel_hold()
     dispatch()
     return True
+
+
+def _cancel_turn_for_escape(app_state: dict, mic, audio_lock, cancel_turn) -> None:
+    with audio_lock:
+        request = app_state.get("capture_request")
+        app_state.update(
+            active=False,
+            released=True,
+            response_active=False,
+            capture_generation=app_state["capture_generation"] + 1,
+            capture=None,
+            capture_request=None,
+            audio_sent_bytes=0,
+            realtime_turn_started=False,
+            recap_pending=False,
+        )
+        app_state.get("pending_audio", []).clear()
+    if request is not None:
+        request.cancel()
+    mic.stop()
+    cancel_turn()
 
 
 def _discard_early_hold(app_state: dict, mic, overlay, audio_lock) -> None:
@@ -110,9 +134,8 @@ def _activate_hold_turn(
 
 
 def _show_runtime_error(overlay, message: str) -> None:
-    logger.warning("Runtime capture/audio error: %s", message)
-    overlay.show()
-    overlay.show_timed_error(message)
+    if overlay.show_timed_error(message):
+        logger.warning("Runtime capture/audio error: %s", message)
 
 
 def _key_name(key: object) -> str:
@@ -343,6 +366,7 @@ def main() -> int:
         "capture": None,
         "capture_request": None,
         "capture_generation": 0,
+        "capture_overlay_hidden": False,
         "connected": False,
         "typed": False,
         "response_active": False,
@@ -351,6 +375,14 @@ def main() -> int:
         "realtime_turn_started": False,
     }
     audio_buffer_lock = threading.Lock()
+
+    def show_runtime_error(message: str) -> None:
+        if app_state["connected"]:
+            _show_runtime_error(overlay, message)
+        elif overlay._status != "offline":
+            overlay.show()
+            overlay.set_status("offline")
+
     required = {part.strip().lower() for part in settings.hotkey.split("+") if part.strip()}
     if "altgr" in required or {"ctrl", "alt"} <= required:
         QMessageBox.critical(None, "Gerald", "Alt et Ctrl+Alt ne sont pas pris en charge comme raccourci.")
@@ -714,15 +746,16 @@ def main() -> int:
                     return
                 overlay.clear()
                 return
-            mic.stop()
-            app_state.update(active=False, released=True, response_active=False)
-            request = app_state.get("capture_request")
-            if request is not None:
-                request.cancel()
-            app_state["capture_generation"] += 1
-            app_state["capture"] = None
-            app_state["recap_pending"] = False
-            schedule(client.cancel())
+            capture_overlay_hidden = app_state["capture_overlay_hidden"]
+            _cancel_turn_for_escape(
+                app_state,
+                mic,
+                audio_buffer_lock,
+                lambda: schedule(client.cancel()),
+            )
+            if capture_overlay_hidden:
+                set_capture_overlay_visibility(True)
+                app_state["capture_overlay_hidden"] = False
             overlay.clear()
             if not audio_capability["available"]:
                 overlay.set_status("error")
@@ -771,9 +804,7 @@ def main() -> int:
         if not _reset_failed_capture(app_state, generation):
             return
         schedule(client.cancel())
-        overlay.show()
-        overlay.set_status("idle" if audio_capability["available"] else "error")
-        _show_runtime_error(overlay, message)
+        show_runtime_error(message)
 
     class UiRequestSlots(QObject):
         @pyqtSlot(object)
@@ -831,17 +862,19 @@ def main() -> int:
     bridge.commands.connect(ui_request_slots.commands)
     bridge.action_marks_visible.connect(ui_request_slots.action_marks_visible)
     bridge.capture_terminal_failed.connect(ui_request_slots.terminal_capture_failed)
-    bridge.capture_failed.connect(lambda message: _show_runtime_error(overlay, message))
+    bridge.capture_failed.connect(show_runtime_error)
     bridge.mic_level.connect(
         lambda level: overlay.set_status(
             "listening" if audio_capability["available"] else "error",
             mic_level=level,
+            level_only=True,
         )
     )
     bridge.output_level.connect(
         lambda level: overlay.set_status(
             "speaking" if audio_capability["available"] else "error",
             output_level=level,
+            level_only=True,
         )
     )
 
@@ -850,8 +883,19 @@ def main() -> int:
     def on_realtime_event(event: dict) -> None:
         event_type = event.get("type")
         if event_type == "session.updated":
+            was_connected = app_state["connected"]
             app_state["connected"] = True
-        elif event_type == "response.created":
+            if not was_connected:
+                overlay.show()
+                overlay.set_status("idle" if audio_capability["available"] else "error")
+            return
+        if not app_state["connected"]:
+            if event_type == "connection.lost":
+                if overlay._status != "offline":
+                    overlay.show()
+                    overlay.set_status("offline")
+            return
+        if event_type == "response.created":
             overlay.set_status("thinking" if audio_capability["available"] else "error")
             caption["text"] = ""
             app_state["response_active"] = True
@@ -865,7 +909,9 @@ def main() -> int:
                 app_state["recap_pending"] = False
         elif event_type == "connection.lost":
             app_state["connected"] = False
-            _show_runtime_error(overlay, "Connexion Realtime interrompue.")
+            if overlay._status != "offline":
+                overlay.show()
+                overlay.set_status("offline")
         elif event_type in {"response.output_audio_transcript.delta", "response.audio_transcript.delta"}:
             caption["text"] += event.get("delta", "")
             overlay.set_caption(caption["text"])

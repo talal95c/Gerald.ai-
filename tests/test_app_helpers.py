@@ -5,6 +5,7 @@ from PIL import Image
 
 from gerald.app import (
     _activate_hold_turn,
+    _cancel_turn_for_escape,
     _dispatch_key_after_hold_conflict,
     _discard_early_hold,
     _finalize_board_collection,
@@ -106,6 +107,81 @@ def test_long_hold_ignores_nonmodifier_key_without_cancelling_or_dispatching():
     assert events == []
 
 
+def test_escape_during_two_second_hold_cancels_without_submitting_turn():
+    _assert_escape_cancels_turn(
+        {
+            "active": True,
+            "released": False,
+            "started": 10.0,
+            "capture_generation": 4,
+            "capture_request": None,
+            "capture": None,
+            "audio_sent_bytes": 24000,
+            "response_active": False,
+            "recap_pending": False,
+            "realtime_turn_started": True,
+            "pending_audio": [],
+        },
+        pressed_at=12.0,
+    )
+
+
+def test_escape_after_release_cancels_pending_capture_without_submission():
+    _assert_escape_cancels_turn(
+        {
+            "active": True,
+            "released": True,
+            "started": 10.0,
+            "capture_generation": 4,
+            "capture_request": SimpleNamespace(cancel=lambda: None),
+            "capture": None,
+            "audio_sent_bytes": 24000,
+            "response_active": False,
+            "recap_pending": False,
+            "realtime_turn_started": True,
+            "pending_audio": [],
+        },
+        pressed_at=10.2,
+    )
+
+
+def _assert_escape_cancels_turn(app_state, pressed_at):
+    audio_lock = threading.Lock()
+    request = app_state["capture_request"]
+    request_events = []
+    if request is not None:
+        request.cancel = lambda: request_events.append("cancel")
+    mic_events = []
+    realtime_events = []
+    mic = SimpleNamespace(stop=lambda: mic_events.append("stop"))
+    events = []
+
+    def dispatch_escape():
+        _cancel_turn_for_escape(
+            app_state,
+            mic,
+            audio_lock,
+            lambda: realtime_events.append("cancel"),
+        )
+        events.append("escape")
+
+    assert _dispatch_key_after_hold_conflict(
+        app_state,
+        "esc",
+        pressed_at,
+        lambda: events.append("short-hold-cancel"),
+        dispatch_escape,
+    )
+    assert events == ["escape"]
+    assert mic_events == ["stop"]
+    assert realtime_events == ["cancel"]
+    assert request_events == (["cancel"] if request is not None else [])
+    assert not app_state["active"]
+    assert app_state["capture"] is None
+    assert app_state["capture_request"] is None
+    assert app_state["capture_generation"] == 5
+
+
 def test_runtime_capture_error_uses_timed_overlay_without_message_box(monkeypatch):
     from PyQt6.QtWidgets import QMessageBox
 
@@ -115,13 +191,15 @@ def test_runtime_capture_error_uses_timed_overlay_without_message_box(monkeypatc
     monkeypatch.setattr(QMessageBox, "warning", unexpected_dialog)
     events = []
     overlay = SimpleNamespace(
-        show=lambda: events.append("show"),
-        show_timed_error=lambda message: events.append(("error", message)),
+        show_timed_error=lambda message: (
+            events.append(("error", message)),
+            True,
+        )[1],
     )
 
     _show_runtime_error(overlay, "Realtime disconnected")
 
-    assert events == ["show", ("error", "Realtime disconnected")]
+    assert events == [("error", "Realtime disconnected")]
 
 
 def test_board_ink_rect_maps_from_screen_to_image_and_back():
