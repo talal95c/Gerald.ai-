@@ -173,6 +173,36 @@ def _tile_bounds(image_height: int, tile_count: int = 4, overlap: int = 48) -> l
     ]
 
 
+def _windows_ocr_scale(source_width: int, bands: list[tuple[int, int]], engine) -> float:
+    try:
+        max_dimension = int(engine.max_image_dimension)
+        if max_dimension <= 0:
+            max_dimension = 4096
+    except Exception:
+        max_dimension = 4096
+    max_band_height = max((bottom - top for top, bottom in bands), default=1)
+    if source_width * 2 <= max_dimension and max_band_height * 2 <= max_dimension:
+        return 2.0
+    if source_width <= max_dimension and max_band_height <= max_dimension:
+        return 1.0
+    return min(max_dimension / source_width, max_dimension / max_band_height)
+
+
+def _map_windows_ocr_box(
+    box: tuple[float, float, float, float],
+    source_top: int,
+    scale_x: float,
+    scale_y: float,
+) -> Rect:
+    left, top, width, height = box
+    return (
+        round(left / scale_x),
+        source_top + round(top / scale_y),
+        max(1, round(width / scale_x)),
+        max(1, round(height / scale_y)),
+    )
+
+
 class UIAProvider:
     interactive_types = {
         "ButtonControl",
@@ -422,18 +452,27 @@ class OCRProvider:
             import io
 
             source = capture.full_image or capture.image
-            scale = 2 if source.width <= 2000 else 1
-            image = source.resize(
-                (source.width * scale, source.height * scale),
-                Image.Resampling.LANCZOS,
-            ) if scale != 1 else source
             bands = _tile_bounds(source.height)
             engine = OcrEngine.try_create_from_user_profile_languages()
             if engine is None:
                 return []
+            scale = _windows_ocr_scale(source.width, bands, engine)
+            scaled_width = max(1, round(source.width * scale))
+            scaled_height = max(1, round(source.height * scale))
+            scale_x = scaled_width / source.width
+            scale_y = scaled_height / source.height
+            image = source.resize(
+                (scaled_width, scaled_height),
+                Image.Resampling.LANCZOS,
+            ) if (scaled_width, scaled_height) != source.size else source
             words: list[OCRWord] = []
 
-            async def recognize_pass(tile: Image.Image, top: int, band_index: int, inverted: bool) -> list[OCRWord]:
+            async def recognize_pass(
+                tile: Image.Image,
+                source_top: int,
+                band_index: int,
+                inverted: bool,
+            ) -> list[OCRWord]:
                 processed = ImageOps.autocontrast(tile.convert("L"))
                 if inverted:
                     processed = ImageOps.invert(processed)
@@ -456,15 +495,17 @@ class OCRProvider:
                         if not text or not any(character.isalnum() for character in text):
                             continue
                         box = word.bounding_rect
-                        left = round(float(box.x) / scale)
-                        word_top = round(float(box.y) / scale)
-                        width = max(1, round(float(box.width) / scale))
-                        height = max(1, round(float(box.height) / scale))
+                        rect = _map_windows_ocr_box(
+                            (float(box.x), float(box.y), float(box.width), float(box.height)),
+                            source_top,
+                            scale_x,
+                            scale_y,
+                        )
                         confidence = float(getattr(word, "confidence", 0.5))
                         found.append(
                             (
                                 text,
-                                (left, top // scale + word_top, width, height),
+                                rect,
                                 confidence,
                                 (band_index, line_index, int(inverted), word_index),
                             )
@@ -476,14 +517,14 @@ class OCRProvider:
                 source_top: int,
                 source_bottom: int,
             ) -> list[OCRWord]:
-                top = source_top * scale
-                bottom = source_bottom * scale
+                top = round(source_top * scale_y)
+                bottom = round(source_bottom * scale_y)
                 tile = image.crop((0, top, image.width, bottom))
                 luminance = ImageStat.Stat(tile.convert("L")).mean[0]
                 saturation = ImageStat.Stat(tile.convert("HSV")).mean[1]
-                passes = [recognize_pass(tile, top, band_index, False)]
+                passes = [recognize_pass(tile, source_top, band_index, False)]
                 if luminance < 140 or saturation > 48:
-                    passes.append(recognize_pass(tile, top, band_index, True))
+                    passes.append(recognize_pass(tile, source_top, band_index, True))
                 completed = await asyncio.gather(*passes, return_exceptions=True)
                 found: list[OCRWord] = []
                 for result in completed:

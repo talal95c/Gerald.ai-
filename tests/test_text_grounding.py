@@ -13,8 +13,10 @@ from gerald.perception.elements import (
     Element,
     OCRProvider,
     _dedupe_ocr_words,
+    _map_windows_ocr_box,
     _split_ocr_words,
     _tile_bounds,
+    _windows_ocr_scale,
     collect_elements,
     collect_elements_detailed,
 )
@@ -395,3 +397,14 @@ def test_windows_ocr_worker_returns_partial_results_on_budget_timeout(monkeypatc
 
     assert elements == [partial]
     assert not complete
+
+
+def test_windows_ocr_scale_respects_engine_dimension_limit():
+    class FakeEngine:
+        max_image_dimension = 3000
+
+    assert _windows_ocr_scale(1920, _tile_bounds(1080), FakeEngine()) == 1
+
+
+def test_windows_ocr_boxes_map_back_using_actual_scale():
+    assert _map_windows_ocr_box((20, 40, 30, 12), 100, 0.5, 0.5) == (40, 180, 60, 24)
