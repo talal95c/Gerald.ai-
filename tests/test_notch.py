@@ -86,8 +86,8 @@ def test_bridge_state_lists_recaps_newest_first(tmp_path):
     older.write_text("Texte\n# Ancienne révision", encoding="utf-8")
     newer = tmp_path / "fiche-du-jour.md"
     newer.write_text("# Polynômes du second degré", encoding="utf-8")
-    os.utime(older, (100, 100))
-    os.utime(newer, (200, 200))
+    os.utime(older, (1_700_000_000, 1_700_000_000))
+    os.utime(newer, (1_700_000_100, 1_700_000_100))
 
     recaps = json.loads(bridge.state())["recaps"]
 
@@ -227,6 +227,26 @@ def test_end_session_without_callback_reports_recap_unavailable():
     assert state["session_open"]
     assert not state["recap_pending"]
     assert not bridge._recap_timer.isActive()
+
+
+def test_end_session_true_callback_starts_recap_polling():
+    callbacks = []
+
+    def end_session():
+        callbacks.append(True)
+        return True
+
+    bridge = Bridge(EmptyStore(), object(), object(), end_session=end_session)
+    bridge._session_open = True
+
+    bridge.endSession()
+
+    state = json.loads(bridge.state())
+    assert callbacks == [True]
+    assert state["recap_pending"]
+    assert state["recap_error"] is None
+    assert bridge._recap_timer.isActive()
+    bridge._recap_timer.stop()
 
 
 def test_end_session_timeout_can_be_retried(tmp_path):

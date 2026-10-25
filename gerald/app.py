@@ -218,6 +218,37 @@ def _finalize_board_collection(
     return final_elements
 
 
+def make_home_opener(
+    open_home,
+    store,
+    indexer,
+    settings,
+    on_library_changed,
+    *,
+    open_board,
+    end_session,
+):
+    home_window = {"widget": None}
+
+    def open_home_window() -> None:
+        if open_home is None:
+            return
+        if home_window["widget"] is None:
+            home_window["widget"] = open_home(
+                store,
+                indexer,
+                settings,
+                on_library_changed,
+                open_board=open_board,
+                end_session=end_session,
+            )
+        home_window["widget"].show()
+        home_window["widget"].raise_()
+        home_window["widget"].activateWindow()
+
+    return open_home_window
+
+
 def main() -> int:
     set_physical_dpi_awareness()
     from PyQt6.QtCore import QObject, QTimer, pyqtSignal, pyqtSlot
@@ -409,28 +440,10 @@ def main() -> int:
     def on_library_changed() -> None:
         schedule(client.update_instructions(current_agent_instructions()))
 
-    home_window = {"widget": None}
-
     def open_board_from_home(title: str, lines: list[str]) -> None:
         board.set_exercise(title, lines)
         if not board.isVisible():
             toggle_board()
-
-    def open_home_window() -> None:
-        if open_home is None:
-            return
-        if home_window["widget"] is None:
-            home_window["widget"] = open_home(
-                store,
-                indexer,
-                settings,
-                on_library_changed,
-                open_board=open_board_from_home,
-                end_session=open_lesson_recap,
-            )
-        home_window["widget"].show()
-        home_window["widget"].raise_()
-        home_window["widget"].activateWindow()
 
     app_state = {
         "pressed": set(),
@@ -852,6 +865,16 @@ def main() -> int:
         overlay.close_text_input()
         schedule(client.send_recap(), on_error=lambda: app_state.update(recap_pending=False))
         return True
+
+    open_home_window = make_home_opener(
+        open_home,
+        store,
+        indexer,
+        settings,
+        on_library_changed,
+        open_board=open_board_from_home,
+        end_session=open_lesson_recap,
+    )
 
     def toggle_board() -> None:
         if app_state["active"]:
