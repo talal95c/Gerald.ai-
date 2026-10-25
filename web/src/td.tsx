@@ -297,6 +297,8 @@ function TD(){
       return title?.innerText.trim()||element.getAttribute("aria-label")?.trim()||"Dialog";
     };
     const candidates=nodes.filter(element=>{
+      if(element.id==="canvas_minipaint")return true;
+      if(/^ok$/i.test(element.innerText?.trim()??"")&&dialogs.some(dialog=>dialog.contains(element)&&dialog.querySelector(".effectsPreview")))return false;
       const semantic=element.matches("button,a,input,select,[role='button'],[role='menuitem'],[title],[class*='layer']");
       return (semantic||clickable.has(element))&&!hasClickableAncestor(element);
     });
@@ -314,7 +316,7 @@ function TD(){
       const inputContainer=input?.closest<HTMLElement>(".item,.row");
       const inputLabelRaw=[...(input?.labels??[])].map(label=>label.innerText.trim()).find(Boolean)
         ||inputContainer?.querySelector<HTMLElement>("label,.label")?.innerText.trim()
-        ||(input?.id==="color_hex"?"Hex":input?.getAttribute("aria-label")||input?.title||input?.placeholder||input?.id.replaceAll("_"," ")||"");
+        ||(/(?:^|_)color_hex$/.test(input?.id??"")?"Hex":input?.getAttribute("aria-label")||input?.title||input?.placeholder||input?.id.replaceAll("_"," ")||"");
       const inputLabel=inputLabelRaw.replace(/[:：]\s*$/,"");
       const inputText=input?(inputValue?`${inputLabel?`${inputLabel} `:""}${inputValue}`:inputLabel):inputValue;
       const checkbox=Boolean(input?.type==="checkbox"||element.getAttribute("role")==="checkbox"
@@ -326,7 +328,9 @@ function TD(){
         ||element.getAttribute("title")?.trim()||element.getAttribute("aria-label")?.trim()
         ||inputText
         ||element.parentElement?.innerText?.trim()||"").trim();
-      const text=`${baseText}${checkbox?(checked?" ✓":" ✗"):""}`.trim();
+      const canvasLabel=element.id==="canvas_minipaint"?"Zone de dessin (canvas principal, glisser ici pour tracer)"
+        :element.id==="canvas_preview"?"Aperçu (miniature, pas la zone de dessin)":"";
+      const text=canvasLabel||`${baseText}${checkbox?(checked?" ✓":" ✗"):""}`.trim();
       const containingDialog=dialogs.filter(dialog=>dialog.contains(element)).pop();
       return {order:index,item:{
         id,text,active,selected,checked:checkbox?checked:undefined,isColor:input?.type==="color"||input?.id==="color_hex",
@@ -339,11 +343,24 @@ function TD(){
       ||Number(b.item.active||b.item.selected)-Number(a.item.active||a.item.selected)
       ||a.order-b.order).slice(0,150).map(entry=>entry.item);
   };
-  const paintTargetRect=(args:Record<string,any>):Rect|null=>{
+  const paintShown=(args:Record<string,any>)=>{
+    if(!paintMode)return {};
+    const elements=paintElements();
+    const label=(elements.find(item=>item.id===Number(args.element_id))
+      ??(typeof args.target_text==="string"?elements.find(item=>textPattern(args.target_text).test(item.text)):undefined))?.text.slice(0,80);
+    return label?{shown:label,say:`Dis en une phrase complète ce que l'élève doit faire avec « ${label} », la commande que tu viens de montrer (ex. « Clique sur ${label} » ou, pour un champ, la valeur exacte à taper). Ne parle d'aucune autre commande ni de l'étape suivante.`}:{};
+  };
+  const paintTargetRect=(args:Record<string,any>,scroll=true):Rect|null=>{
     const elements=paintElements();
     const element=elements.find(item=>item.id===Number(args.element_id))
       ??(typeof args.target_text==="string"?elements.find(item=>textPattern(args.target_text).test(item.text)):undefined);
-    return element?.rect??null;
+    if(!element)return null;
+    const iframe=paintFrame.current,node=iframe?.contentDocument?.querySelector<HTMLElement>(`[data-gerald-id="${element.id}"]`);
+    if(!iframe||!node)return element.rect;
+    if(scroll)node.scrollIntoView({block:"nearest",inline:"nearest"});
+    const frameRect=iframe.getBoundingClientRect(),rect=node.getBoundingClientRect();
+    const scaleX=frameRect.width/Math.max(1,iframe.clientWidth),scaleY=frameRect.height/Math.max(1,iframe.clientHeight);
+    return {x:frameRect.x+rect.x*scaleX,y:frameRect.y+rect.y*scaleY,w:rect.width*scaleX,h:rect.height*scaleY};
   };
   const elements=():ViewElement[]=>paintMode?paintElements():[...document.querySelectorAll<HTMLElement>("[data-gerald-id]")].filter(e=>e.getClientRects().length).map(e=>{const r=e.getBoundingClientRect();return {id:Number(e.dataset.geraldId),text:(e instanceof HTMLInputElement?e.value||e.placeholder:e.innerText||"").trim(),rect:{x:r.x,y:r.y,w:r.width,h:r.height}};});
   const annotationOccupants=(target?:AnnotationRect,extra:AnnotationRect[]=[]):AnnotationRect[]=>[
@@ -376,11 +393,12 @@ function TD(){
     const fromIsPoint=name==="arrow"&&typeof fromArgs.x==="number"&&typeof fromArgs.y==="number"
       &&typeof fromArgs.w!=="number"&&typeof fromArgs.h!=="number"
       &&typeof fromArgs.target_text!=="string"&&typeof fromArgs.element_id!=="number";
-    const from=name==="arrow"&&fromIsPoint
+    let from=name==="arrow"&&fromIsPoint
       ?{x:fromArgs.x,y:fromArgs.y,w:0,h:0}
       :name==="arrow"?resolveTarget(fromArgs):resolveTarget(args);
     const to=name==="arrow"?resolveTarget(args.to??{}):null;
     const boardClosedHint=boardOpenRef.current?"":" Le tableau est fermé : ce texte n’existe peut-être que sur le tableau. Si l’élève parle de ce qu’il y a écrit, appelle toi-même open_board dans ce même tour, puis refais l’annotation sur le tableau ; ne lui demande pas de le rouvrir. Sinon, vise un élément visible du TD ci-dessus.";
+    if(paintMode&&name==="arrow"&&from&&!fromIsPoint)from=paintTargetRect(args.from??{},false);
     if(name==="arrow"&&!to){
       const visible=elements().slice(0,40).map(e=>`[${e.id}] ${e.text.slice(0,100)}`).join("; ");
       return {ok:false,error:`arrow target was not found. Visible targets: ${visible}${boardClosedHint}`};
@@ -462,7 +480,7 @@ function TD(){
         await animateHeadProgress(progress=>updateMarkHead(id,progress));
         await moveToRest(queue,restBeside(bounds));
       });
-      return {ok:true,target:{x:x2,y:y2},from:{x:x1,y:y1},to:{x:x2,y:y2}};
+      return {ok:true,target:{x:x2,y:y2},from:{x:x1,y:y1},to:{x:x2,y:y2},...paintShown(args.to??{})};
     }
     const id=crypto.randomUUID();
     const mark={id,kind:name,rect,text,color,fill:name==="highlight"?highlightFill:null};
@@ -496,7 +514,7 @@ function TD(){
         await moveToRest(queue,restBeside(bounds));
       });
     }
-    return {ok:true,target:{x:rect.x,y:rect.y}};
+    return {ok:true,target:{x:rect.x,y:rect.y},...paintShown(args)};
   };
   useEffect(()=>{window.geraldTD={elements,exec,close:()=>{boardOpenRef.current=false;setBoardOpen(false);},waitForAnimations:()=>cursorMotion.current!.waitForAnimations()};return()=>{delete window.geraldTD;};});
   const getBoardApi=async()=>{for(let i=0;i<100;i++){const api=frame.current?.contentWindow?.geraldBoard;if(api)return api;await new Promise(resolve=>setTimeout(resolve,20));}return null;};

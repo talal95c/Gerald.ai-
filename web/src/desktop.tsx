@@ -277,14 +277,14 @@ function Desktop() {
     const area = usableArea();
     const maxWidth = Math.max(0, window.innerWidth);
     const maxHeight = area.height;
-    const minWidth = Math.min(480, maxWidth);
-    const minHeight = Math.min(320, maxHeight);
-    const width = Math.max(minWidth, Math.min(requestedWidth, maxWidth));
-    const height = Math.max(minHeight, Math.min(requestedHeight, maxHeight));
-    const position = clampToUsable(x, y, width, height, area);
     setWindows(previous => {
       const item = previous[app];
       if (!item || item.maximized) return previous;
+      const minWidth = Math.min(480, maxWidth, requestedWidth);
+      const minHeight = Math.min(320, maxHeight, requestedHeight);
+      const width = Math.max(minWidth, Math.min(requestedWidth, maxWidth));
+      const height = Math.max(minHeight, Math.min(requestedHeight, maxHeight));
+      const position = clampToUsable(x, y, width, height, area);
       return {...previous, [app]: {...item, ...position, width, height, zoomTransition: false}};
     });
   };

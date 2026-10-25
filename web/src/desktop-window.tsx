@@ -83,14 +83,16 @@ export function DesktopWindow({
     let nextY = current.rect.y;
     let nextWidth = current.rect.width;
     let nextHeight = current.rect.height;
-    if (current.direction.includes("e")) nextWidth = Math.max(480, current.rect.width + dx);
-    if (current.direction.includes("s")) nextHeight = Math.max(320, current.rect.height + dy);
+    const minWidth = Math.min(480, current.rect.width);
+    const minHeight = Math.min(320, current.rect.height);
+    if (current.direction.includes("e")) nextWidth = Math.max(minWidth, current.rect.width + dx);
+    if (current.direction.includes("s")) nextHeight = Math.max(minHeight, current.rect.height + dy);
     if (current.direction.includes("w")) {
-      nextWidth = Math.max(480, current.rect.width - dx);
+      nextWidth = Math.max(minWidth, current.rect.width - dx);
       nextX = current.rect.x + current.rect.width - nextWidth;
     }
     if (current.direction.includes("n")) {
-      nextHeight = Math.max(320, current.rect.height - dy);
+      nextHeight = Math.max(minHeight, current.rect.height - dy);
       nextY = current.rect.y + current.rect.height - nextHeight;
     }
     onResize(nextX, nextY, nextWidth, nextHeight);
