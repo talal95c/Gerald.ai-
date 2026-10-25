@@ -10,9 +10,10 @@ Then it lets *you* find the answer.
 [![Try the live demo](https://img.shields.io/badge/Try_the_live_demo-gerald--yl14.onrender.com-111111?style=for-the-badge&logo=render&logoColor=white)](https://gerald-yl14.onrender.com/landing.html)
 [![Demo video](https://img.shields.io/badge/Demo_video-YouTube-E5484D?style=for-the-badge&logo=youtube&logoColor=white)](https://youtu.be/B41yHYg-4Sw)
 [![Build in public](https://img.shields.io/badge/Build_in_public-TikTok-000000?style=for-the-badge&logo=tiktok&logoColor=white)](https://www.tiktok.com/@intellectuelathlete/video/7700615552749931808)
+[![Pitch deck](https://img.shields.io/badge/Pitch_deck-Vercel-000000?style=for-the-badge&logo=vercel&logoColor=white)](https://gerald-pitch-deck.vercel.app/#1)
 [![GitHub](https://img.shields.io/badge/GitHub-talal95c%2FGerald.ai--?style=for-the-badge&logo=github&logoColor=white)](https://github.com/talal95c/Gerald.ai-)
 
-**[Live demo](https://gerald-yl14.onrender.com/landing.html)** · **[Demo video](https://youtu.be/B41yHYg-4Sw)** · **[Build in public](https://www.tiktok.com/@intellectuelathlete/video/7700615552749931808)** · [Pitch deck](pitch/) · [Architecture](docs/ARCHITECTURE.md) · [Run it locally](#quick-start)
+**[Live demo](https://gerald-yl14.onrender.com/landing.html)** · **[Demo video](https://youtu.be/B41yHYg-4Sw)** · **[Build in public](https://www.tiktok.com/@intellectuelathlete/video/7700615552749931808)** · **[Pitch deck](https://gerald-pitch-deck.vercel.app/#1)** · [Architecture](docs/ARCHITECTURE.md) · [Run it locally](#quick-start)
 
 ![Gerald circles the wrong sign on a handwritten discriminant and writes the fix](docs/media/04-board-correction.gif)
 
@@ -217,7 +218,7 @@ The public demo runs at [gerald-yl14.onrender.com](https://gerald-yl14.onrender.
 
 ## Pitch and videos
 
-- **Pitch deck** — `pitch/index.html`, static, 1920×1080 stage with the demo clips in `pitch/media/`.
+- **Pitch deck** — live at [gerald-pitch-deck.vercel.app](https://gerald-pitch-deck.vercel.app/#1); source in `pitch/index.html`, static, 1920×1080 stage with the demo clips in `pitch/media/`.
   Serve with `python3 -m http.server -d pitch` and press → to advance.
 - **Demo video** — [YouTube](https://youtu.be/B41yHYg-4Sw).
 - **Demo clips** — [`pitch/media/`](pitch/media/), shown above in [Demo video](#demo-video).
