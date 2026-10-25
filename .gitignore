@@ -12,3 +12,5 @@ dist/
 .vscode/
 .DS_Store
 usage.jsonl
+evals/results/*
+!evals/results/.gitkeep
