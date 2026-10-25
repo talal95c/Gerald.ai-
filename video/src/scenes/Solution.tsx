@@ -127,7 +127,7 @@ const PhotoshopMock: React.FC = () => {
 };
 
 /** Clip3 moments (seconds in the clip, length): Shapes panel → Color picker on red → the red square. */
-const PS_CUTS: readonly (readonly [number, number])[] = [[6, 3.5], [20, 3], [32.5, 3.5]];
+const PS_CUTS: readonly (readonly [number, number])[] = [[6, 3], [20.5, 2.5], [31.5, 4.5]];
 
 /** Scene · Any app — Photoshop guided to the red square (real clip, three cuts). */
 export const Desktop: React.FC<{ footage: string | null; trim: number }> = ({ footage, trim }) => {
