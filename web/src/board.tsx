@@ -64,16 +64,6 @@ function writeBoundsOverlap(left: AnnotationRect, right: AnnotationRect): boolea
     && left.y + left.h + WRITE_LAYOUT_GAP > right.y;
 }
 
-function firstFreeWriteY(bounds: AnnotationRect, occupied: AnnotationRect[], minimumY: number): number {
-  let y = Math.max(bounds.y, minimumY);
-  while (true) {
-    const line = {...bounds, y};
-    const collisions = occupied.filter((rect) => writeBoundsOverlap(line, rect));
-    if (!collisions.length) return y;
-    y = Math.max(...collisions.map((rect) => rect.y + rect.h + WRITE_LAYOUT_GAP));
-  }
-}
-
 function traceSketchPath(ctx: CanvasRenderingContext2D, points: CursorPoint[]) {
   if (!points.length) return;
   ctx.beginPath();
@@ -910,23 +900,22 @@ function Board() {
       motion.enqueue(async (queue) => {
         const previousRects = [...document.querySelectorAll<HTMLElement>(".gerald-write")]
           .map(measuredWriteBounds);
-        const previousBottom = previousRects.reduce((bottom, rect) => Math.max(bottom, rect.y + rect.h), 0);
-        const automaticY = Math.max(160, previousBottom + 12);
         const occupiedRects = [
           ...previousRects,
           ...elements().filter((element) => element.id >= 10000).map((element) => element.rect),
         ];
+        const occupiedBottom = occupiedRects.reduce((bottom, rect) => Math.max(bottom, rect.y + rect.h), 0);
+        const automaticY = Math.max(160, occupiedBottom + 12);
         let y = requestedY ?? automaticY;
         await queue.moveTo({x, y});
         setGeraldTexts((items) => [...items, {id, text, x, y, size, color: color ?? "#111", html, parts}]);
         await new Promise<void>((resolve) => requestAnimationFrame(() => requestAnimationFrame(() => resolve())));
         let line = document.querySelector<HTMLElement>(`[data-gerald-text-id="${id}"]`);
         let bounds = line ? measuredWriteBounds(line) : null;
-        for (let attempt = 0; bounds && attempt <= occupiedRects.length; attempt += 1) {
-          const minimumY = requestedY === null ? automaticY : bounds.y;
-          const freeY = firstFreeWriteY(bounds, occupiedRects, minimumY);
-          if (freeY <= bounds.y + 1) break;
-          y += freeY - bounds.y;
+        const shouldStartBelowAll = requestedY === null
+          || (bounds !== null && occupiedRects.some((rect) => writeBoundsOverlap(bounds, rect)));
+        if (bounds && shouldStartBelowAll && bounds.y < automaticY - 1) {
+          y += automaticY - bounds.y;
           setGeraldTexts((items) => items.map((item) => item.id === id ? {...item, y} : item));
           await new Promise<void>((resolve) => requestAnimationFrame(() => requestAnimationFrame(() => resolve())));
           line = document.querySelector<HTMLElement>(`[data-gerald-text-id="${id}"]`);
