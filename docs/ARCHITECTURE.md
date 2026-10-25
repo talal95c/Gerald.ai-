@@ -44,14 +44,16 @@ Le client utilise l'interface Realtime GA documentée par OpenAI :
 [Realtime conversations](https://developers.openai.com/api/docs/guides/realtime-conversations).
 La session maintient l'historique; les outils sont retournés comme
 `function_call_output` avant une unique continuation par réponse achevée.
-Les actions de saisie et de souris sont refusées sans confirmation explicite par
-défaut (`GERALD_REQUIRE_CONFIRMATION=1`). Elles s'exécutent hors de la boucle
-asyncio; un clic affiche d'abord un repère, puis masque les marques pendant
-l'entrée. Échap annule les actions en attente, huit actions au maximum sont
-autorisées par tour et un déplacement manuel de souris supérieur à 40 px
-interrompt la séquence. Après une action, une nouvelle capture et un nouveau
-contexte d'éléments précèdent la continuation pour que le modèle puisse vérifier
-le résultat.
+Les actions de saisie et de souris demandent une autorisation dans une capsule
+Qt « Autoriser / Annuler » au premier geste de chaque tour
+(`GERALD_REQUIRE_CONFIRMATION=1`). Le champ `confirmed` du modèle n'autorise
+jamais l'action à lui seul. La demande expire après 15 secondes. Les gestionnaires
+s'exécutent hors de la boucle asyncio; un clic affiche d'abord un repère, puis
+masque les marques pendant l'entrée. Échap annule la demande ou efface toujours
+les marques. Huit actions au maximum sont autorisées par tour et un déplacement
+manuel de souris supérieur à 40 px interrompt la séquence. Après une action,
+l'overlay est masqué pendant la nouvelle capture et le contexte d'éléments
+précède la continuation pour que le modèle puisse vérifier le résultat.
 
 `Ctrl+Shift+R` et l'action de la zone de notification envoient une demande de
 récapitulatif textuelle, sans capture d'écran. L'outil `save_recap` écrit le

@@ -26,7 +26,12 @@ disponibles; la reconnaissance UIA et l'OCR Windows sont optionnels.
 - Maintenir `Ctrl+Shift` : parler et partager une capture ponctuelle.
 - `Ctrl+Shift+Enter` ou l'icône de zone de notification : saisir une question.
 - `Ctrl+Shift+R` ou l'action de la zone de notification : enregistrer un récapitulatif de la leçon.
-- `Échap` : interrompre Gerald et effacer les dessins.
+- `Échap` : annuler une demande d'action, interrompre Gerald ou effacer les dessins.
+
+Avant la première action de chaque tour, Gerald demande une autorisation réelle
+dans une capsule « Autoriser / Annuler »; le champ `confirmed` fourni par le
+modèle ne suffit pas. `GERALD_REQUIRE_CONFIRMATION=0` désactive cette demande
+uniquement pour le développement.
 
 Modifiez `GERALD_HOTKEY`, `GERALD_MODEL`, `GERALD_VOICE`,
 `GERALD_MAX_IMAGE_W` et `GERALD_OCR_BUDGET` (2,5 secondes par défaut) dans

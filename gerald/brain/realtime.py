@@ -39,6 +39,7 @@ class RealtimeClient:
         capture_after_action: Callable[[], tuple[Capture, list[Element], str]] | None = None,
         on_marks_visible: Callable[[bool], None] | None = None,
         input_actions: InputActions | None = None,
+        request_action_confirmation: Callable[[str, tuple[int, int] | None, float], bool] | None = None,
     ) -> None:
         self.api_key = api_key
         self.model = model
@@ -48,7 +49,10 @@ class RealtimeClient:
         self.on_event = on_event or (lambda event: None)
         self.on_commands = on_commands or (lambda commands: None)
         self.on_marks_visible = on_marks_visible or (lambda _visible: None)
-        self.input_actions = input_actions or InputActions(require_confirmation=require_confirmation)
+        self.input_actions = input_actions or InputActions(
+            require_confirmation=require_confirmation,
+            request_confirmation=request_action_confirmation,
+        )
         self.capture_after_action = capture_after_action
         self.usage_log = usage_log if usage_log is not None else Path.home() / ".gerald" / "usage.jsonl"
         self.websocket = None
@@ -129,6 +133,9 @@ class RealtimeClient:
         self._tool_rounds = 0
         self._action_session = self.input_actions.new_session()
         self._turn_started_at = time.monotonic()
+
+    def abort_actions(self) -> None:
+        self.input_actions.abort(self._action_session)
 
     async def send_recap(self) -> None:
         await self.cancel()

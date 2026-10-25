@@ -471,15 +471,39 @@ def collect_elements_detailed(
         result = list(uia[:150])
         for candidate in ocr:
             cx, cy, cw, ch = candidate.rect
-            image_area = max(1, cw * ch)
-            overlaps = any(
-                max(0, min(cx + cw, ex + ew) - max(cx, ex))
-                * max(0, min(cy + ch, ey + eh) - max(cy, ey))
-                / image_area
-                > 0.5
-                for element in result
-                for ex, ey, ew, eh in [element.rect]
-            )
+            candidate_area = max(1, cw * ch)
+            container_roles = {"window", "pane", "document", "group"}
+            interactive_roles = {
+                "button",
+                "checkbox",
+                "combobox",
+                "edit",
+                "hyperlink",
+                "listitem",
+                "menuitem",
+                "radiobutton",
+                "slider",
+                "spinner",
+                "tabitem",
+                "treeitem",
+            }
+            overlaps = False
+            for element in uia[:150]:
+                role = element.role.casefold().removesuffix("control")
+                if role in container_roles:
+                    continue
+                ex, ey, ew, eh = element.rect
+                ui_area = max(1, ew * eh)
+                comparable = ui_area <= 4 * candidate_area
+                interactive_leaf = role in interactive_roles
+                overlap = (
+                    max(0, min(cx + cw, ex + ew) - max(cx, ex))
+                    * max(0, min(cy + ch, ey + eh) - max(cy, ey))
+                    / candidate_area
+                )
+                if overlap > 0.5 and (comparable or interactive_leaf):
+                    overlaps = True
+                    break
             if not overlaps:
                 result.append(candidate)
         final = []

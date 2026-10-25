@@ -14,7 +14,6 @@ from gerald.perception.grounding import GroundingResolution, resolve_target
 from gerald.tools.registry import PointCommand
 
 ACTION_TOOL_NAMES = frozenset({"click", "type_text", "press_keys", "scroll"})
-CONFIRMATION_ERROR = "needs_confirmation: say what you will do and ask the user for a yes first"
 
 
 @dataclass
@@ -22,7 +21,9 @@ class ActionSession:
     abort_event: threading.Event = field(default_factory=threading.Event)
     action_count: int = 0
     last_mouse_position: tuple[int, int] | None = None
+    approved: bool = False
     lock: threading.Lock = field(default_factory=threading.Lock)
+    confirmation_lock: threading.Lock = field(default_factory=threading.Lock)
 
 
 def _mouse_controller():
@@ -46,12 +47,16 @@ class InputActions:
         keyboard_factory: Callable[[], Any] | None = None,
         click_delay: float = 0.35,
         delay_wait: Callable[[threading.Event, float], bool] | None = None,
+        request_confirmation: Callable[[str, tuple[int, int] | None, float], bool] | None = None,
+        confirmation_timeout: float = 15.0,
     ) -> None:
         self.require_confirmation = require_confirmation
         self.mouse_factory = mouse_factory or _mouse_controller
         self.keyboard_factory = keyboard_factory or _keyboard_controller
         self.click_delay = click_delay
         self.delay_wait = delay_wait or (lambda event, delay: event.wait(delay))
+        self.request_confirmation = request_confirmation
+        self.confirmation_timeout = confirmation_timeout
 
     @staticmethod
     def new_session() -> ActionSession:
@@ -79,8 +84,8 @@ class InputActions:
             return error("arguments must be an object")
         if name not in ACTION_TOOL_NAMES:
             return error(f"unknown action: {name}")
-        if self.require_confirmation and args.get("confirmed") is not True:
-            return error(CONFIRMATION_ERROR)
+        if "confirmed" in args and not isinstance(args["confirmed"], bool):
+            return error("confirmed must be a boolean")
         try:
             target_fields = {"element_id", "x", "y", "text"}
             if name == "click":
@@ -121,6 +126,21 @@ class InputActions:
         if session.abort_event.is_set():
             return error("action cancelled")
 
+        point = tuple(round(value) for value in target.rect.center) if name in {"click", "scroll"} and target else None
+        if name == "click" and target is not None:
+            on_commands([PointCommand(target.rect)])
+        elif name == "scroll" and target is not None and self.require_confirmation and not session.approved:
+            on_commands([PointCommand(target.rect)])
+        if self.require_confirmation and not session.approved:
+            prompt = self._confirmation_prompt(name, args)
+            with session.confirmation_lock:
+                if not session.approved:
+                    if self.request_confirmation is None or not self.request_confirmation(
+                        prompt, point, self.confirmation_timeout
+                    ):
+                        return error("user declined")
+                    session.approved = True
+
         try:
             mouse = self.mouse_factory()
             initial_position = self._position(mouse)
@@ -140,7 +160,6 @@ class InputActions:
         try:
             if name == "click":
                 assert target is not None
-                on_commands([PointCommand(target.rect)])
                 if self.delay_wait(session.abort_event, self.click_delay) or session.abort_event.is_set():
                     return error("action cancelled")
                 expected_position = previous_position or initial_position
@@ -223,6 +242,27 @@ class InputActions:
         if "esc" in keys or "escape" in keys:
             raise ValueError("Esc is reserved to cancel actions")
         return keys
+
+    @staticmethod
+    def _confirmation_prompt(name: str, args: dict[str, Any]) -> str:
+        if name == "click":
+            return {
+                "left": "Gerald veut cliquer ici",
+                "right": "Gerald veut faire un clic droit ici",
+                "double": "Gerald veut double-cliquer ici",
+            }[args.get("button", "left")]
+        if name == "type_text":
+            text = args["text"]
+            shown = text if len(text) <= 48 else f"{text[:45]}…"
+            return f"Gerald veut taper « {shown} »"
+        if name == "press_keys":
+            formatted = "+".join(
+                part.title() if part.casefold() in {"ctrl", "shift", "alt", "altgr"} else part.title()
+                for part in args["keys"].split("+")
+            )
+            return f"Gerald veut appuyer {formatted}"
+        direction = "haut" if args["direction"] == "up" else "bas"
+        return f"Gerald veut défiler vers le {direction}"
 
     @staticmethod
     def _press_keys(keyboard, keys: list[str], abort_event: threading.Event) -> None:

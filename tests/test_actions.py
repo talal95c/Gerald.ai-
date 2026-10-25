@@ -45,7 +45,7 @@ def setup_capture():
     return capture, np.asarray(image)
 
 
-def test_unconfirmed_action_is_refused_without_creating_controllers():
+def test_action_without_user_approval_is_refused_without_creating_controllers():
     calls = []
     actions = InputActions(
         mouse_factory=lambda: calls.append("mouse"),
@@ -56,7 +56,7 @@ def test_unconfirmed_action_is_refused_without_creating_controllers():
     output = actions.execute(
         actions.new_session(),
         "click",
-        {"x": 50, "y": 50},
+        {"x": 50, "y": 50, "confirmed": True},
         capture,
         [],
         image,
@@ -64,9 +64,7 @@ def test_unconfirmed_action_is_refused_without_creating_controllers():
         lambda _visible: None,
     )
 
-    assert output == (
-        '{"ok":false,"error":"needs_confirmation: say what you will do and ask the user for a yes first"}'
-    )
+    assert output == '{"ok":false,"error":"user declined"}'
     assert calls == []
 
 
@@ -77,6 +75,7 @@ def test_confirmed_click_emits_point_then_clicks_physical_coordinates(monkeypatc
         mouse_factory=lambda: mouse,
         click_delay=0,
         delay_wait=lambda _event, _delay: False,
+        request_confirmation=lambda *_args: True,
     )
     capture, image = setup_capture()
     pynput = ModuleType("pynput")
@@ -113,6 +112,7 @@ def test_escape_aborts_pending_click_before_input():
         mouse_factory=lambda: mouse,
         click_delay=0.35,
         delay_wait=lambda event, _delay: (event.set() or True),
+        request_confirmation=lambda *_args: True,
     )
     capture, image = setup_capture()
     commands = []
@@ -136,7 +136,7 @@ def test_escape_aborts_pending_click_before_input():
 def test_action_limit_and_user_mouse_movement_abort():
     capture, image = setup_capture()
     mouse = FakeMouse()
-    actions = InputActions(mouse_factory=lambda: mouse)
+    actions = InputActions(mouse_factory=lambda: mouse, require_confirmation=False)
     session = actions.new_session()
 
     for _ in range(8):
@@ -186,3 +186,53 @@ def test_action_limit_and_user_mouse_movement_abort():
         lambda _visible: None,
     )
     assert json.loads(moved)["error"] == "user took control"
+
+
+def test_action_approval_is_once_per_session_and_repeats_for_new_turn():
+    prompts = []
+    actions = InputActions(
+        mouse_factory=FakeMouse,
+        request_confirmation=lambda *args: (prompts.append(args) or True),
+    )
+    capture, image = setup_capture()
+
+    def scroll(session):
+        return actions.execute(
+            session,
+            "scroll",
+            {"direction": "down", "amount": 1, "confirmed": False},
+            capture,
+            [],
+            image,
+            lambda _commands: None,
+            lambda _visible: None,
+        )
+
+    first_turn = actions.new_session()
+    assert json.loads(scroll(first_turn))["ok"] is True
+    assert json.loads(scroll(first_turn))["ok"] is True
+    assert len(prompts) == 1
+    assert json.loads(scroll(actions.new_session()))["ok"] is True
+    assert len(prompts) == 2
+
+
+def test_decline_or_timeout_returns_user_declined_without_input():
+    calls = []
+    actions = InputActions(
+        mouse_factory=lambda: calls.append("mouse"),
+        request_confirmation=lambda *_args: False,
+    )
+    capture, image = setup_capture()
+    output = actions.execute(
+        actions.new_session(),
+        "type_text",
+        {"text": "hello", "confirmed": True},
+        capture,
+        [],
+        image,
+        lambda _commands: None,
+        lambda _visible: None,
+    )
+
+    assert json.loads(output) == {"ok": False, "error": "user declined"}
+    assert calls == []

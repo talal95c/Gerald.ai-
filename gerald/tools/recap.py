@@ -15,8 +15,16 @@ def save_recap(markdown: str, home: Path | None = None, *, open_file: bool = Tru
         raise ValueError("markdown must be a non-empty string")
     lessons = (home or Path.home()) / "Gerald" / "lessons"
     lessons.mkdir(parents=True, exist_ok=True)
-    path = lessons / f"{datetime.now():%Y-%m-%d_%H-%M}.md"
-    path.write_text(markdown.strip() + "\n", encoding="utf-8")
+    stem = f"{datetime.now():%Y-%m-%d_%H-%M}"
+    suffix = 1
+    while True:
+        path = lessons / f"{stem}{'' if suffix == 1 else f'-{suffix}'}.md"
+        try:
+            with path.open("x", encoding="utf-8") as recap_file:
+                recap_file.write(markdown.strip() + "\n")
+            break
+        except FileExistsError:
+            suffix += 1
     if open_file:
         try:
             if os.name == "nt":

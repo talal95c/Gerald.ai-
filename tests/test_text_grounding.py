@@ -267,6 +267,25 @@ def test_ocr_uses_full_resolution_and_retains_word_boxes(monkeypatch):
         elements_module._tesseract_languages.cache_clear()
 
 
+def test_full_window_uia_container_does_not_suppress_ocr_search_label():
+    capture = make_capture()
+
+    class Provider:
+        def __init__(self, elements):
+            self.elements = elements
+
+        def get_elements(self, _capture):
+            return self.elements
+
+    collection = collect_elements(
+        capture,
+        Provider([Element(0, "Window", "Chrome", (-1000, 40, 400, 200), "uia")]),
+        Provider([Element(0, "text", "Search", (-950, 60, 60, 18), "ocr")]),
+    )
+
+    assert any(element.name == "Search" and element.source == "ocr" for element in collection)
+
+
 def test_ocr_budget_returns_completed_tiles_as_partial_results(monkeypatch):
     capture = capture_from_image(
         Image.new("RGB", (400, 200), "white"),

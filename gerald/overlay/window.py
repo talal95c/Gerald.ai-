@@ -17,7 +17,7 @@ from PyQt6.QtGui import (
     QPalette,
     QPen,
 )
-from PyQt6.QtWidgets import QApplication, QLineEdit, QVBoxLayout, QWidget
+from PyQt6.QtWidgets import QApplication, QHBoxLayout, QLabel, QLineEdit, QPushButton, QVBoxLayout, QWidget
 
 from gerald.capture.screen import Capture
 from gerald.perception.grounding import ScreenRect
@@ -67,6 +67,130 @@ def _system_font_family() -> str:
 
 
 ACCENT = _accent_color()
+Rect = tuple[int, int, int, int]
+
+
+@dataclass(frozen=True)
+class _ScreenMapping:
+    physical: Rect
+    logical: Rect
+    ratio: float
+
+
+def _build_screen_mappings(
+    screens: list[tuple[str, Rect, float]],
+    native_monitors: list[tuple[str, Rect]] | None = None,
+) -> list[_ScreenMapping]:
+    if not native_monitors:
+        return [
+            _ScreenMapping(
+                (round(x * ratio), round(y * ratio), round(width * ratio), round(height * ratio)),
+                (x, y, width, height),
+                ratio,
+            )
+            for _name, (x, y, width, height), ratio in screens
+        ]
+    remaining = list(range(len(screens)))
+    mappings = []
+    for monitor_index, (name, physical) in enumerate(native_monitors):
+        match = next(
+            (index for index in remaining if screens[index][0].casefold() == name.casefold()),
+            None,
+        )
+        if match is None:
+            left, top, width, height = physical
+            overlaps = []
+            for index in remaining:
+                _screen_name, (x, y, w, h), ratio = screens[index]
+                projected = (round(x * ratio), round(y * ratio), round(w * ratio), round(h * ratio))
+                area = max(0, min(left + width, projected[0] + projected[2]) - max(left, projected[0]))
+                area *= max(0, min(top + height, projected[1] + projected[3]) - max(top, projected[1]))
+                overlaps.append((area, index))
+            best = max(overlaps, default=(0, -1))
+            match = best[1] if best[0] else None
+        if match is None and monitor_index in remaining:
+            match = monitor_index
+        if match is None:
+            continue
+        remaining.remove(match)
+        _screen_name, logical, dpr = screens[match]
+        ratio = physical[2] / max(1, logical[2]) or dpr
+        mappings.append(_ScreenMapping(physical, logical, ratio))
+    return mappings
+
+
+def _physical_to_logical(
+    x: float,
+    y: float,
+    mappings: list[_ScreenMapping],
+) -> tuple[float, float, float] | None:
+    for mapping in mappings:
+        left, top, width, height = mapping.physical
+        if left <= x < left + width and top <= y < top + height:
+            logical_x, logical_y, _logical_width, _logical_height = mapping.logical
+            return (
+                logical_x + (x - left) / mapping.ratio,
+                logical_y + (y - top) / mapping.ratio,
+                mapping.ratio,
+            )
+    return None
+
+
+def _logical_to_physical(
+    x: float,
+    y: float,
+    mappings: list[_ScreenMapping],
+) -> tuple[float, float] | None:
+    for mapping in mappings:
+        left, top, width, height = mapping.logical
+        if left <= x < left + width and top <= y < top + height:
+            physical_x, physical_y, _physical_width, _physical_height = mapping.physical
+            return (
+                physical_x + (x - left) * mapping.ratio,
+                physical_y + (y - top) * mapping.ratio,
+            )
+    return None
+
+
+def _native_windows_monitors() -> list[tuple[str, Rect]]:
+    if os.name != "nt":
+        return []
+    import ctypes
+    from ctypes import wintypes
+
+    class NativeRect(ctypes.Structure):
+        _fields_ = [
+            ("left", wintypes.LONG),
+            ("top", wintypes.LONG),
+            ("right", wintypes.LONG),
+            ("bottom", wintypes.LONG),
+        ]
+
+    class MonitorInfo(ctypes.Structure):
+        _fields_ = [
+            ("cbSize", wintypes.DWORD),
+            ("rcMonitor", NativeRect),
+            ("rcWork", NativeRect),
+            ("dwFlags", wintypes.DWORD),
+            ("szDevice", ctypes.c_wchar * 32),
+        ]
+
+    found: list[tuple[str, Rect]] = []
+    callback_type = ctypes.WINFUNCTYPE(
+        wintypes.BOOL, wintypes.HMONITOR, wintypes.HDC, ctypes.POINTER(NativeRect), wintypes.LPARAM
+    )
+
+    def enumerate_monitor(handle, _dc, _rect, _data):
+        info = MonitorInfo()
+        info.cbSize = ctypes.sizeof(info)
+        if ctypes.windll.user32.GetMonitorInfoW(handle, ctypes.byref(info)):
+            rect = info.rcMonitor
+            found.append((info.szDevice, (rect.left, rect.top, rect.right - rect.left, rect.bottom - rect.top)))
+        return True
+
+    callback = callback_type(enumerate_monitor)
+    ctypes.windll.user32.EnumDisplayMonitors(0, None, callback, 0)
+    return found
 
 
 @dataclass
@@ -127,6 +251,54 @@ class _GlassTextInput(QWidget):
         painter.end()
 
 
+class _ConfirmationPill(QWidget):
+    def __init__(self, owner: OverlayWindow, text: str, finish) -> None:
+        super().__init__(
+            None,
+            Qt.WindowType.FramelessWindowHint
+            | Qt.WindowType.WindowStaysOnTopHint
+            | Qt.WindowType.Tool
+            | Qt.WindowType.WindowDoesNotAcceptFocus,
+        )
+        self.owner = owner
+        self.finish = finish
+        self.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground, True)
+        self.setAttribute(Qt.WidgetAttribute.WA_ShowWithoutActivating, True)
+        self.setFixedSize(430, 58)
+        layout = QHBoxLayout(self)
+        layout.setContentsMargins(12, 7, 12, 7)
+        layout.setSpacing(8)
+        self.label = QLabel(text, self)
+        self.label.setFont(QFont(owner._font_family, 10, QFont.Weight.Medium))
+        self.label.setStyleSheet("QLabel { background: transparent; color: #F5F5F7; }")
+        self.label.setMaximumWidth(225)
+        layout.addWidget(self.label, 1)
+        for title, approved in (("Autoriser", True), ("Annuler", False)):
+            button = QPushButton(title, self)
+            button.setFixedHeight(34)
+            button.setFont(QFont(owner._font_family, 9, QFont.Weight.Medium))
+            color = ACCENT.name() if approved else "rgba(255,255,255,0.12)"
+            button.setStyleSheet(
+                f"QPushButton {{ color: #F5F5F7; background: {color}; border: none; "
+                "border-radius: 17px; padding: 0 12px; }"
+                "QPushButton:hover { background: rgba(255,255,255,0.22); }"
+            )
+            button.clicked.connect(lambda _checked=False, value=approved: self.finish(value))
+            layout.addWidget(button)
+        QTimer.singleShot(15000, lambda: self.finish(False))
+
+    def paintEvent(self, event) -> None:
+        del event
+        painter = QPainter(self)
+        painter.setRenderHint(QPainter.RenderHint.Antialiasing)
+        dark = self.owner._dark_for_global_logical(self.frameGeometry().center())
+        self.owner._draw_glass_card(painter, QRectF(self.rect()), 29, dark)
+        self.label.setStyleSheet(
+            f"QLabel {{ background: transparent; color: {'#F5F5F7' if dark else '#1D1D1F'}; }}"
+        )
+        painter.end()
+
+
 class OverlayWindow(QWidget):
     def __init__(self) -> None:
         super().__init__()
@@ -159,6 +331,7 @@ class OverlayWindow(QWidget):
         self._text_input_submit = None
         self._text_input_cancel = None
         self._text_input = _GlassTextInput(self)
+        self._confirmation: _ConfirmationPill | None = None
         self._timer = QTimer(self)
         self._timer.timeout.connect(self._tick)
         self._set_capture_exclusion()
@@ -256,6 +429,48 @@ class OverlayWindow(QWidget):
         self._marks_visible = visible
         self.update()
 
+    def show_confirmation(self, text, point, completion, result) -> None:
+        self.dismiss_confirmation()
+        holder: dict[str, _ConfirmationPill] = {}
+
+        def finish(approved: bool) -> None:
+            pill = holder.get("pill")
+            if pill is None or self._confirmation is not pill:
+                return
+            result["approved"] = approved
+            completion.set()
+            self._confirmation = None
+            pill.close()
+
+        pill = _ConfirmationPill(self, text, finish)
+        holder["pill"] = pill
+        self._confirmation = pill
+        if point is None:
+            from PyQt6.QtGui import QCursor
+
+            x, y = QCursor.pos().x(), QCursor.pos().y()
+        else:
+            mapped = self._global_physical_to_logical(*point)
+            x, y = mapped[:2] if mapped is not None else point
+        screen = QApplication.screenAt(QPoint(round(x), round(y))) or QApplication.primaryScreen()
+        if screen is not None:
+            area = screen.availableGeometry()
+            x = min(max(area.left(), round(x + 18)), area.right() - pill.width())
+            y = min(max(area.top(), round(y + 18)), area.bottom() - pill.height())
+        pill.move(x, y)
+        pill.show()
+        pill.raise_()
+
+    def dismiss_confirmation(self) -> bool:
+        if self._confirmation is None:
+            return False
+        pill = self._confirmation
+        pill.finish(False)
+        return True
+
+    def has_confirmation(self) -> bool:
+        return self._confirmation is not None
+
     def clear(self) -> None:
         self._marks.clear()
         self._status = "idle"
@@ -294,18 +509,26 @@ class OverlayWindow(QWidget):
             self._timer.stop()
         self.update()
 
+    def _screen_mappings(self) -> list[_ScreenMapping]:
+        screens = [
+            (
+                screen.name(),
+                (screen.geometry().x(), screen.geometry().y(), screen.geometry().width(), screen.geometry().height()),
+                screen.devicePixelRatio(),
+            )
+            for screen in QApplication.screens()
+        ]
+        native = _native_windows_monitors() if os.name == "nt" else None
+        return _build_screen_mappings(screens, native)
+
+    def _global_physical_to_logical(self, x: float, y: float) -> tuple[float, float, float] | None:
+        return _physical_to_logical(x, y, self._screen_mappings())
+
     def _qt_position(self, x: float, y: float) -> tuple[float, float, float]:
-        for screen in QApplication.screens():
-            geometry = screen.geometry()
-            ratio = screen.devicePixelRatio()
-            left, top = geometry.x() * ratio, geometry.y() * ratio
-            right, bottom = left + geometry.width() * ratio, top + geometry.height() * ratio
-            if left <= x <= right and top <= y <= bottom:
-                return (
-                    geometry.x() + (x - left) / ratio - self.geometry().x(),
-                    geometry.y() + (y - top) / ratio - self.geometry().y(),
-                    ratio,
-                )
+        mapped = self._global_physical_to_logical(x, y)
+        if mapped is not None:
+            logical_x, logical_y, ratio = mapped
+            return logical_x - self.geometry().x(), logical_y - self.geometry().y(), ratio
         ratio = QApplication.primaryScreen().devicePixelRatio()
         return x / ratio - self.geometry().x(), y / ratio - self.geometry().y(), ratio
 
@@ -320,10 +543,9 @@ class OverlayWindow(QWidget):
     def _widget_to_physical(self, x: float, y: float) -> tuple[float, float]:
         logical_x = x + self.geometry().x()
         logical_y = y + self.geometry().y()
-        for screen in QApplication.screens():
-            if screen.geometry().contains(QPoint(round(logical_x), round(logical_y))):
-                ratio = screen.devicePixelRatio()
-                return logical_x * ratio, logical_y * ratio
+        mapped = _logical_to_physical(logical_x, logical_y, self._screen_mappings())
+        if mapped is not None:
+            return mapped
         ratio = QApplication.primaryScreen().devicePixelRatio()
         return logical_x * ratio, logical_y * ratio
 

@@ -11,6 +11,28 @@ from pathlib import Path
 from gerald.config import load_settings, set_physical_dpi_awareness
 
 logger = logging.getLogger(__name__)
+AUDIO_BYTES_FOR_100MS = 24000 * 2 // 10
+
+
+def _has_audio_to_commit(audio_sent_bytes: int) -> bool:
+    return audio_sent_bytes >= AUDIO_BYTES_FOR_100MS
+
+
+def _reset_failed_capture(app_state: dict, generation: int) -> bool:
+    if generation != app_state["capture_generation"] or not app_state["active"]:
+        return False
+    request = app_state.get("capture_request")
+    if request is not None:
+        request.cancel()
+    app_state.update(
+        capture_generation=generation + 1,
+        capture=None,
+        capture_request=None,
+        active=False,
+        released=False,
+        audio_sent_bytes=0,
+    )
+    return True
 
 
 def _key_name(key: object) -> str:
@@ -33,7 +55,7 @@ def _key_name(key: object) -> str:
 
 def main() -> int:
     set_physical_dpi_awareness()
-    from PyQt6.QtCore import QObject, pyqtSignal
+    from PyQt6.QtCore import QObject, pyqtSignal, pyqtSlot
     from PyQt6.QtGui import QIcon
     from PyQt6.QtWidgets import (
         QApplication,
@@ -65,23 +87,60 @@ def main() -> int:
         commands = pyqtSignal(list)
         capture_ready = pyqtSignal(object)
         capture_failed = pyqtSignal(str)
+        capture_terminal_failed = pyqtSignal(object)
+        capture_overlay = pyqtSignal(object)
+        action_confirmation = pyqtSignal(object)
         mic_level = pyqtSignal(float)
         output_level = pyqtSignal(float)
         audio_unavailable = pyqtSignal()
-        action_marks_visible = pyqtSignal(bool)
+        action_marks_visible = pyqtSignal(object)
 
     bridge = Bridge()
     overlay = OverlayWindow()
     overlay.show()
+
+    def set_capture_overlay_visibility(visible: bool, *, clear: bool = False) -> None:
+        if clear:
+            overlay.clear()
+        if visible:
+            overlay.show()
+        else:
+            overlay.hide()
+        app.processEvents()
+
+    def set_action_marks_visible(visible: bool) -> None:
+        completed = threading.Event()
+        bridge.action_marks_visible.emit((visible, completed))
+        if not completed.wait(5):
+            if not visible:
+                raise TimeoutError("Overlay mark hide timed out")
+            logger.warning("Overlay mark restore timed out")
+
     def capture_after_action():
-        capture = capture_screen(settings.max_image_width)
-        collection = collect_elements_detailed(capture)
-        context = serialize_context(
-            collection.elements,
-            capture.image_width,
-            capture.image_height,
-        )
-        return capture, collection.elements, context
+        ready = threading.Event()
+        bridge.capture_overlay.emit((False, False, ready))
+        if not ready.wait(5):
+            raise TimeoutError("Overlay capture hide timed out")
+        try:
+            capture = capture_screen(settings.max_image_width)
+            collection = collect_elements_detailed(capture)
+            context = serialize_context(
+                collection.elements,
+                capture.image_width,
+                capture.image_height,
+            )
+            return capture, collection.elements, context
+        finally:
+            restored = threading.Event()
+            bridge.capture_overlay.emit((True, False, restored))
+            if not restored.wait(5):
+                logger.warning("Overlay capture restore timed out")
+
+    def request_action_confirmation(text, point, timeout) -> bool:
+        completion = threading.Event()
+        result = {"approved": False}
+        bridge.action_confirmation.emit((text, point, completion, result))
+        return completion.wait(timeout) and bool(result["approved"])
 
     prompt = (Path(__file__).parent / "prompts" / "system_prompt.md").read_text(encoding="utf-8")
     client = RealtimeClient(
@@ -90,8 +149,9 @@ def main() -> int:
         settings.voice,
         prompt,
         require_confirmation=settings.require_confirmation,
+        request_action_confirmation=request_action_confirmation,
         capture_after_action=capture_after_action,
-        on_marks_visible=bridge.action_marks_visible.emit,
+        on_marks_visible=set_action_marks_visible,
     )
     client.on_event = bridge.realtime_event.emit
     client.on_commands = bridge.commands.emit
@@ -124,7 +184,7 @@ def main() -> int:
         "active": False,
         "released": False,
         "started": 0.0,
-        "audio_bytes": 0,
+        "audio_sent_bytes": 0,
         "capture": None,
         "capture_request": None,
         "capture_generation": 0,
@@ -178,8 +238,7 @@ def main() -> int:
         if not app_state["active"] or not app_state["connected"]:
             return
         schedule(client.send_audio(audio))
-        if level > 0.015:
-            app_state["audio_bytes"] += len(audio)
+        app_state["audio_sent_bytes"] += len(audio)
 
     audio_capability = {"available": True}
 
@@ -205,9 +264,7 @@ def main() -> int:
             previous_request.cancel()
         app_state["capture_generation"] += 1
         generation = app_state["capture_generation"]
-        overlay.clear()
-        overlay.hide()
-        app.processEvents()
+        set_capture_overlay_visibility(False, clear=True)
         request = CaptureRequest(capture_executor, lambda: collect_capture(request.started_at))
         request.start_on_press()
         app_state["capture_request"] = request
@@ -231,7 +288,9 @@ def main() -> int:
                     capture = partial_capture["capture"]
                     elements = list(partial_capture["elements"])
                 if capture is None:
-                    bridge.capture_failed.emit("Capture d'écran indisponible après expiration du budget OCR.")
+                    bridge.capture_terminal_failed.emit(
+                        (generation, "Capture d'écran indisponible après expiration du budget OCR.")
+                    )
                     return
                 logger.warning(
                     "OCR collection exceeded the remaining budget; using %d completed elements",
@@ -244,7 +303,7 @@ def main() -> int:
                 )
                 captured = capture, elements, context
             except Exception as error:
-                bridge.capture_failed.emit(str(error))
+                bridge.capture_terminal_failed.emit((generation, str(error)))
                 return
             bridge.capture_ready.emit((generation, captured))
 
@@ -259,7 +318,7 @@ def main() -> int:
         app_state.update(
             active=True,
             started=time.monotonic(),
-            audio_bytes=0,
+            audio_sent_bytes=0,
             released=False,
             typed=False,
             recap_pending=False,
@@ -282,7 +341,7 @@ def main() -> int:
             return
         capture, elements, context = captured
         app_state["capture"] = None
-        has_audio = app_state["audio_bytes"] > 0
+        has_audio = _has_audio_to_commit(app_state["audio_sent_bytes"])
         duration = time.monotonic() - app_state["started"]
         question = app_state.pop("question", "")
         if not has_audio and not question and duration < 0.3:
@@ -307,9 +366,9 @@ def main() -> int:
         already_active = app_state["active"]
         if already_active:
             mic.stop()
-            app_state.update(started=time.monotonic(), audio_bytes=0, released=False, typed=True)
+            app_state.update(started=time.monotonic(), audio_sent_bytes=0, released=False, typed=True)
         else:
-            app_state.update(active=True, started=time.monotonic(), audio_bytes=0, released=False, typed=True)
+            app_state.update(active=True, started=time.monotonic(), audio_sent_bytes=0, released=False, typed=True)
             schedule(client.start_turn())
         overlay.set_status("thinking" if audio_capability["available"] else "error")
         if not already_active:
@@ -359,12 +418,18 @@ def main() -> int:
 
     def key_press(name: str) -> None:
         app_state["pressed"].add(name)
-        if name == "esc" and app_state["active"] and app_state["typed"]:
-            cancel_typed_question()
-            return
-        if name == "esc" and (
-            app_state["active"] or app_state["response_active"] or app_state["recap_pending"]
-        ):
+        if name == "esc":
+            if overlay.dismiss_confirmation():
+                client.abort_actions()
+                overlay.clear()
+                return
+            if app_state["active"] and app_state["typed"]:
+                cancel_typed_question()
+                overlay.clear()
+                return
+            if not (app_state["active"] or app_state["response_active"] or app_state["recap_pending"]):
+                overlay.clear()
+                return
             mic.stop()
             app_state.update(active=False, released=True, response_active=False)
             request = app_state.get("capture_request")
@@ -401,7 +466,40 @@ def main() -> int:
             overlay.show()
             send_captured_if_ready()
 
+    def handle_terminal_capture_failure(generation: int, message: str) -> None:
+        if not _reset_failed_capture(app_state, generation):
+            return
+        schedule(client.cancel())
+        overlay.show()
+        overlay.set_status("idle" if audio_capability["available"] else "error")
+        logger.warning("Terminal capture failure: %s", message)
+        QMessageBox.warning(None, "Gerald", message)
+
+    class UiRequestSlots(QObject):
+        @pyqtSlot(object)
+        def capture_overlay(self, request) -> None:
+            set_capture_overlay_visibility(request[0], clear=request[1])
+            request[2].set()
+
+        @pyqtSlot(object)
+        def action_confirmation(self, request) -> None:
+            overlay.show_confirmation(*request)
+
+        @pyqtSlot(object)
+        def action_marks_visible(self, request) -> None:
+            overlay.set_marks_visible(request[0])
+            request[1].set()
+
+        @pyqtSlot(object)
+        def terminal_capture_failed(self, failure) -> None:
+            handle_terminal_capture_failure(*failure)
+
+    ui_request_slots = UiRequestSlots()
     bridge.capture_ready.connect(capture_ready)
+    bridge.capture_overlay.connect(ui_request_slots.capture_overlay)
+    bridge.action_confirmation.connect(ui_request_slots.action_confirmation)
+    bridge.action_marks_visible.connect(ui_request_slots.action_marks_visible)
+    bridge.capture_terminal_failed.connect(ui_request_slots.terminal_capture_failed)
     bridge.capture_failed.connect(
             lambda message: (
                 overlay.show(),
@@ -411,7 +509,6 @@ def main() -> int:
         )
     )
     bridge.commands.connect(overlay.add_commands)
-    bridge.action_marks_visible.connect(overlay.set_marks_visible)
     bridge.mic_level.connect(
         lambda level: overlay.set_status(
             "listening" if audio_capability["available"] else "error",

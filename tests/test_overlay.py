@@ -1,11 +1,17 @@
 import os
+import threading
 
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
+from PyQt6.QtCore import Qt
 from PyQt6.QtGui import QImage, QPainter
 from PyQt6.QtWidgets import QApplication
 
-from gerald.overlay.window import OverlayWindow
+from gerald.overlay.window import (
+    OverlayWindow,
+    _build_screen_mappings,
+    _physical_to_logical,
+)
 from gerald.perception.grounding import ScreenRect
 from gerald.tools.registry import ArrowCommand, CircleCommand, NoteCommand
 
@@ -36,5 +42,56 @@ def test_overlay_renders_circle_and_arrow_with_transparent_surroundings():
     assert image.pixelColor(410, 128).alpha() > 0
     assert image.pixelColor(320, 330).alpha() > 0
     assert image.pixelColor(600, 200).alpha() == 0
+    overlay.close()
+    app.processEvents()
+
+
+def test_mixed_dpi_screen_maps_from_native_physical_origins():
+    mappings = _build_screen_mappings(
+        [
+            ("DISPLAY1", (0, 0, 1920, 1080), 2.0),
+            ("DISPLAY2", (1920, 0, 1920, 1080), 1.0),
+        ],
+        [
+            ("DISPLAY1", (0, 0, 3840, 2160)),
+            ("DISPLAY2", (3840, 0, 1920, 1080)),
+        ],
+    )
+
+    assert _physical_to_logical(4000, 500, mappings) == (2080, 500, 1.0)
+
+
+def test_negative_origin_monitor_maps_relative_to_native_origin():
+    mappings = _build_screen_mappings(
+        [("LEFT", (-1280, 0, 1280, 720), 1.0), ("MAIN", (0, 0, 1920, 1080), 1.0)],
+        [("LEFT", (-1280, 0, 1280, 720)), ("MAIN", (0, 0, 1920, 1080))],
+    )
+
+    assert _physical_to_logical(-640, 120, mappings) == (-640, 120, 1.0)
+
+
+def test_confirmation_pill_renders_and_declines_without_accepting_focus():
+    app = QApplication.instance() or QApplication([])
+    overlay = OverlayWindow()
+    overlay.setGeometry(0, 0, 640, 400)
+    completion = threading.Event()
+    result = {"approved": False}
+    overlay.show_confirmation("Gerald veut cliquer ici", (100, 100), completion, result)
+    app.processEvents()
+
+    pill = overlay._confirmation
+    assert pill is not None
+    assert pill.windowFlags() & Qt.WindowType.WindowDoesNotAcceptFocus
+    assert not pill.windowFlags() & Qt.WindowType.WindowTransparentForInput
+    image = QImage(pill.width(), pill.height(), QImage.Format.Format_ARGB32)
+    image.fill(0)
+    painter = QPainter(image)
+    pill.render(painter)
+    painter.end()
+    assert image.pixelColor(12, 12).alpha() > 0
+
+    assert overlay.dismiss_confirmation()
+    assert completion.is_set()
+    assert result["approved"] is False
     overlay.close()
     app.processEvents()
