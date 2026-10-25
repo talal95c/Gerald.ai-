@@ -6,15 +6,18 @@ import json
 import logging
 import time
 from collections.abc import Callable
+from functools import partial
 from pathlib import Path
 from typing import Any
 from urllib.parse import quote
 
 import numpy as np
 
+from gerald.actions.input import ACTION_TOOL_NAMES, InputActions
 from gerald.audio.player import AudioPlayer
 from gerald.capture.screen import Capture
 from gerald.perception.elements import Element
+from gerald.tools.recap import save_recap
 from gerald.tools.registry import TOOL_SCHEMAS, execute_tool
 
 logger = logging.getLogger(__name__)
@@ -32,6 +35,10 @@ class RealtimeClient:
         on_event: Callable[[dict[str, Any]], None] | None = None,
         on_commands: Callable[[list[object]], None] | None = None,
         usage_log: Path | None = None,
+        require_confirmation: bool = True,
+        capture_after_action: Callable[[], tuple[Capture, list[Element], str]] | None = None,
+        on_marks_visible: Callable[[bool], None] | None = None,
+        input_actions: InputActions | None = None,
     ) -> None:
         self.api_key = api_key
         self.model = model
@@ -40,12 +47,16 @@ class RealtimeClient:
         self.player = player or AudioPlayer()
         self.on_event = on_event or (lambda event: None)
         self.on_commands = on_commands or (lambda commands: None)
+        self.on_marks_visible = on_marks_visible or (lambda _visible: None)
+        self.input_actions = input_actions or InputActions(require_confirmation=require_confirmation)
+        self.capture_after_action = capture_after_action
         self.usage_log = usage_log if usage_log is not None else Path.home() / ".gerald" / "usage.jsonl"
         self.websocket = None
         self.capture: Capture | None = None
         self.image_array: np.ndarray | None = None
         self.elements: list[Element] = []
         self._tool_rounds = 0
+        self._action_session = self.input_actions.new_session()
         self._executed_call_ids: set[str] = set()
         self._tool_outputs: dict[str, str] = {}
         self._turn_started_at: float | None = None
@@ -111,10 +122,39 @@ class RealtimeClient:
 
     async def start_turn(self) -> None:
         self.player.stop()
+        self.input_actions.abort(self._action_session)
         if self.websocket is not None and self._response_active:
             await self._send({"type": "response.cancel"})
             self._response_active = False
         self._tool_rounds = 0
+        self._action_session = self.input_actions.new_session()
+        self._turn_started_at = time.monotonic()
+
+    async def send_recap(self) -> None:
+        await self.cancel()
+        self._tool_rounds = 0
+        self._action_session = self.input_actions.new_session()
+        self._turn_started_at = time.monotonic()
+        await self._send(
+            {
+                "type": "conversation.item.create",
+                "item": {
+                    "type": "message",
+                    "role": "user",
+                    "content": [
+                        {
+                            "type": "input_text",
+                            "text": (
+                                "Fais un récap écrit de cette leçon : ce qu'on a vu, les étapes clés, "
+                                "3 points à retenir, et un mini exercice. Réponds par l'outil save_recap."
+                            ),
+                        }
+                    ],
+                },
+            }
+        )
+        await self._send({"type": "response.create"})
+        self._response_active = True
         self._turn_started_at = time.monotonic()
 
     async def send_audio(self, audio: bytes) -> None:
@@ -161,6 +201,7 @@ class RealtimeClient:
 
     async def cancel(self) -> None:
         self.player.stop()
+        self.input_actions.abort(self._action_session)
         if self.websocket is not None and self._response_active:
             await self._send({"type": "response.cancel"})
         if self.websocket is not None:
@@ -169,6 +210,7 @@ class RealtimeClient:
 
     async def close(self) -> None:
         self._closed = True
+        self.input_actions.abort(self._action_session)
         self.player.close()
         websocket, self.websocket = self.websocket, None
         if websocket is not None:
@@ -218,7 +260,7 @@ class RealtimeClient:
         }:
             self.on_event(event)
         elif event_type == "response.function_call_arguments.done":
-            self._execute_function_call(
+            await self._execute_function_call(
                 str(event.get("call_id") or ""),
                 str(event.get("name") or ""),
                 event.get("arguments") or "{}",
@@ -233,22 +275,46 @@ class RealtimeClient:
         else:
             self.on_event(event)
 
-    def _execute_function_call(self, call_id: str, name: str, arguments: str) -> str:
+    async def _execute_function_call(self, call_id: str, name: str, arguments: str) -> str:
         if call_id in self._executed_call_ids:
             return self._tool_outputs[call_id]
         try:
             args = json.loads(arguments or "{}")
             if not isinstance(args, dict):
                 raise ValueError("function arguments must be an object")
-            commands, output = execute_tool(
-                name,
-                args,
-                self.capture,  # type: ignore[arg-type]
-                self.elements,
-                self.image_array,
-            )
-            if commands:
-                self.on_commands(commands)
+            if name in ACTION_TOOL_NAMES:
+                loop = asyncio.get_running_loop()
+                output = await loop.run_in_executor(
+                    None,
+                    partial(
+                        self.input_actions.execute,
+                        self._action_session,
+                        name,
+                        args,
+                        self.capture,
+                        self.elements,
+                        self.image_array,
+                        self.on_commands,
+                        self.on_marks_visible,
+                    ),
+                )
+            elif name == "save_recap":
+                path = await asyncio.get_running_loop().run_in_executor(
+                    None,
+                    save_recap,
+                    args.get("markdown", ""),
+                )
+                output = json.dumps({"ok": True, "path": str(path)})
+            else:
+                commands, output = execute_tool(
+                    name,
+                    args,
+                    self.capture,  # type: ignore[arg-type]
+                    self.elements,
+                    self.image_array,
+                )
+                if commands:
+                    self.on_commands(commands)
         except Exception as error:
             output = json.dumps({"ok": False, "error": str(error)})
         self._executed_call_ids.add(call_id)
@@ -274,7 +340,7 @@ class RealtimeClient:
                 self._executed_call_ids.add(call_id)
                 self._tool_outputs[call_id] = output
             else:
-                output = self._execute_function_call(
+                output = await self._execute_function_call(
                     call_id,
                     call.get("name", ""),
                     call.get("arguments") or "{}",
@@ -289,9 +355,62 @@ class RealtimeClient:
                     },
                 }
             )
+        action_succeeded = False
+        for call in calls:
+            call_id = call.get("call_id")
+            if call.get("name") not in ACTION_TOOL_NAMES or not isinstance(call_id, str):
+                continue
+            try:
+                action_succeeded |= json.loads(self._tool_outputs.get(call_id, "{}")).get("ok") is True
+            except (TypeError, json.JSONDecodeError):
+                continue
         if response.get("status") != "cancelled" and self._tool_rounds < 4:
+            if action_succeeded:
+                await self._refresh_after_action()
             await self._send({"type": "response.create"})
             self._response_active = True
+
+    async def _refresh_after_action(self) -> None:
+        if self.capture_after_action is None:
+            return
+        try:
+            capture, elements, context = await asyncio.get_running_loop().run_in_executor(
+                None,
+                self.capture_after_action,
+            )
+            self.capture = capture
+            self.image_array = np.asarray(capture.full_image or capture.image)
+            self.elements = elements
+            await self._send(
+                {
+                    "type": "conversation.item.create",
+                    "item": {
+                        "type": "message",
+                        "role": "user",
+                        "content": [
+                            {"type": "input_image", "image_url": capture.data_url},
+                            {"type": "input_text", "text": f"SCREEN AFTER YOUR ACTION\n{context}"},
+                        ],
+                    },
+                }
+            )
+        except Exception:
+            logger.warning("Could not capture the screen after an action", exc_info=True)
+            await self._send(
+                {
+                    "type": "conversation.item.create",
+                    "item": {
+                        "type": "message",
+                        "role": "user",
+                        "content": [
+                            {
+                                "type": "input_text",
+                                "text": "SCREEN AFTER YOUR ACTION: fresh capture unavailable.",
+                            }
+                        ],
+                    },
+                }
+            )
 
     def _log_usage(self, response: dict[str, Any]) -> None:
         usage = response.get("usage")

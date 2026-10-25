@@ -68,16 +68,30 @@ def main() -> int:
         mic_level = pyqtSignal(float)
         output_level = pyqtSignal(float)
         audio_unavailable = pyqtSignal()
+        action_marks_visible = pyqtSignal(bool)
 
     bridge = Bridge()
     overlay = OverlayWindow()
     overlay.show()
+    def capture_after_action():
+        capture = capture_screen(settings.max_image_width)
+        collection = collect_elements_detailed(capture)
+        context = serialize_context(
+            collection.elements,
+            capture.image_width,
+            capture.image_height,
+        )
+        return capture, collection.elements, context
+
     prompt = (Path(__file__).parent / "prompts" / "system_prompt.md").read_text(encoding="utf-8")
     client = RealtimeClient(
         settings.api_key,
         settings.model,
         settings.voice,
         prompt,
+        require_confirmation=settings.require_confirmation,
+        capture_after_action=capture_after_action,
+        on_marks_visible=bridge.action_marks_visible.emit,
     )
     client.on_event = bridge.realtime_event.emit
     client.on_commands = bridge.commands.emit
@@ -117,6 +131,7 @@ def main() -> int:
         "connected": False,
         "typed": False,
         "response_active": False,
+        "recap_pending": False,
     }
     required = {part.strip().lower() for part in settings.hotkey.split("+") if part.strip()}
     if "altgr" in required or {"ctrl", "alt"} <= required:
@@ -241,7 +256,14 @@ def main() -> int:
         if not app_state["connected"]:
             bridge.capture_failed.emit("Gerald attend la connexion Realtime. Réessayez dans un instant.")
             return
-        app_state.update(active=True, started=time.monotonic(), audio_bytes=0, released=False, typed=False)
+        app_state.update(
+            active=True,
+            started=time.monotonic(),
+            audio_bytes=0,
+            released=False,
+            typed=False,
+            recap_pending=False,
+        )
         schedule(client.start_turn())
         overlay.clear()
         overlay.set_status("listening" if audio_capability["available"] else "error")
@@ -315,12 +337,34 @@ def main() -> int:
         overlay.show()
         overlay.set_status("idle" if audio_capability["available"] else "error")
 
+    def open_lesson_recap() -> None:
+        if app_state["recap_pending"]:
+            return
+        mic.stop()
+        request = app_state.get("capture_request")
+        if request is not None:
+            request.cancel()
+        app_state["capture_generation"] += 1
+        app_state.update(
+            active=False,
+            released=False,
+            capture=None,
+            capture_request=None,
+            typed=False,
+            recap_pending=True,
+            response_active=False,
+        )
+        overlay.close_text_input()
+        schedule(client.send_recap())
+
     def key_press(name: str) -> None:
         app_state["pressed"].add(name)
         if name == "esc" and app_state["active"] and app_state["typed"]:
             cancel_typed_question()
             return
-        if name == "esc" and (app_state["active"] or app_state["response_active"]):
+        if name == "esc" and (
+            app_state["active"] or app_state["response_active"] or app_state["recap_pending"]
+        ):
             mic.stop()
             app_state.update(active=False, released=True, response_active=False)
             request = app_state.get("capture_request")
@@ -328,10 +372,14 @@ def main() -> int:
                 request.cancel()
             app_state["capture_generation"] += 1
             app_state["capture"] = None
+            app_state["recap_pending"] = False
             schedule(client.cancel())
             overlay.clear()
             if not audio_capability["available"]:
                 overlay.set_status("error")
+            return
+        if (required | {"r"}) <= app_state["pressed"]:
+            open_lesson_recap()
             return
         if typed_hotkey <= app_state["pressed"]:
             open_typed_question()
@@ -363,6 +411,7 @@ def main() -> int:
         )
     )
     bridge.commands.connect(overlay.add_commands)
+    bridge.action_marks_visible.connect(overlay.set_marks_visible)
     bridge.mic_level.connect(
         lambda level: overlay.set_status(
             "listening" if audio_capability["available"] else "error",
@@ -386,11 +435,14 @@ def main() -> int:
             overlay.set_status("thinking" if audio_capability["available"] else "error")
             caption["text"] = ""
             app_state["response_active"] = True
+            app_state["recap_pending"] = False
         elif event_type in {"response.output_audio.delta", "response.audio.delta"}:
             overlay.set_status("speaking" if audio_capability["available"] else "error")
         elif event_type in {"response.output_audio.done", "response.audio.done", "response.done"}:
             overlay.set_status("idle" if audio_capability["available"] else "error")
             app_state["response_active"] = client._response_active
+            if event_type == "response.done" and not client._response_active:
+                app_state["recap_pending"] = False
         elif event_type == "connection.lost":
             app_state["connected"] = False
         elif event_type in {"response.output_audio_transcript.delta", "response.audio_transcript.delta"}:
@@ -405,6 +457,8 @@ def main() -> int:
     menu = QMenu()
     text_action = menu.addAction("Poser une question…")
     text_action.triggered.connect(open_typed_question)
+    recap_action = menu.addAction("Récap de la leçon")
+    recap_action.triggered.connect(open_lesson_recap)
     menu.addSeparator()
     quit_action = menu.addAction("Quitter Gerald")
     quit_action.triggered.connect(app.quit)

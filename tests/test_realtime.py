@@ -247,6 +247,75 @@ def test_tool_round_cap_is_four():
     asyncio.run(scenario())
 
 
+def test_post_action_capture_precedes_the_followup_response():
+    async def scenario():
+        client, capture = make_client()
+        sent = []
+
+        async def fake_send(event):
+            sent.append(event)
+
+        fresh_elements = [Element(1, "Button", "Done", (20, 20, 10, 10), "uia")]
+        client._send = fake_send
+        client.capture_after_action = lambda: (capture, fresh_elements, "new context")
+        client._executed_call_ids.add("click-1")
+        client._tool_outputs["click-1"] = '{"ok":true,"action":"click"}'
+
+        await client._handle_response_done(
+            {
+                "status": "completed",
+                "output": [
+                    {
+                        "type": "function_call",
+                        "name": "click",
+                        "call_id": "click-1",
+                        "arguments": "{}",
+                    }
+                ],
+            }
+        )
+
+        assert [event["type"] for event in sent] == [
+            "conversation.item.create",
+            "conversation.item.create",
+            "response.create",
+        ]
+        assert sent[0]["item"]["type"] == "function_call_output"
+        assert sent[1]["item"]["content"][0]["type"] == "input_image"
+        assert sent[1]["item"]["content"][1]["text"] == "SCREEN AFTER YOUR ACTION\nnew context"
+        assert client.elements == fresh_elements
+
+    asyncio.run(scenario())
+
+
+def test_lesson_recap_sends_a_text_only_request():
+    async def scenario():
+        client, _capture = make_client()
+        sent = []
+
+        async def fake_send(event):
+            sent.append(event)
+
+        client._send = fake_send
+        await client.send_recap()
+
+        assert [event["type"] for event in sent] == [
+            "conversation.item.create",
+            "response.create",
+        ]
+        assert sent[0]["item"]["content"] == [
+            {
+                "type": "input_text",
+                "text": (
+                    "Fais un récap écrit de cette leçon : ce qu'on a vu, les étapes clés, "
+                    "3 points à retenir, et un mini exercice. Réponds par l'outil save_recap."
+                ),
+            }
+        ]
+
+    asyncio.run(scenario())
+
+
 def test_barge_in_cancels_response_and_stops_player():
     async def scenario():
         received = asyncio.Queue()

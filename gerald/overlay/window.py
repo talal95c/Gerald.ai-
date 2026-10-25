@@ -143,6 +143,7 @@ class OverlayWindow(QWidget):
         if screen is not None:
             self.setGeometry(screen.virtualGeometry())
         self._marks: list[_Mark] = []
+        self._marks_visible = True
         self._status = "idle"
         self._status_visible = False
         self._status_message = ""
@@ -249,6 +250,10 @@ class OverlayWindow(QWidget):
             else:
                 self._marks.append(_Mark(command, now, ttl))
         self._ensure_timer()
+        self.update()
+
+    def set_marks_visible(self, visible: bool) -> None:
+        self._marks_visible = visible
         self.update()
 
     def clear(self) -> None:
@@ -392,21 +397,22 @@ class OverlayWindow(QWidget):
         painter = QPainter(self)
         painter.setRenderHint(QPainter.RenderHint.Antialiasing)
         now = time.monotonic()
-        for mark in self._marks:
-            age = now - mark.created
-            opacity = max(0.0, min(1.0, (mark.ttl - age) / 1.2))
-            if self._reduced_motion:
-                opacity *= min(1.0, age / 0.15)
-                progress = 1.0
-            else:
-                opacity *= min(1.0, age / 0.12)
-                progress = 1 - (1 - min(1.0, age / 0.32)) ** 3
-            painter.save()
-            painter.setOpacity(opacity)
-            if isinstance(mark.command, (CircleCommand, ArrowCommand, LinkCommand, UnderlineCommand, PointCommand)):
-                self._paint_mark(painter, mark.command, progress, age, outline=True)
-            self._paint_mark(painter, mark.command, progress, age)
-            painter.restore()
+        if self._marks_visible:
+            for mark in self._marks:
+                age = now - mark.created
+                opacity = max(0.0, min(1.0, (mark.ttl - age) / 1.2))
+                if self._reduced_motion:
+                    opacity *= min(1.0, age / 0.15)
+                    progress = 1.0
+                else:
+                    opacity *= min(1.0, age / 0.12)
+                    progress = 1 - (1 - min(1.0, age / 0.32)) ** 3
+                painter.save()
+                painter.setOpacity(opacity)
+                if isinstance(mark.command, (CircleCommand, ArrowCommand, LinkCommand, UnderlineCommand, PointCommand)):
+                    self._paint_mark(painter, mark.command, progress, age, outline=True)
+                self._paint_mark(painter, mark.command, progress, age)
+                painter.restore()
         self._paint_status(painter, now)
         painter.end()
 

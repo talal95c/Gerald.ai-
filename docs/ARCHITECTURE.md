@@ -11,6 +11,8 @@ interface native.
 | `perception/elements.py` | Interroge UI Automation et l'OCR si disponible, filtre et sérialise le contexte de l'écran. |
 | `perception/grounding.py` | Résout un identifiant ou un point en rectangle physique sans dépendre de Qt. |
 | `tools/registry.py` | Déclare les schémas Realtime et transforme les appels en commandes de dessin simples. |
+| `actions/input.py` | Exécute les actions desktop confirmées avec limite par tour, abort Échap et détection de prise de contrôle. |
+| `tools/recap.py` | Enregistre un récap Markdown dans `~/Gerald/lessons` et tente de l'ouvrir. |
 | `brain/realtime.py` | Gère la session WebSocket, les tours push-to-talk, les outils, les transcriptions et l'usage. |
 | `audio/` | Capture et restitue du PCM mono à 24 kHz. |
 | `overlay/window.py` | Dessine les annotations dans une fenêtre transparente, au-dessus du bureau. |
@@ -42,3 +44,16 @@ Le client utilise l'interface Realtime GA documentée par OpenAI :
 [Realtime conversations](https://developers.openai.com/api/docs/guides/realtime-conversations).
 La session maintient l'historique; les outils sont retournés comme
 `function_call_output` avant une unique continuation par réponse achevée.
+Les actions de saisie et de souris sont refusées sans confirmation explicite par
+défaut (`GERALD_REQUIRE_CONFIRMATION=1`). Elles s'exécutent hors de la boucle
+asyncio; un clic affiche d'abord un repère, puis masque les marques pendant
+l'entrée. Échap annule les actions en attente, huit actions au maximum sont
+autorisées par tour et un déplacement manuel de souris supérieur à 40 px
+interrompt la séquence. Après une action, une nouvelle capture et un nouveau
+contexte d'éléments précèdent la continuation pour que le modèle puisse vérifier
+le résultat.
+
+`Ctrl+Shift+R` et l'action de la zone de notification envoient une demande de
+récapitulatif textuelle, sans capture d'écran. L'outil `save_recap` écrit le
+Markdown dans `~/Gerald/lessons/` puis tente de l'ouvrir avec l'application
+associée du système.

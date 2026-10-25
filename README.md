@@ -25,6 +25,7 @@ disponibles; la reconnaissance UIA et l'OCR Windows sont optionnels.
 
 - Maintenir `Ctrl+Shift` : parler et partager une capture ponctuelle.
 - `Ctrl+Shift+Enter` ou l'icône de zone de notification : saisir une question.
+- `Ctrl+Shift+R` ou l'action de la zone de notification : enregistrer un récapitulatif de la leçon.
 - `Échap` : interrompre Gerald et effacer les dessins.
 
 Modifiez `GERALD_HOTKEY`, `GERALD_MODEL`, `GERALD_VOICE`,

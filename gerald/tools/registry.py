@@ -72,6 +72,42 @@ TOOL_SCHEMAS = [
         ["text"],
     ),
     _schema("clear", "Clear all drawing marks.", {}, []),
+    _targeted_schema(
+        "click",
+        "Click a target after explaining the action and receiving an explicit yes; button is left, right, or double.",
+        {
+            "button": {"type": "string", "description": "left, right, or double"},
+            "confirmed": {"type": "boolean", "description": "true only after the user explicitly confirms"},
+        },
+    ),
+    _schema(
+        "type_text",
+        "Type text only after explaining the action and receiving an explicit yes.",
+        {
+            "text": {"type": "string"},
+            "confirmed": {"type": "boolean", "description": "true only after the user explicitly confirms"},
+        },
+        ["text"],
+    ),
+    _schema(
+        "press_keys",
+        "Press a key chord such as ctrl+s only after explaining it and receiving an explicit yes.",
+        {
+            "keys": {"type": "string"},
+            "confirmed": {"type": "boolean", "description": "true only after the user explicitly confirms"},
+        },
+        ["keys"],
+    ),
+    _targeted_schema(
+        "scroll",
+        "Scroll up or down 1–10 steps, optionally at a target; require an explicit yes before acting.",
+        {
+            "direction": {"type": "string", "description": "up or down"},
+            "amount": {"type": "integer", "description": "integer from 1 to 10"},
+            "confirmed": {"type": "boolean", "description": "true only after the user explicitly confirms"},
+        },
+    ),
+    _schema("save_recap", "Save the lesson recap as a Markdown file and open it.", {"markdown": {"type": "string"}}, ["markdown"]),
 ]
 
 
