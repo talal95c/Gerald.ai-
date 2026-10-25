@@ -8,7 +8,7 @@ npm run dev                      # Remotion Studio → http://localhost:3000/Lau
 npx remotion render Launch out/gerald-launch.mp4
 ```
 
-Structure (`src/Video.tsx`, 1920×1080 · 30 fps · ~55 s, English): problem (stuck alone → chatbots give the answer) → **Voici Gerald** → real clips of the live site (TD, board + parabola, Photoshop guided) → CTA. Voice-over: OpenAI TTS (`python3 scripts_vo.py ash`, needs `OPENAI_API_KEY`; set `voiceOver: false` to mute). See `STORYBOARD.md`.
+Structure (`src/Video.tsx`, 1920×1080 · 30 fps · ~52 s, English): problem (stuck alone → chatbots give the answer) → **Voici Gerald** → real clips of the live site (TD, board + parabola, Photoshop guided) → CTA. Voice-over: OpenAI TTS (`python3 scripts_vo.py ash`, needs `OPENAI_API_KEY`; set `voiceOver: false` to mute). See `STORYBOARD.md`.
 
 ## Real footage
 
@@ -22,4 +22,12 @@ Clips are shown `objectFit: contain` in a 1360×850 (16:10) frame on the landing
 
 ## Audio
 
-`public/audio/` — Mixkit tracks (free licence, see `CREDITS.md`). Default: *Motivating Mornings* (123 BPM, lifts at ~10 s), ducked under the voice-over. Swap with the `music` prop (`driving-ambition.mp3` is the calmer film-score alternative). SFX from remotion.media.
+`public/audio/` — Mixkit tracks (free licence, see `CREDITS.md`): *Training* for `Launch`, *I Won't Surrender* for `Pitch`, both ducked under the voice-over. Swap with the `music` / `musicVolume` props in `src/Root.tsx`. SFX from remotion.media.
+
+## Pitch video
+
+`Pitch` (~3:40) narrates the `pitch/` deck slides and the live demo clips (`python3 scripts_vo_pitch.py ash` → `public/audio/vo-pitch/`, `src/voPitch.ts`):
+
+```bash
+npx remotion render Pitch out/gerald-pitch.mp4
+```
