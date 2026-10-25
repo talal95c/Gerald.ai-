@@ -3,12 +3,13 @@ import { AbsoluteFill, Easing, interpolate, useCurrentFrame, useVideoConfig } fr
 import { Badge, Bg, Brand, Btn, Caption, H, Keycap, Lead, Orb, Reveal, Words, useP } from "../ui";
 import { FONT, T } from "../theme";
 
+/** Pitch deck · "Under the hood", verbatim. */
 const NODES = [
-  { k: "Trigger", t: "Push-to-talk", d: "Mic + one capture while you hold the key" },
-  { k: "Perception", t: "UIA · OCR · Moondream", d: "Every visible element, with provenance" },
-  { k: "Brain", t: "gpt-realtime-2", d: "Voice + image, one WebSocket, full session memory" },
-  { k: "Tools", t: "point · circle · plot", d: "Validated calls → drawing commands" },
-  { k: "Render", t: "Overlay + board", d: "Click-through, never captured" },
+  { k: "Trigger", t: "Push-to-talk", d: "24 kHz PCM mic + one capture of the screen under the cursor" },
+  { k: "Perception", t: "UIA · OCR · Moondream", d: "Visible elements with provenance, to anchor every gesture" },
+  { k: "Brain", t: "gpt-realtime-2", d: "Voice + image over a single WebSocket, context kept for the whole session" },
+  { k: "Tools", t: "point · circle · plot · diagram", d: "Validated function calls, turned into drawing commands" },
+  { k: "Render", t: "Overlay + board", d: "Transparent, click-through window, excluded from captures" },
 ];
 
 /** Scene · How it works — one voice turn, from keypress to ink. */
@@ -40,7 +41,7 @@ export const How: React.FC = () => {
           })}
         </div>
       </AbsoluteFill>
-      <Caption at={5.6}>Vision only while you hold the key. Allow / Cancel before any action.</Caption>
+      <Caption at={5.6}>Trust order: UIA element → OCR word → visual grounder → never the model's raw coordinate.</Caption>
     </Bg>
   );
 };
@@ -51,15 +52,15 @@ export const Proof: React.FC = () => {
   const { fps } = useVideoConfig();
   const score = Math.round(interpolate(frame, [1.6 * fps, 3.4 * fps], [77, 92], { extrapolateLeft: "clamp", extrapolateRight: "clamp", easing: Easing.out(Easing.cubic) }));
   const cards: { h: React.ReactNode; p: string }[] = [
-    { h: <>{score} %</>, p: "pedagogy score on our 17-scenario harness, up from 77 % (gpt-5.5 judge, 8 criteria)" },
-    { h: <>1 key</>, p: "the screen is read only while you hold Ctrl + Shift — no continuous capture" },
-    { h: <span style={{ fontSize: 64 }}>Allow / Cancel</span>, p: "before any action on your apps. Esc stops everything. Open source, MIT." },
+    { h: <>{score} %</>, p: "Pedagogy harness: 17 rendered scenarios, real gpt-realtime-2 turns, gpt-5.5 judge (8 criteria). Baseline prompt 77 % → tutor-first 91–93 %." },
+    { h: <span style={{ fontSize: 64 }}>Vision on demand</span>, p: "No continuous capture: the screen is only read while you hold the shortcut." },
+    { h: <span style={{ fontSize: 64 }}>Real consent</span>, p: "Before any action, an \"Allow / Cancel\" prompt. The model can't approve itself. Esc stops everything." },
   ];
   return (
     <Bg>
       <AbsoluteFill style={{ padding: "0 120px", justifyContent: "center" }}>
-        <Reveal at={0}><Badge>Why trust it</Badge></Reveal>
-        <Reveal at={0.15} style={{ marginTop: 22 }}><H size={72}>Teaches. Measured.<br />Never a spy.</H></Reveal>
+        <Reveal at={0}><Badge>Trust & privacy</Badge></Reveal>
+        <Reveal at={0.15} style={{ marginTop: 22 }}><H size={72}>A tutor on your screen,<br />not a spy.</H></Reveal>
         <div style={{ display: "grid", gridTemplateColumns: "repeat(3,1fr)", gap: 26, marginTop: 60 }}>
           {cards.map((c, i) => (
             <Reveal key={i} at={0.6 + i * 0.18}>
@@ -95,7 +96,7 @@ export const Cta: React.FC = () => {
           <Btn>Try the demo</Btn><Btn primary>Learn live →</Btn>
         </Reveal>
         <Reveal at={3.4} style={{ position: "absolute", bottom: 70 }}>
-          <Lead size={24}>github.com/talal95c/Gerald.ai- · open source · MIT · Windows first</Lead>
+          <Lead size={24}>github.com/talal95c/Gerald.ai- · Any app · Windows first · open source (MIT)</Lead>
         </Reveal>
       </AbsoluteFill>
     </Bg>

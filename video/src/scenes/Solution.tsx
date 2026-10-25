@@ -68,9 +68,9 @@ export const Board: React.FC<{ footage: string | null }> = ({ footage }) => {
           <Footage src={footage} label="board recording"><BoardMock /></Footage>
         </div>
       </Stage>
-      <Caption at={0.8} out={4.2}>It sees every line you write.</Caption>
-      <Caption at={4.6} out={7.8}>It circles the mistake — and explains it out loud.</Caption>
-      <Caption at={8.2}>You fix it yourself. That's the point.</Caption>
+      <Caption at={0.8} out={4.2}>Work your exercise by hand on Gerald's board. It follows every line.</Caption>
+      <Caption at={4.6} out={7.8}>It circles the mistake and explains it out loud.</Caption>
+      <Caption at={8.2}>You still find the answer.</Caption>
     </Bg>
   );
 };
@@ -115,10 +115,10 @@ const PhotoshopMock: React.FC = () => {
         <div style={{ opacity: 0.6, margin: "18px 0 10px" }}>Layers</div>
         {["Rectangle 1", "Background"].map((l, i) => <div key={l} style={{ padding: "8px 10px", borderRadius: 6, background: i === 0 ? "#3d3d44" : "transparent", opacity: i === 0 && rect === 0 ? 0 : 1 }}>{l}</div>)}
       </div>
-      <Bubble at={0.3} out={2.2} x={560} y={110} size={20}>Sure — let's draw a rectangle. First, the shape tool.</Bubble>
+      <Bubble at={0.3} out={2.2} x={560} y={110} size={20}>A rectangle? Start with the shape tool.</Bubble>
       <Bubble at={2.6} out={5.0} x={140} y={200} size={20}>This one. Click it, then drag on the canvas.</Bubble>
-      <Bubble at={6.0} out={8.6} x={880} y={120} size={20}>Nice. Now pick a colour in the swatches.</Bubble>
-      <Bubble at={9.2} x={520} y={380} size={20} ok>Done — your rectangle is blue.</Bubble>
+      <Bubble at={6.0} out={8.6} x={880} y={120} size={20}>Good. Now choose a colour in the swatches.</Bubble>
+      <Bubble at={9.2} x={520} y={380} size={20} ok>Your rectangle is blue. Your turn.</Bubble>
       <GeraldCursor x={cur.x} y={cur.y} />
     </div>
   );
@@ -129,15 +129,15 @@ export const Desktop: React.FC<{ footage: string | null }> = ({ footage }) => {
   const p = useP(0, 1.0);
   return (
     <Bg>
-      <Reveal at={0} style={{ position: "absolute", left: 120, top: 60 }}><Badge dot>Any app · guided by voice</Badge></Reveal>
+      <Reveal at={0} style={{ position: "absolute", left: 120, top: 60 }}><Badge dot>Any app · Windows first</Badge></Reveal>
       <div style={{ position: "absolute", left: 120, right: 120, top: 130, bottom: 190, borderRadius: 24, background: "linear-gradient(135deg,#dfe8ff,#eef1f8)", border: `1px solid ${T.line}`, boxShadow: "0 40px 80px -40px rgba(30,40,120,.4)", opacity: p, scale: `${0.97 + 0.03 * p}`, overflow: "hidden" }}>
         <div style={{ position: "absolute", left: 60, right: 60, top: 40, bottom: 40, borderRadius: 18, boxShadow: "0 30px 60px -30px rgba(0,0,0,.6)" }}>
           <Footage src={footage} label="photoshop recording"><PhotoshopMock /></Footage>
         </div>
       </div>
-      <Caption at={0.6} out={3.6}>"Gerald, how do I draw a blue rectangle?"</Caption>
-      <Caption at={4.0} out={7.4}>It points at the right tool. You click. It checks.</Caption>
-      <Caption at={7.8}>One step at a time — in any app, no hard-coded script.</Caption>
+      <Caption at={0.6} out={3.6}>Hold Ctrl + Shift from any app. Gerald sees what you see.</Caption>
+      <Caption at={4.0} out={7.4}>It points at what matters. You do the clicking.</Caption>
+      <Caption at={7.8}>One step at a time, then "your turn". It only acts if you allow it.</Caption>
     </Bg>
   );
 };
@@ -190,12 +190,12 @@ export const Td: React.FC<{ footage: string | null }> = ({ footage }) => {
   const p = useP(0, 1.0);
   return (
     <Bg>
-      <Reveal at={0} style={{ position: "absolute", left: 120, top: 60 }}><Badge>Your worksheets · your board</Badge></Reveal>
+      <Reveal at={0} style={{ position: "absolute", left: 120, top: 60 }}><Badge>Your courses · the board</Badge></Reveal>
       <div style={{ position: "absolute", left: 120, right: 120, top: 130, bottom: 190, borderRadius: 24, boxShadow: "0 40px 80px -40px rgba(30,40,120,.4)", opacity: p, scale: `${0.97 + 0.03 * p}` }}>
         <Footage src={footage} label="TD + board recording"><TdMock /></Footage>
       </div>
-      <Caption at={0.6} out={4.8}>Drop your course PDF. Gerald reads the exercise with you.</Caption>
-      <Caption at={5.2}>It plots the exact curve — only when a drawing helps.</Caption>
+      <Caption at={0.6} out={4.8}>Drop your courses. Gerald reads the exercise you have open.</Caption>
+      <Caption at={5.2}>When a drawing helps, it opens a board and plots the exact curve.</Caption>
     </Bg>
   );
 };
