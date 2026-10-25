@@ -2,6 +2,25 @@ export type AnnotationRect = {x: number; y: number; w: number; h: number};
 export type AnnotationKind = "note" | "tip";
 export type AnnotationPlacement = {rect: AnnotationRect; leader: boolean};
 export type BoardTextPart = {type: "text" | "math"; value: string};
+export type ColorIntent = "correction" | "valide" | "remarque";
+
+const intentColors: Record<ColorIntent, string> = {
+  correction: "#DC2626",
+  valide: "#16A34A",
+  remarque: "#2563EB",
+};
+
+export function intentColor(intent: unknown, fallback: string | null = null, alpha = 1): string | null {
+  const mapped = typeof intent === "string" && Object.prototype.hasOwnProperty.call(intentColors, intent)
+    ? intentColors[intent as ColorIntent]
+    : undefined;
+  const color = mapped ?? fallback;
+  if (!color || alpha >= 1) return color;
+  const match = /^#([\da-f]{2})([\da-f]{2})([\da-f]{2})$/iu.exec(color);
+  if (!match) return color;
+  const [red, green, blue] = match.slice(1).map((channel) => Number.parseInt(channel, 16));
+  return `rgba(${red}, ${green}, ${blue}, ${alpha})`;
+}
 
 const gap = 12;
 const mathRuns = /[\\abcxyΔ0-9²√±=+*×\/^().,\s\-−]+/giu;

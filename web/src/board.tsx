@@ -3,7 +3,7 @@ import { createRoot } from "react-dom/client";
 import katex from "katex";
 import "katex/dist/katex.min.css";
 import "./board.css";
-import {annotationLeader, annotationSize, placeAnnotation, segmentBoardText, type AnnotationRect, type BoardTextPart} from "./annotations";
+import {annotationLeader, annotationSize, intentColor, placeAnnotation, segmentBoardText, type AnnotationRect, type BoardTextPart} from "./annotations";
 import { mountNotch } from "./notch";
 
 type Pt = {x: number; y: number; p: number};
@@ -19,8 +19,8 @@ type PlotData = {
   points: PlotPointData[];
   title?: string;
 };
-type GeraldText = {id: string; text: string; x: number; y: number; size: number; html?: string; parts?: Array<BoardTextPart & {html?: string}>};
-type BoardMark = {id: string; kind: string; x: number; y: number; w: number; h: number; text: string; target?: AnnotationRect; leader?: boolean};
+type GeraldText = {id: string; text: string; x: number; y: number; size: number; color: string; html?: string; parts?: Array<BoardTextPart & {html?: string}>};
+type BoardMark = {id: string; kind: string; x: number; y: number; w: number; h: number; text: string; color?: string | null; fill?: string | null; target?: AnnotationRect; leader?: boolean};
 type BoardSnapshot = {
   plotData: PlotData | null;
   plotBox: Win;
@@ -595,6 +595,8 @@ function Board() {
   const executeWebTool = async (name: string, args: Record<string, unknown>) => {
     const id = crypto.randomUUID();
     const target = targetRect(args);
+    const color = intentColor(args.intent);
+    const highlightFill = intentColor(args.intent, null, 0.16);
     if (name === "clear_gerald") {
       setMarks([]);
       setGeraldTexts([]);
@@ -623,7 +625,7 @@ function Board() {
           ? {...part, html: katex.renderToString(mathToLatex(part.value), {throwOnError: false, output: "htmlAndMathml"})}
           : part)
         : undefined;
-      setGeraldTexts((items) => [...items, {id, text, x: Number(args.x), y: Number(args.y), size, html, parts}]);
+      setGeraldTexts((items) => [...items, {id, text, x: Number(args.x), y: Number(args.y), size, color: color ?? "#111", html, parts}]);
       return {ok: true};
     }
     if (name === "tip") {
@@ -634,7 +636,7 @@ function Board() {
       setCursor({x: point.x + point.w / 2, y: point.y + point.h / 2});
       setMarks((items) => [...items, {
         id, kind: "tip", x: placement.rect.x, y: placement.rect.y, ...annotationSize(args.text as string, "tip"),
-        text: args.text as string, target: target ? point : undefined, leader: target ? placement.leader : false,
+        text: args.text as string, color, target: target ? point : undefined, leader: target ? placement.leader : false,
       }]);
       return {ok: true, target: {x: point.x, y: point.y, w: point.w, h: point.h}, annotation: placement.rect};
     }
@@ -644,7 +646,7 @@ function Board() {
       if (!from || !to) return {ok: false, error: "arrow targets were not found"};
       const x = from.x + from.w / 2, y = from.y + from.h / 2;
       setCursor({x: to.x + to.w / 2, y: to.y + to.h / 2});
-      setMarks((items) => [...items, {id, kind: "arrow", x, y, w: to.x + to.w / 2 - x, h: to.y + to.h / 2 - y, text: ""}]);
+      setMarks((items) => [...items, {id, kind: "arrow", x, y, w: to.x + to.w / 2 - x, h: to.y + to.h / 2 - y, text: "", color}]);
       return {ok: true, target: {x, y}};
     }
     if (["underline", "circle", "highlight", "point", "note"].includes(name)) {
@@ -660,7 +662,7 @@ function Board() {
         const size = annotationSize(text, "note");
         const mark = {
           id, kind: name, x: placement.rect.x, y: placement.rect.y, ...size, text,
-          target, leader: placement.leader,
+          color, target, leader: placement.leader,
         };
         setCursor({x: target.x + target.w / 2, y: target.y + target.h / 2});
         setMarks((items) => [...items, mark]);
@@ -671,7 +673,7 @@ function Board() {
       const exactText = typeof args.target_text === "string" && args.target_text.length > 0;
       const width = exactText ? target.w : isNumber(args.w) ? args.w : target.w || (name === "point" ? 12 : 120);
       const height = exactText ? target.h : isNumber(args.h) ? args.h : target.h || (name === "point" ? 12 : 38);
-      const mark = {id, kind: name, x, y, w: width, h: height, text};
+      const mark = {id, kind: name, x, y, w: width, h: height, text, color, fill: name === "highlight" ? highlightFill : null};
       setCursor({x, y});
       setMarks((items) => [...items, mark]);
       return {ok: true, target: {x, y}};
@@ -715,7 +717,7 @@ function Board() {
     <canvas ref={canvas} className={tool} onPointerDown={down} onPointerMove={move}/>
     <aside className="ex-card" ref={exerciseCard} data-gerald-id="100"><div className="ex-label"><i/>{title.toUpperCase()}</div>{lines.map((line, index) => <p key={index} data-gerald-id={101 + index}>{line}</p>)}</aside>
     <div className="gerald-text-layer">
-      {geraldTexts.map((item,index) => <div key={item.id} className="gerald-write" data-gerald-id={300+index} style={{left: item.x, top: item.y, fontSize: item.size}}>
+      {geraldTexts.map((item,index) => <div key={item.id} className="gerald-write" data-gerald-id={300+index} style={{left: item.x, top: item.y, fontSize: item.size, color: item.color}}>
         {item.html ? <span dangerouslySetInnerHTML={{__html: item.html}}/> : item.parts
           ? item.parts.map((part, partIndex) => part.html
             ? <span key={partIndex} dangerouslySetInnerHTML={{__html: part.html}}/>
@@ -724,29 +726,37 @@ function Board() {
       </div>)}
     </div>
     <svg className="gerald-marks" width={innerWidth} height={innerHeight}>
-      <defs><marker id="gerald-arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M 0 0 L 10 5 L 0 10 z"/></marker></defs>
+      <defs>
+        <marker id="gerald-arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M 0 0 L 10 5 L 0 10 z"/></marker>
+        {marks.filter((mark) => mark.kind === "arrow" && mark.color).map((mark) =>
+          <marker key={mark.id} id={`gerald-arrow-${mark.id}`} viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+            <path d="M 0 0 L 10 5 L 0 10 z" style={{fill: mark.color!}}/>
+          </marker>)}
+      </defs>
       {marks.filter((mark) => mark.kind === "circle").map((mark) =>
-        <ellipse key={mark.id} cx={mark.x} cy={mark.y} rx={mark.w / 2} ry={mark.h / 2}/>)}
+        <ellipse key={mark.id} data-gerald-mark-kind="circle" cx={mark.x} cy={mark.y} rx={mark.w / 2} ry={mark.h / 2} style={{stroke: mark.color ?? undefined}}/>)}
       {marks.filter((mark) => mark.kind === "underline").map((mark) =>
-        <line key={mark.id} x1={mark.x - mark.w / 2} x2={mark.x + mark.w / 2} y1={mark.y + mark.h / 2} y2={mark.y + mark.h / 2}/>)}
+        <line key={mark.id} data-gerald-mark-kind="underline" x1={mark.x - mark.w / 2} x2={mark.x + mark.w / 2} y1={mark.y + mark.h / 2} y2={mark.y + mark.h / 2} style={{stroke: mark.color ?? undefined}}/>)}
       {marks.filter((mark) => mark.kind === "point").map((mark) =>
-        <g key={mark.id}><circle cx={mark.x} cy={mark.y} r="5"/><text x={mark.x + 8} y={mark.y - 8}>{mark.text}</text></g>)}
+        <g key={mark.id} data-gerald-mark-kind="point"><circle cx={mark.x} cy={mark.y} r="5" style={{fill: mark.color ?? undefined}}/><text x={mark.x + 8} y={mark.y - 8} style={{fill: mark.color ?? undefined}}>{mark.text}</text></g>)}
       {marks.filter((mark) => mark.kind === "highlight").map((mark) =>
-        <rect key={mark.id} x={mark.x - mark.w / 2} y={mark.y - mark.h / 2} width={mark.w} height={mark.h}/>)}
+        <rect key={mark.id} data-gerald-mark-kind="highlight" x={mark.x - mark.w / 2} y={mark.y - mark.h / 2} width={mark.w} height={mark.h} style={{fill: mark.fill ?? undefined, stroke: mark.color ?? undefined}}/>)}
       {marks.filter((mark) => mark.kind === "arrow").map((mark) =>
-        <line key={mark.id} x1={mark.x} y1={mark.y} x2={mark.x + mark.w} y2={mark.y + mark.h} markerEnd="url(#gerald-arrow)"/>)}
+        <line key={mark.id} data-gerald-mark-kind="arrow" x1={mark.x} y1={mark.y} x2={mark.x + mark.w} y2={mark.y + mark.h} markerEnd={mark.color ? `url(#gerald-arrow-${mark.id})` : "url(#gerald-arrow)"} style={{stroke: mark.color ?? undefined}}/>)}
       {marks.filter((mark) => (mark.kind === "note" || mark.kind === "tip") && mark.leader && mark.target).map((mark) => {
         const line = annotationLeader(mark.target!, {x: mark.x, y: mark.y, w: mark.w, h: mark.h});
-        return <line key={`${mark.id}-leader`} x1={line.x1} y1={line.y1} x2={line.x2} y2={line.y2}/>;
+        return <line key={`${mark.id}-leader`} x1={line.x1} y1={line.y1} x2={line.x2} y2={line.y2} style={{stroke: mark.color ?? undefined}}/>;
       })}
       {marks.filter((mark) => mark.kind === "note").map((mark) =>
         <foreignObject key={mark.id} data-gerald-note={mark.id} x={mark.x} y={mark.y} width={mark.w} height={mark.h}>
-          <div className="gerald-note" data-gerald-note={mark.id}>{mark.text}</div>
+          <div className="gerald-note" data-gerald-note={mark.id} data-gerald-mark-kind="note"
+            style={mark.color ? {color: mark.color, border: `1px solid ${mark.color}`} : undefined}>{mark.text}</div>
         </foreignObject>)}
     </svg>
     {marks.filter((mark) => mark.kind === "tip").map((mark) =>
       <div key={mark.id} className="gerald-tip" data-gerald-tip={mark.id}
-        style={{left: mark.x, top: mark.y, width: mark.w, height: mark.h}}>{mark.text}</div>)}
+        data-gerald-mark-kind="tip"
+        style={{left: mark.x, top: mark.y, width: mark.w, height: mark.h, color: mark.color ?? undefined, border: mark.color ? `1px solid ${mark.color}` : undefined}}>{mark.text}</div>)}
     {cursor&&<div className="gerald-pointer" style={{left:cursor.x,top:cursor.y}}>➤{cursor.text&&<span>{cursor.text}</span>}</div>}
     {plotVisible && plotData && <PlotWindow key={plotRevision} data={plotData} initialBox={plotBox}
       onClose={() => setPlotVisible(false)} onBoxChange={setPlotBox}/>}

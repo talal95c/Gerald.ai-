@@ -35,6 +35,23 @@ WEB_TOOL_NAMES = {
     "tip",
     "open_board",
 }
+INTENT_TOOL_NAMES = {
+    "write",
+    "write_math",
+    "underline",
+    "circle",
+    "highlight",
+    "arrow",
+    "point",
+    "note",
+    "tip",
+}
+INTENT_VALUES = ["correction", "valide", "remarque"]
+COLOR_GUIDANCE = (
+    "Code couleur : rouge (intent=correction) pour signaler une erreur ou la correction, "
+    "vert (intent=valide) pour ce qui est juste, bleu (intent=remarque) pour une remarque "
+    "ou un rappel de méthode ; l'écriture normale reste noire."
+)
 TD_EXERCISES = [
     ("exercice-1", "Exercice 1", ["Résous dans ℝ : x² − 5x + 6 = 0"]),
     ("exercice-2", "Exercice 2", ["Résous dans ℝ : 2x² + 3x − 2 = 0"]),
@@ -69,6 +86,13 @@ def _web_tools() -> list[dict]:
         schema = deepcopy(tool["parameters"])
         preserve_targets(schema)
         description = tool["description"]
+        if tool["name"] in INTENT_TOOL_NAMES:
+            schema.setdefault("properties", {})["intent"] = {
+                "type": "string",
+                "enum": INTENT_VALUES,
+                "description": "Optional semantic color intent; omit to keep the default color.",
+            }
+            description += f" {COLOR_GUIDANCE}"
         if tool["name"] == "plot":
             description += (
                 " Pour toute demande de courbe ou de graphe, appelle plot avec l'expression; "
@@ -98,7 +122,7 @@ def _web_tools() -> list[dict]:
             {
                 "type": "function",
                 "name": "tip",
-                "description": "Show a short spoken hint in a bubble next to Gerald's pointer.",
+                "description": f"Show a short spoken hint in a bubble next to Gerald's pointer. {COLOR_GUIDANCE}",
                 "parameters": {
                     "type": "object",
                     "properties": {
@@ -107,6 +131,11 @@ def _web_tools() -> list[dict]:
                         "y": {"type": "number"},
                         "element_id": {"type": "integer"},
                         "target_text": {"type": "string"},
+                        "intent": {
+                            "type": "string",
+                            "enum": INTENT_VALUES,
+                            "description": "Optional semantic color intent; omit to keep the default color.",
+                        },
                     },
                     "required": ["text"],
                     "additionalProperties": False,
@@ -166,14 +195,15 @@ def session_instructions(title: str = DEFAULT_TITLE, lines: list[str] | None = N
         "Δ = b² − 4ac, sans calculer sa valeur ni résoudre l’équation. Dis ensuite "
         "« à toi de jouer » et laisse l’élève faire ses erreurs. Ne donne jamais la "
         "valeur de Δ ni les racines; s’il se trompe, utilise une seule underline ou circle "
-        "sur le terme fautif et n'ajoute pas de note ou de tip. "
+        "(intent=correction) sur le terme fautif et n'ajoute pas de note ou de tip. "
         "Pour toute demande de courbe ou de graphe, appelle plot avec l’expression correspondante; "
         "ne dessine jamais une courbe à la main avec draw_path; utilise une multiplication explicite, "
         "par exemple x**2-5*x+6, et ajoute dans points les racines et le sommet connus. "
         "Même après avoir tracé une courbe, ne prononce pas les racines ni leur approximation; "
         "invite l'élève à les lire lui-même. "
         "Quand il a résolu l’exercice, termine par « bravo » et un bref récapitulatif "
-        "de la méthode."
+        "de la méthode. "
+        + COLOR_GUIDANCE
     )
     return f"{prompt}\n{td_context}\n{board_context}\n{td_guidance}{board_guidance}{tutor_guidance}"
 
