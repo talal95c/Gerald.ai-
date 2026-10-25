@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+from concurrent.futures import ThreadPoolExecutor
 import logging
 import sys
 import threading
@@ -32,11 +33,10 @@ def _key_name(key: object) -> str:
 
 def main() -> int:
     set_physical_dpi_awareness()
-    from PyQt6.QtCore import QObject, QRunnable, QThreadPool, QTimer, pyqtSignal, pyqtSlot
+    from PyQt6.QtCore import QObject, pyqtSignal
     from PyQt6.QtGui import QIcon
     from PyQt6.QtWidgets import (
         QApplication,
-        QInputDialog,
         QMenu,
         QMessageBox,
         QStyle,
@@ -46,6 +46,7 @@ def main() -> int:
 
     from gerald.audio.mic import Microphone
     from gerald.brain.realtime import RealtimeClient
+    from gerald.capture.session import CaptureRequest
     from gerald.capture.screen import capture_screen
     from gerald.overlay.window import OverlayWindow
     from gerald.perception.elements import collect_elements, serialize_context
@@ -65,22 +66,8 @@ def main() -> int:
         capture_ready = pyqtSignal(object)
         capture_failed = pyqtSignal(str)
         mic_level = pyqtSignal(float)
-
-    class CaptureTask(QRunnable):
-        def __init__(self, max_width: int, bridge: Bridge) -> None:
-            super().__init__()
-            self.max_width = max_width
-            self.bridge = bridge
-
-        @pyqtSlot()
-        def run(self) -> None:
-            try:
-                capture = capture_screen(self.max_width)
-                elements = collect_elements(capture)
-                context = serialize_context(elements, capture.image_width, capture.image_height)
-                self.bridge.capture_ready.emit((capture, elements, context))
-            except Exception as error:
-                self.bridge.capture_failed.emit(str(error))
+        output_level = pyqtSignal(float)
+        audio_unavailable = pyqtSignal()
 
     bridge = Bridge()
     overlay = OverlayWindow()
@@ -94,6 +81,8 @@ def main() -> int:
     )
     client.on_event = bridge.realtime_event.emit
     client.on_commands = bridge.commands.emit
+    client.player.on_unavailable = bridge.audio_unavailable.emit
+    client.player.on_level = bridge.output_level.emit
 
     loop = asyncio.new_event_loop()
 
@@ -123,9 +112,10 @@ def main() -> int:
         "started": 0.0,
         "audio_bytes": 0,
         "capture": None,
+        "capture_request": None,
+        "capture_generation": 0,
         "connected": False,
         "typed": False,
-        "hold_pending": False,
         "response_active": False,
     }
     required = {part.strip().lower() for part in settings.hotkey.split("+") if part.strip()}
@@ -136,7 +126,14 @@ def main() -> int:
         QMessageBox.critical(None, "Gerald", "GERALD_HOTKEY doit être un raccourci de maintien, par exemple ctrl+shift.")
         return 1
     typed_hotkey = required | {"enter"}
-    pool = QThreadPool.globalInstance()
+    capture_executor = ThreadPoolExecutor(max_workers=1, thread_name_prefix="gerald-capture")
+
+    def collect_capture():
+        capture = capture_screen(settings.max_image_width)
+        elements = collect_elements(capture)
+        context = serialize_context(elements, capture.image_width, capture.image_height)
+        return capture, elements, context
+
     def on_microphone_audio(audio: bytes, level: float) -> None:
         bridge.mic_level.emit(level)
         if not app_state["active"] or not app_state["connected"]:
@@ -145,17 +142,53 @@ def main() -> int:
         if level > 0.015:
             app_state["audio_bytes"] += len(audio)
 
-    mic = Microphone(on_microphone_audio)
+    audio_capability = {"available": True}
+
+    def audio_unavailable() -> None:
+        audio_capability["available"] = False
+        overlay.set_status("error")
+
+    bridge.audio_unavailable.connect(audio_unavailable)
+    mic = Microphone(on_microphone_audio, bridge.audio_unavailable.emit)
+    audio_capability["available"] = mic.available and client.player.available
+    if not audio_capability["available"]:
+        overlay.set_status("error")
 
     def begin_capture(typed: bool = False, question: str = "") -> None:
         app_state["typed"] = typed
         app_state["question"] = question
         app_state["released"] = False
         app_state["capture"] = None
+        previous_request = app_state.get("capture_request")
+        if previous_request is not None:
+            previous_request.cancel()
+        app_state["capture_generation"] += 1
+        generation = app_state["capture_generation"]
         overlay.clear()
         overlay.hide()
         app.processEvents()
-        pool.start(CaptureTask(settings.max_image_width, bridge))
+        request = CaptureRequest(capture_executor, collect_capture)
+        request.start_on_press()
+        app_state["capture_request"] = request
+        app_state["capture_generation_for_request"] = generation
+
+    def await_capture_after_release() -> None:
+        request = app_state.get("capture_request")
+        if request is None:
+            return
+        generation = app_state["capture_generation_for_request"]
+
+        async def wait_for_capture() -> None:
+            try:
+                captured = await request.wait_on_release()
+            except asyncio.CancelledError:
+                return
+            except Exception as error:
+                bridge.capture_failed.emit(str(error))
+                return
+            bridge.capture_ready.emit((generation, captured))
+
+        asyncio.run_coroutine_threadsafe(wait_for_capture(), loop)
 
     def start_hold() -> None:
         if app_state["active"]:
@@ -166,7 +199,7 @@ def main() -> int:
         app_state.update(active=True, started=time.monotonic(), audio_bytes=0, released=False, typed=False)
         schedule(client.start_turn())
         overlay.clear()
-        overlay.set_status("listening")
+        overlay.set_status("listening" if audio_capability["available"] else "error")
         try:
             mic.start()
         except RuntimeError as error:
@@ -188,7 +221,7 @@ def main() -> int:
         if not has_audio and not question and duration < 0.3:
             question = "explique ce que je regarde"
         app_state["active"] = False
-        overlay.set_status("thinking")
+        overlay.set_status("thinking" if audio_capability["available"] else "error")
         schedule(client.finish_turn(capture, elements, context, question, has_audio))
 
     def release_hold() -> None:
@@ -196,89 +229,107 @@ def main() -> int:
             return
         mic.stop()
         app_state["released"] = True
-        send_captured_if_ready()
+        await_capture_after_release()
 
     def open_typed_question() -> None:
-        app_state["hold_pending"] = False
         if app_state["active"] and app_state["typed"]:
             return
         if not app_state["connected"]:
             bridge.capture_failed.emit("Gerald attend la connexion Realtime. Réessayez dans un instant.")
             return
-        if app_state["active"]:
+        already_active = app_state["active"]
+        if already_active:
             mic.stop()
-            app_state["capture"] = None
-        app_state.update(active=True, started=time.monotonic(), audio_bytes=0, released=False, typed=True)
-        schedule(client.start_turn())
-        overlay.set_status("thinking")
-        begin_capture(True)
-        question, accepted = QInputDialog.getText(None, "Demander à Gerald", "Votre question :")
-        if accepted and question.strip():
-            app_state["question"] = question.strip()
-            app_state["released"] = True
-            send_captured_if_ready()
+            app_state.update(started=time.monotonic(), audio_bytes=0, released=False, typed=True)
         else:
-            app_state.update(active=False, released=False, capture=None)
-            schedule(client.cancel())
-            overlay.show()
-            overlay.set_status("idle")
+            app_state.update(active=True, started=time.monotonic(), audio_bytes=0, released=False, typed=True)
+            schedule(client.start_turn())
+        overlay.set_status("thinking" if audio_capability["available"] else "error")
+        if not already_active:
+            begin_capture(True)
+        overlay.open_text_input(submit_typed_question, cancel_typed_question)
 
-    def schedule_hold() -> None:
-        if app_state["hold_pending"]:
+    def submit_typed_question(question: str) -> None:
+        if not question.strip() or not app_state["active"] or not app_state["typed"]:
             return
-        app_state["hold_pending"] = True
+        app_state["question"] = question.strip()
+        app_state["released"] = True
+        overlay.close_text_input()
+        await_capture_after_release()
 
-        def start_if_still_held() -> None:
-            if not app_state["hold_pending"]:
-                return
-            app_state["hold_pending"] = False
-            if required <= app_state["pressed"] and "enter" not in app_state["pressed"]:
-                start_hold()
-
-        QTimer.singleShot(120, start_if_still_held)
+    def cancel_typed_question() -> None:
+        if not app_state["active"] or not app_state["typed"]:
+            return
+        request = app_state.get("capture_request")
+        if request is not None:
+            request.cancel()
+        app_state["capture_generation"] += 1
+        app_state.update(active=False, released=False, capture=None, capture_request=None)
+        schedule(client.cancel())
+        overlay.close_text_input()
+        overlay.show()
+        overlay.set_status("idle" if audio_capability["available"] else "error")
 
     def key_press(name: str) -> None:
         app_state["pressed"].add(name)
+        if name == "esc" and app_state["active"] and app_state["typed"]:
+            cancel_typed_question()
+            return
         if name == "esc" and (app_state["active"] or app_state["response_active"]):
             mic.stop()
             app_state.update(active=False, released=True, response_active=False)
+            request = app_state.get("capture_request")
+            if request is not None:
+                request.cancel()
+            app_state["capture_generation"] += 1
             app_state["capture"] = None
             schedule(client.cancel())
             overlay.clear()
+            if not audio_capability["available"]:
+                overlay.set_status("error")
             return
         if typed_hotkey <= app_state["pressed"]:
             open_typed_question()
         elif required <= app_state["pressed"] and "enter" not in app_state["pressed"]:
-            schedule_hold()
+            start_hold()
 
     def key_release(name: str) -> None:
         app_state["pressed"].discard(name)
         if app_state["active"] and required - app_state["pressed"]:
             release_hold()
-        elif app_state["hold_pending"] and required - app_state["pressed"]:
-            app_state["hold_pending"] = False
-            start_hold()
-            release_hold()
 
     bridge.key_down.connect(key_press)
     bridge.key_up.connect(key_release)
-    def capture_ready(captured) -> None:
-        if app_state["active"]:
+    def capture_ready(result) -> None:
+        generation, captured = result
+        if generation == app_state["capture_generation"] and app_state["active"]:
             app_state["capture"] = captured
+            overlay.set_capture(captured[0])
             overlay.show()
             send_captured_if_ready()
 
     bridge.capture_ready.connect(capture_ready)
     bridge.capture_failed.connect(
-        lambda message: (
-            overlay.show(),
-            overlay.set_status("idle"),
-            logger.warning("Capture/audio error: %s", message),
+            lambda message: (
+                overlay.show(),
+                overlay.set_status("idle" if audio_capability["available"] else "error"),
+                logger.warning("Capture/audio error: %s", message),
             QMessageBox.warning(None, "Gerald", message),
         )
     )
     bridge.commands.connect(overlay.add_commands)
-    bridge.mic_level.connect(lambda level: overlay.set_status("listening", level))
+    bridge.mic_level.connect(
+        lambda level: overlay.set_status(
+            "listening" if audio_capability["available"] else "error",
+            mic_level=level,
+        )
+    )
+    bridge.output_level.connect(
+        lambda level: overlay.set_status(
+            "speaking" if audio_capability["available"] else "error",
+            output_level=level,
+        )
+    )
 
     caption = {"text": ""}
 
@@ -287,13 +338,13 @@ def main() -> int:
         if event_type == "session.updated":
             app_state["connected"] = True
         elif event_type == "response.created":
-            overlay.set_status("thinking")
+            overlay.set_status("thinking" if audio_capability["available"] else "error")
             caption["text"] = ""
             app_state["response_active"] = True
         elif event_type in {"response.output_audio.delta", "response.audio.delta"}:
-            overlay.set_status("speaking")
+            overlay.set_status("speaking" if audio_capability["available"] else "error")
         elif event_type in {"response.output_audio.done", "response.audio.done", "response.done"}:
-            overlay.set_status("idle")
+            overlay.set_status("idle" if audio_capability["available"] else "error")
             app_state["response_active"] = client._response_active
         elif event_type == "connection.lost":
             app_state["connected"] = False
@@ -333,6 +384,7 @@ def main() -> int:
         cleanup_done["value"] = True
         listener.stop()
         mic.stop()
+        capture_executor.shutdown(wait=False, cancel_futures=True)
         overlay.close()
         try:
             asyncio.run_coroutine_threadsafe(client.close(), loop).result(timeout=2)

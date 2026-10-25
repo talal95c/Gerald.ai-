@@ -14,6 +14,7 @@ TARGET_SCHEMA = {
         "element_id": {"type": "integer"},
         "x": {"type": "number"},
         "y": {"type": "number"},
+        "text": {"type": "string"},
     },
     "additionalProperties": False,
 }
@@ -62,7 +63,12 @@ TOOL_SCHEMAS = [
     _schema("link", "Connect two targets with a labeled line.", {"a": TARGET_SCHEMA, "b": TARGET_SCHEMA, "label": {"type": "string"}}, ["a", "b"]),
     _targeted_schema("underline", "Underline a target or image-coordinate line.", {"w": {"type": "number"}}),
     _targeted_schema("highlight", "Highlight a target or image-coordinate region.", {"w": {"type": "number"}, "h": {"type": "number"}}),
-    _targeted_schema("note", "Add a short note next to a target.", {"text": {"type": "string"}}, ["text"]),
+    _targeted_schema(
+        "note",
+        "Add a short note next to a target; target_text can locate its target by text.",
+        {"text": {"type": "string"}, "target_text": {"type": "string"}},
+        ["text"],
+    ),
     _schema("clear", "Clear all drawing marks.", {}, []),
 ]
 
@@ -121,10 +127,8 @@ def _target(args: dict[str, Any], key: str, capture: Capture, elements: list[Ele
     value = args.get(key)
     if not isinstance(value, dict):
         raise ValueError(f"{key} must be a target object")
-    if set(value) - {"element_id", "x", "y"}:
+    if set(value) - {"element_id", "x", "y", "text"}:
         raise ValueError(f"{key} contains unexpected properties")
-    if "element_id" in value and ({"x", "y"} & value.keys()):
-        raise ValueError(f"{key} must use element_id or x and y")
     return resolve_target(value, capture, elements)
 
 
@@ -134,17 +138,20 @@ def _validate_root_target(
     optional: set[str] | None = None,
     required: set[str] | None = None,
 ) -> None:
-    target_fields = {"element_id", "x", "y"}
+    target_fields = {"element_id", "x", "y", "text"}
     allowed = target_fields | (optional or set())
     extra = set(args) - allowed
     if extra:
         raise ValueError(f"unexpected argument: {sorted(extra)[0]}")
     if required and not required <= args.keys():
         raise ValueError(f"{sorted(required - args.keys())[0]} is required")
-    if "element_id" in args and ({"x", "y"} & args.keys()):
-        raise ValueError(f"{name} must use element_id or x and y")
-    if "element_id" not in args and not {"x", "y"} <= args.keys():
-        raise ValueError("target requires element_id or x and y")
+    has_target = (
+        "element_id" in args
+        or (isinstance(args.get("text"), str) and bool(args.get("text")))
+        or {"x", "y"} <= args.keys()
+    )
+    if not has_target:
+        raise ValueError("target requires element_id, text, or x and y")
 
 
 def _center(rect: ScreenRect) -> tuple[int, int]:
@@ -178,11 +185,23 @@ def execute_tool(
                 "circle": {"w", "h"},
                 "underline": {"w"},
                 "highlight": {"w", "h"},
-                "note": {"text"},
+                "note": {"text", "target_text"},
             }[name]
             required = {"text"} if name == "note" else set()
             _validate_root_target(args, name, optional, required)
-            rect = resolve_target(args, capture, elements)
+            target_args = args
+            if name == "note":
+                target_args = {
+                    key: value
+                    for key, value in args.items()
+                    if key in {"element_id", "x", "y"}
+                }
+                target_text = args.get("target_text")
+                if target_text is None and not target_args:
+                    target_text = args.get("text")
+                if target_text is not None:
+                    target_args["text"] = target_text
+            rect = resolve_target(target_args, capture, elements)
             if name == "point":
                 label = args.get("label", "")
                 if not isinstance(label, str):

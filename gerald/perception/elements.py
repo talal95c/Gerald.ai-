@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+from functools import lru_cache
 import logging
 import os
 import shutil
@@ -24,6 +25,7 @@ class Element:
     name: str
     rect: Rect
     source: ElementSource
+    word_boxes: tuple[tuple[str, Rect], ...] = ()
 
 
 class ElementProvider(Protocol):
@@ -104,10 +106,20 @@ class OCRProvider:
         try:
             if os.name == "nt":
                 return self._windows_ocr(capture)
+            started = time.monotonic()
             import pytesseract
 
+            language = _tesseract_languages()
+            timeout = 0.7 - (time.monotonic() - started)
+            if timeout <= 0:
+                return []
+            image = capture.full_image or capture.image
             lines = pytesseract.image_to_data(
-                capture.image, output_type=pytesseract.Output.DICT, config="--psm 6"
+                image,
+                output_type=pytesseract.Output.DICT,
+                config="--psm 6",
+                lang=language,
+                timeout=timeout,
             )
             grouped: dict[tuple[int, int, int], list[tuple[str, tuple[int, int, int, int]]]] = {}
             for index, word in enumerate(lines["text"]):
@@ -132,19 +144,17 @@ class OCRProvider:
                 top = min(rect[1] for _word, rect in words)
                 right = max(rect[0] + rect[2] for _word, rect in words)
                 bottom = max(rect[1] + rect[3] for _word, rect in words)
-                screen_left, screen_top = capture.img_to_screen(left, top)
                 result.append(
                     Element(
                         index,
                         "Text",
                         " ".join(word for word, _rect in words),
-                        (
-                            round(screen_left),
-                            round(screen_top),
-                            round((right - left) / capture.scale),
-                            round((bottom - top) / capture.scale),
-                        ),
+                        capture.full_rect_to_screen((left, top, right - left, bottom - top)),
                         "ocr",
+                        tuple(
+                            (word, capture.full_rect_to_screen(rect))
+                            for word, rect in words
+                        ),
                     )
                 )
             return result
@@ -159,7 +169,7 @@ class OCRProvider:
             from winsdk.windows.media.ocr import OcrEngine
             from winsdk.windows.storage.streams import DataWriter, InMemoryRandomAccessStream
 
-            png = capture.image
+            png = capture.full_image or capture.image
             import io
 
             buffer = io.BytesIO()
@@ -186,14 +196,30 @@ class OCRProvider:
                 top = min(word.bounding_rect.y for word in words)
                 right = max(word.bounding_rect.x + word.bounding_rect.width for word in words)
                 bottom = max(word.bounding_rect.y + word.bounding_rect.height for word in words)
-                x, y = capture.img_to_screen(left, top)
+                word_boxes = tuple(
+                    (
+                        str(word.text),
+                        capture.full_rect_to_screen(
+                            (
+                                word.bounding_rect.x,
+                                word.bounding_rect.y,
+                                word.bounding_rect.width,
+                                word.bounding_rect.height,
+                            )
+                        ),
+                    )
+                    for word in words
+                )
                 output.append(
                     Element(
                         index,
                         "Text",
                         str(line.text),
-                        (round(x), round(y), round((right - left) / capture.scale), round((bottom - top) / capture.scale)),
+                        capture.full_rect_to_screen(
+                            (left, top, right - left, bottom - top)
+                        ),
                         "ocr",
+                        word_boxes,
                     )
                 )
             return output
@@ -234,8 +260,25 @@ def collect_elements(
     final = []
     for index, element in enumerate(result[:300]):
         image_rect = capture.rect_to_image(element.rect)
-        final.append(Element(index, element.role, element.name, image_rect, element.source))
+        word_boxes = tuple(
+            (word, capture.rect_to_image(rect))
+            for word, rect in element.word_boxes
+        )
+        final.append(Element(index, element.role, element.name, image_rect, element.source, word_boxes))
     return final
+
+
+@lru_cache(maxsize=1)
+def _tesseract_languages() -> str:
+    try:
+        import pytesseract
+
+        available = set(pytesseract.get_languages(config="", timeout=0.2))
+    except Exception:
+        return "eng"
+    preferred = [language for language in ("fra", "eng") if language in available]
+    fallback = sorted(available - {"osd"})
+    return "+".join(preferred) or (fallback[0] if fallback else "eng")
 
 
 def active_window_context() -> tuple[str, str]:

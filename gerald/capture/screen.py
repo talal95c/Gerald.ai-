@@ -21,6 +21,7 @@ class Capture:
     scale: float
     image: Image.Image
     data_url: str
+    full_image: Image.Image | None = None
 
     @property
     def image_width(self) -> int:
@@ -52,21 +53,45 @@ class Capture:
             round(height * self.scale),
         )
 
+    def full_img_to_screen(self, x: float, y: float) -> tuple[float, float]:
+        image = self.full_image or self.image
+        scale_x = image.width / max(1, self.monitor.width)
+        scale_y = image.height / max(1, self.monitor.height)
+        return (
+            self.monitor.left + x / scale_x,
+            self.monitor.top + y / scale_y,
+        )
+
+    def full_rect_to_screen(
+        self,
+        rect: tuple[float, float, float, float],
+    ) -> tuple[int, int, int, int]:
+        x, y, width, height = rect
+        screen_x, screen_y = self.full_img_to_screen(x, y)
+        image = self.full_image or self.image
+        return (
+            round(screen_x),
+            round(screen_y),
+            round(width * self.monitor.width / max(1, image.width)),
+            round(height * self.monitor.height / max(1, image.height)),
+        )
+
 
 def capture_from_image(
     image: Image.Image,
     monitor: MonitorRect,
     max_width: int = 1280,
 ) -> Capture:
-    source = image.convert("RGB")
-    scale = min(1.0, max_width / source.width)
+    full_image = image.convert("RGB")
+    source = full_image
+    scale = min(1.0, max_width / full_image.width)
     if scale < 1.0:
-        size = (max(1, round(source.width * scale)), max(1, round(source.height * scale)))
-        source = source.resize(size, Image.Resampling.LANCZOS)
+        size = (max(1, round(full_image.width * scale)), max(1, round(full_image.height * scale)))
+        source = full_image.resize(size, Image.Resampling.LANCZOS)
     output = io.BytesIO()
     source.save(output, format="JPEG", quality=80, optimize=True)
     encoded = base64.b64encode(output.getvalue()).decode("ascii")
-    return Capture(monitor, scale, source, f"data:image/jpeg;base64,{encoded}")
+    return Capture(monitor, scale, source, f"data:image/jpeg;base64,{encoded}", full_image)
 
 
 def capture_screen(max_width: int = 1280) -> Capture:
