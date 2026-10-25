@@ -64,7 +64,8 @@ MOCK_BRIDGE = """
       const normalized = String(question).normalize("NFD").replace(/[\u0300-\u036f]/g, "").toLowerCase();
       const match = normalized.match(/(?:exercice|exo)\s*(\d)/);
       const number = Math.min(4, Math.max(1, Number(match?.[1] || 1)));
-      const equations = ["x² − 5x + 6 = 0", "2x² + 3x − 2 = 0", "x² − 4x + 1 = 0", "x² − x − 6 = 0"];
+      const coefficients = ["a = 1, b = −5 et c = 6", "a = 2, b = 3 et c = −2", "a = 1, b = −4 et c = 1", "a = −1, b = 1 et c = 6"];
+      const equations = ["x² − 5x + 6 = 0", "2x² + 3x − 2 = 0", "x² − 4x + 1", "−x² + x + 6"];
       const broad = /exercice|exo|td|methode|comprends|bloque/.test(normalized);
       const text = /delta|discriminant/.test(normalized)
         ? "Le discriminant se calcule avec Δ = b² − 4ac. Ici, Δ = 25 − 24 = 1."
@@ -75,7 +76,7 @@ MOCK_BRIDGE = """
             : /signe/.test(normalized)
               ? "Le signe du trinôme est celui de a à l’extérieur des racines. Pour l’exercice 4, elles sont −2 et 3."
               : broad
-                ? `Ici, ${equations[number - 1]} est un polynôme du second degré. Viens, on va au tableau pour l’exercice ${number}.`
+                ? `Ici, ${equations[number - 1]} est un polynôme du second degré : on ne l’isole pas comme une fonction affine. Repère d’abord ${coefficients[number - 1]}, puis calcule Δ = b² − 4ac. Viens, on va au tableau, je t’explique pas à pas.`
                 : "Je regarde ça avec toi : dis-moi sur quel exercice tu bloques, ou ouvre le TD.";
       const td = broad;
       setTimeout(() => {

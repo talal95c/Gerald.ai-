@@ -93,7 +93,7 @@ function Folders({docs, hotkey}: {docs: AppState["documents"]; hotkey: string}) 
 }
 
 function App() {
-  const [mode, setMode] = useState("greeting");
+  const [mode, setMode] = useState(window.qt || !/(td|board|fiche)\.html$/.test(location.pathname) ? "greeting" : "collapsed");
   const [state, setState] = useState(emptyState);
   const [status, setStatus] = useState("idle");
   const [tab, setTab] = useState("Documents");
