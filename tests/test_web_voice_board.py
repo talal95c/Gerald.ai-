@@ -153,6 +153,8 @@ def test_session_posts_sdp_and_filtered_realtime_config(monkeypatch, server):
     assert len(tool_names) == len(session["tools"])
     tools_by_name = {tool["name"]: tool for tool in session["tools"]}
     assert "write_math" in tools_by_name["write"]["description"]
+    assert "y" not in tools_by_name["write_math"]["parameters"].get("required", [])
+    assert "from" not in tools_by_name["arrow"]["parameters"].get("required", [])
     assert "LaTeX" in tools_by_name["write_math"]["description"]
     assert r"\Delta = b^2 - 4ac" in tools_by_name["write_math"]["description"]
     assert "le target_text de to" in tools_by_name["arrow"]["description"]
