@@ -10,6 +10,7 @@ const tabs = ["Tableau", "Documents", "Historique", "Raccourcis"];
 type Recap = {path: string; title: string; created_at: string};
 type NotchState = AppState & {recaps?: Recap[]; recap_error?: string | null};
 type HistoryMessage = {role: string; text: string; created_at?: string};
+type NotchHintController = {current: (text: string) => void};
 const emptyState: NotchState = {
   greeting: "Bonjour.", hotkey_label: "CTRL + SHIFT", documents: [],
   conversations: [], session_open: false, recap_pending: false, last_exercise: null, recaps: []
@@ -136,7 +137,7 @@ function Folders({docs, recaps, hotkey, uploadError, onDocumentOpen, onBack}: {
   </div>;
 }
 
-function App({onTalk}: {onTalk?: (pressed: boolean) => void}) {
+function App({onTalk, hintController}: {onTalk?: (pressed: boolean) => void; hintController: NotchHintController}) {
   const [mode, setMode] = useState(window.qt || !/(td|board|fiche)\.html$/.test(location.pathname) ? "greeting" : "collapsed");
   const [state, setState] = useState<NotchState>(emptyState);
   const [status, setStatus] = useState("idle");
@@ -144,6 +145,18 @@ function App({onTalk}: {onTalk?: (pressed: boolean) => void}) {
   const [recap, setRecap] = useState("");
   const [historyMessages, setHistoryMessages] = useState<HistoryMessage[] | null>(null);
   const timer = useRef<number | null>(null);
+  const [hintText, setHintText] = useState("");
+  const [hintVisible, setHintVisible] = useState(false);
+  const hintTimers = useRef<number[]>([]);
+  hintController.current = text => {
+    hintTimers.current.forEach(timeout => window.clearTimeout(timeout));
+    setHintText(text);
+    setHintVisible(true);
+    hintTimers.current = [
+      window.setTimeout(() => setHintVisible(false), 2240),
+      window.setTimeout(() => setHintText(""), 2400),
+    ];
+  };
   const go = (next: string) => { setMode(next); bridge.setMode(next); };
   const clear = () => { if (timer.current !== null) window.clearTimeout(timer.current); };
   const later = (next: string, ms: number) => { clear(); timer.current = window.setTimeout(() => go(next), ms); };
@@ -169,6 +182,10 @@ function App({onTalk}: {onTalk?: (pressed: boolean) => void}) {
     document.body.classList.toggle("qt-notch", Boolean(window.qt));
     document.body.classList.toggle("notch-document-open", mode === "document");
   }, [mode]);
+  useEffect(() => () => {
+    hintTimers.current.forEach(timeout => window.clearTimeout(timeout));
+    hintController.current = () => undefined;
+  }, [hintController]);
   const pick = (name: string) => {
     if (name === "Tableau") {
       bridge.openBoard(
@@ -185,6 +202,7 @@ function App({onTalk}: {onTalk?: (pressed: boolean) => void}) {
   };
   const active = status !== "idle";
   const pillLabel = active ? statusText[status] ?? status : mode === "greeting" ? state.greeting : `Maintiens ${state.hotkey_label}`;
+  const hintElement = <div className={`notch-hint${hintVisible ? " visible" : ""}`} role="status" aria-live="polite">{hintText}</div>;
   if (mode === "greeting" || mode === "collapsed") return onTalk
     ? <div className={`notch pill-notch notch-pill-controls m-${mode} s-${status}`} role="button" tabIndex={0}
       onClick={()=>{clear();go("panel");}}
@@ -196,6 +214,7 @@ function App({onTalk}: {onTalk?: (pressed: boolean) => void}) {
         onPointerUp={()=>onTalk(false)} onPointerCancel={()=>onTalk(false)} onLostPointerCapture={()=>onTalk(false)}>
         <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3a3 3 0 0 0-3 3v5a3 3 0 0 0 6 0V6a3 3 0 0 0-3-3ZM6 11a6 6 0 0 0 12 0M12 17v4m-3 0h6" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round"/></svg>
       </button>
+      {hintElement}
     </div>
     : <button className={`notch pill-notch m-${mode} s-${status}`} onClick={()=>{clear();go("panel");}}>
       <Orb status={status} size={24}/><span key={pillLabel}><Reveal text={pillLabel}/></span>
@@ -233,9 +252,12 @@ function App({onTalk}: {onTalk?: (pressed: boolean) => void}) {
           <div className="shortcut" key={t} style={{animationDelay:`${i*50}ms`}}><span className="keys">{k.split("+").map(x=><kbd key={x}>{x.trim()}</kbd>)}</span><b>{t}</b><small>{d}</small></div>)}
       </div>}
     </div>}
+    {onTalk && hintElement}
   </section>;
 }
 
 export function mountNotch(el: HTMLElement, onTalk?: (pressed: boolean) => void) {
-  createRoot(el).render(<App onTalk={onTalk}/>);
+  const hintController: NotchHintController = {current: () => undefined};
+  createRoot(el).render(<App onTalk={onTalk} hintController={hintController}/>);
+  return {hint: (text: string) => hintController.current(text)};
 }
