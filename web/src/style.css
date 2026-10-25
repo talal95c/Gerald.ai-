@@ -101,3 +101,4 @@ footer{display:flex;align-items:center;gap:8px}footer input{min-width:0;flex:1;h
 .td-ask input::placeholder{color:#8A8A8A}
 .td-ask kbd{font:12px Abel,sans-serif;color:#cfcfcf;background:#262626;border-radius:999px;padding:6px 10px}
 .exercise{cursor:pointer}
+.orb-wrap{position:relative;display:inline-flex;flex:none;align-items:center;justify-content:center}.orb-wrap svg{position:absolute;inset:0;transition:opacity .25s,transform .25s}.voice-ring{position:absolute;pointer-events:none;animation:fade .25s both}

@@ -1,4 +1,5 @@
 import React, { useEffect, useRef } from "react";
+import { VoiceRing } from "./voicering";
 
 const N = 72;
 const sides: Record<string, number> = {listening: 0, thinking: 3, speaking: 4};
@@ -53,7 +54,9 @@ export function Orb({status, size = 26}: {status: string; size?: number}) {
     return () => cancelAnimationFrame(frame);
   }, [size]);
   const id = `orb${size}`;
-  return <svg style={{overflow:"visible", flex:"none"}} className={`orb o-${status}`} width={size} height={size} viewBox={`0 0 ${size} ${size}`} aria-hidden="true">
+  const speaking = status === "speaking";
+  return <span className="orb-wrap" style={{width:size, height:size}}>
+  <svg style={{overflow:"visible", flex:"none", opacity: speaking ? 0 : 1, transform: speaking ? "scale(.6)" : "none"}} className={`orb o-${status}`} width={size} height={size} viewBox={`0 0 ${size} ${size}`} aria-hidden="true">
     <defs>
       <linearGradient id={`${id}h`} x1="0" y1="0" x2="1" y2="1"><stop offset="0" stopColor="#5E6BFF"/><stop offset=".5" stopColor="#A99BFF"/><stop offset="1" stopColor="#F2C4F0"/></linearGradient>
       <linearGradient id={`${id}c`} x1=".2" y1="0" x2=".8" y2="1"><stop offset="0" stopColor="#F4F3FF" stopOpacity=".75"/><stop offset=".55" stopColor="#C9C1FF" stopOpacity=".45"/><stop offset="1" stopColor="#E9D6FF" stopOpacity=".6"/></linearGradient>
@@ -71,5 +74,7 @@ export function Orb({status, size = 26}: {status: string; size?: number}) {
     <path ref={ring} fill={`url(#${id}h)`} filter={`url(#${id}s)`} opacity=".9"/>
     <g filter={`url(#${id}g)`}><path ref={core} fill={`url(#${id}c)`}/></g>
     <path ref={rim} fill="none" stroke={`url(#${id}r)`} strokeWidth={Math.max(0.8, size * 0.025)}/>
-  </svg>;
+  </svg>
+  {speaking && <VoiceRing active size={size}/>}
+  </span>;
 }
