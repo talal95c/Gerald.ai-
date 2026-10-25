@@ -143,7 +143,38 @@ def test_session_posts_sdp_and_filtered_realtime_config(monkeypatch, server):
     assert "write_math" in tools_by_name["write"]["description"]
     assert "LaTeX" in tools_by_name["write_math"]["description"]
     assert r"\Delta = b^2 - 4ac" in tools_by_name["write_math"]["description"]
+    assert "Si l'élève demande explicitement une flèche" in tools_by_name["arrow"]["description"]
     assert "réserve write aux mots français courts" in session["instructions"]
+    intent_tool_names = {
+        "write",
+        "write_math",
+        "underline",
+        "circle",
+        "highlight",
+        "arrow",
+        "point",
+        "note",
+        "tip",
+    }
+    for name in intent_tool_names:
+        schema = tools_by_name[name]["parameters"]
+        assert schema["properties"]["intent"]["type"] == "string"
+        assert schema["properties"]["intent"]["enum"] == [
+            "correction",
+            "valide",
+            "remarque",
+        ]
+        assert "intent" not in schema.get("required", [])
+        assert "Code couleur" in tools_by_name[name]["description"]
+    for color_intent in (
+        "rouge (intent=correction)",
+        "vert (intent=valide)",
+        "bleu (intent=remarque)",
+        "l'écriture normale reste noire",
+    ):
+        assert color_intent in session["instructions"]
+    assert "une seule underline ou circle (intent=correction)" in session["instructions"]
+    assert "l’élève demande explicitement une flèche" in session["instructions"]
     plot_tool = next(tool for tool in session["tools"] if tool["name"] == "plot")
     plot_schema = plot_tool["parameters"]
     json.dumps(plot_schema)

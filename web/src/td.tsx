@@ -7,7 +7,7 @@ import "./board.css";
 import {getBridge} from "./bridge";
 import {Orb} from "./orb";
 import {Reveal} from "./reveal";
-import {annotationLeader, annotationSize, placeAnnotation, type AnnotationRect} from "./annotations";
+import {annotationLeader, annotationSize, arrowEndpoints, createCursorMotion, ellipseCircumference, intentColor, placeAnnotation, type AnnotationRect, type CursorVisual} from "./annotations";
 import {mountNotch} from "./notch";
 
 const bridge = getBridge();
@@ -19,7 +19,7 @@ const exercises = [
 ];
 type Rect = {x:number;y:number;w:number;h:number};
 type ViewElement = {id:number;text:string;rect:Rect};
-type ViewApi = {elements:()=>ViewElement[];exec:(name:string,args:Record<string,any>)=>Promise<Record<string,any>>;close?:()=>void};
+type ViewApi = {elements:()=>ViewElement[];exec:(name:string,args:Record<string,any>)=>Promise<Record<string,any>>;close?:()=>void;waitForAnimations:()=>Promise<void>};
 type BoardApi = ViewApi & {snapshot:()=>string};
 type GeraldVoiceState = {turn:number;settledTurn:number;pendingTools:number;settledAt:number;responsesCreated:number;responsesDone:number};
 declare global { interface Window { geraldTD?:ViewApi; geraldBoard?:BoardApi; __geraldLog?:Record<string,unknown>[]; __geraldState?:GeraldVoiceState } }
@@ -59,8 +59,12 @@ function TD(){
   const [question,setQuestion]=useState(""),[status,setStatus]=useState("idle"),[caption,setCaption]=useState(""),[captionFading,setCaptionFading]=useState(false),[connecting,setConnecting]=useState(false),[audioLevel,setAudioLevel]=useState(0),[voiceError,setVoiceError]=useState(""),[micEnabled,setMicEnabled]=useState(false);
   const [boardOpen,setBoardOpen]=useState(false),[boardSrc,setBoardSrc]=useState("");
   const [activeExercise,setActiveExercise]=useState(exercises[0]);
-  const [marks,setMarks]=useState<Array<{id:string;kind:string;rect:Rect;text?:string;to?:Rect;annotationTarget?:Rect;leader?:boolean}>>([]);
-  const [cursor,setCursor]=useState<{x:number;y:number;text?:string}|null>(null);
+  const [marks,setMarks]=useState<Array<{id:string;kind:string;rect:Rect;text?:string;to?:Rect;annotationTarget?:Rect;leader?:boolean;color?:string|null;fill?:string|null;progress?:number}>>([]);
+  const cursorRest={x:innerWidth/2,y:innerHeight-90};
+  const [cursor,setCursor]=useState<CursorVisual>({...cursorRest,visible:false});
+  const cursorMotion=useRef<ReturnType<typeof createCursorMotion>|null>(null);
+  if(!cursorMotion.current)cursorMotion.current=createCursorMotion(cursorRest,setCursor);
+  const pendingAnnotations=useRef(new Map<string,Rect>());
   const [answer,setAnswer]=useState<{q:string;text:string;ex:typeof exercises[number]}|null>(null);
   const [suggestion,setSuggestion]=useState(false);
   const boardOpenRef=useRef(false);
@@ -85,44 +89,113 @@ function TD(){
     const occupied:AnnotationRect[]=[
       ...elements().map(element=>element.rect),
       ...marks.filter(mark=>mark.kind==="note"||mark.kind==="tip").map(mark=>mark.rect),
+      ...pendingAnnotations.current.values(),
       target,
     ];
     return placeAnnotation(target,annotationSize(text,kind),occupied,{w:innerWidth,h:innerHeight});
   };
+  const waitForPaint=()=>new Promise<void>(resolve=>requestAnimationFrame(()=>requestAnimationFrame(()=>resolve())));
+  const addMark=(mark:typeof marks[number])=>setMarks(items=>[...items,mark]);
+  const updateMarkProgress=(id:string,progress:number)=>setMarks(items=>items.map(mark=>mark.id===id?{...mark,progress}:mark));
   const exec=async(name:string,args:Record<string,any>)=>{
     if(name==="open_board"){openBoard(String(args.exercise_id));return {ok:true};}
-    if(name==="clear_gerald"){setMarks([]);setCursor(null);return {ok:true};}
+    const motion=cursorMotion.current!;
+    if(name==="clear_gerald"){
+      pendingAnnotations.current.clear();
+      motion.enqueue(()=>{setMarks([]);motion.clear();});
+      return {ok:true};
+    }
+    const color=intentColor(args.intent);
+    const highlightFill=intentColor(args.intent,null,0.16);
     const from=name==="arrow"?targetRect(args.from??{}):targetRect(args);
     const to=name==="arrow"?targetRect(args.to??{}):null;
     if(name==="arrow"&&(!from||!to))return {ok:false,error:"arrow targets were not found"};
+    const endpoints=name==="arrow"&&from&&to?arrowEndpoints(from,to):null;
+    if(name==="arrow"&&!endpoints)return {ok:false,error:"arrow endpoints could not be calculated"};
     const r=from??(typeof args.target_text!=="string"&&typeof args.x==="number"&&typeof args.y==="number"?{x:args.x,y:args.y,w:Number(args.w)||120,h:Number(args.h)||38}:null);
     if(name==="tip"){
       if(typeof args.text!=="string")return {ok:false,error:"tip requires text"};
       const pos=r??{x:innerWidth/2,y:innerHeight-130,w:0,h:0};
       const placement=placeBeside(pos,args.text,"tip");
       if(!placement)return {ok:false,error:"no free space to place the tip beside its target"};
-      setCursor({x:pos.x+pos.w/2,y:pos.y+pos.h/2});
-      setMarks(a=>[...a,{id:crypto.randomUUID(),kind:"tip",rect:placement.rect,text:args.text,annotationTarget:r?pos:undefined,leader:r?placement.leader:false}]);
+      const id=crypto.randomUUID();
+      pendingAnnotations.current.set(id,placement.rect);
+      motion.enqueue(async queue=>{
+        await queue.moveTo({x:pos.x+pos.w/2,y:pos.y+pos.h/2});
+        addMark({id,kind:"tip",rect:placement.rect,text:args.text,color,annotationTarget:r?pos:undefined,leader:r?placement.leader:false});
+        pendingAnnotations.current.delete(id);
+      });
       return {ok:true,target:pos,annotation:placement.rect};
     }
-    if(name==="write"||name==="write_math"){const pos=r??{x:Number(args.x)||120,y:Number(args.y)||160,w:0,h:0};setCursor({x:pos.x,y:pos.y});setMarks(a=>[...a,{id:crypto.randomUUID(),kind:"write",rect:pos,text:String(args.text??args.latex??"")}]);return {ok:true};}
+    if(name==="write"||name==="write_math"){
+      const pos=r??{x:Number(args.x)||120,y:Number(args.y)||160,w:0,h:0};
+      const id=crypto.randomUUID();
+      motion.enqueue(async queue=>{
+        await queue.moveTo({x:pos.x,y:pos.y});
+        addMark({id,kind:"write",rect:pos,text:String(args.text??args.latex??""),color:color??"#111"});
+      });
+      return {ok:true};
+    }
     if(!r)return {ok:false,error:"target not found"};
     if(!["circle","underline","point","highlight","arrow","note"].includes(name))return {ok:false,error:`unknown TD tool: ${name}`};
     const text=String(args.text??args.label??"");
     if(name==="note"){
       const placement=placeBeside(r,text,"note");
       if(!placement)return {ok:false,error:"no free space to place the note beside its target"};
-      setCursor({x:r.x+r.w/2,y:r.y+r.h/2});
-      setMarks(a=>[...a,{id:crypto.randomUUID(),kind:"note",rect:placement.rect,text,annotationTarget:r,leader:placement.leader}]);
+      const id=crypto.randomUUID();
+      pendingAnnotations.current.set(id,placement.rect);
+      motion.enqueue(async queue=>{
+        await queue.moveTo({x:r.x+r.w/2,y:r.y+r.h/2});
+        addMark({id,kind:"note",rect:placement.rect,text,color,annotationTarget:r,leader:placement.leader});
+        pendingAnnotations.current.delete(id);
+      });
       return {ok:true,target:r,annotation:placement.rect};
     }
     const exactText=typeof args.target_text==="string"&&args.target_text.length>0;
     const rect={x:r.x+r.w/2,y:r.y+r.h/2,w:exactText?r.w:Number(args.w)||r.w,h:exactText?r.h:Number(args.h)||r.h};
-    setCursor(name==="arrow"&&to?{x:to.x+to.w/2,y:to.y+to.h/2}:{x:rect.x,y:rect.y});
-    setMarks(a=>[...a,{id:crypto.randomUUID(),kind:name,rect,text,to}]);
+    if(name==="arrow"&&endpoints){
+      const {x1,y1,x2,y2}=endpoints;
+      const id=crypto.randomUUID();
+      motion.enqueue(async queue=>{
+        await queue.moveTo({x:x1,y:y1});
+        addMark({id,kind:"arrow",rect:{x:x1,y:y1,w:x2-x1,h:y2-y1},text,to:{x:x2,y:y2,w:0,h:0},color,progress:0});
+        await waitForPaint();
+        await queue.moveTo({x:x2,y:y2},progress=>updateMarkProgress(id,progress));
+      });
+      return {ok:true,target:{x:x2,y:y2},from:{x:x1,y:y1},to:{x:x2,y:y2}};
+    }
+    const id=crypto.randomUUID();
+    const mark={id,kind:name,rect,text,color,fill:name==="highlight"?highlightFill:null};
+    if(name==="underline"||name==="highlight"){
+      const start={x:rect.x-rect.w/2,y:rect.y+rect.h/2};
+      const end={x:rect.x+rect.w/2,y:rect.y+rect.h/2};
+      motion.enqueue(async queue=>{
+        await queue.moveTo(start);
+        addMark({...mark,progress:0});
+        await waitForPaint();
+        await queue.moveTo(end,progress=>updateMarkProgress(id,progress));
+      });
+    }else if(name==="circle"){
+      const start={x:rect.x+rect.w/2,y:rect.y};
+      motion.enqueue(async queue=>{
+        await queue.moveTo(start);
+        addMark({...mark,progress:0});
+        await waitForPaint();
+        for(let segment=1;segment<=4;segment+=1){
+          const angle=segment*Math.PI/2;
+          const end={x:rect.x+rect.w/2*Math.cos(angle),y:rect.y+rect.h/2*Math.sin(angle)};
+          await queue.moveTo(end,progress=>updateMarkProgress(id,(segment-1+progress)/4));
+        }
+      });
+    }else{
+      motion.enqueue(async queue=>{
+        await queue.moveTo({x:rect.x,y:rect.y});
+        addMark({...mark,progress:1});
+      });
+    }
     return {ok:true,target:{x:rect.x,y:rect.y}};
   };
-  useEffect(()=>{window.geraldTD={elements,exec,close:()=>{boardOpenRef.current=false;setBoardOpen(false);}};return()=>{delete window.geraldTD;};});
+  useEffect(()=>{window.geraldTD={elements,exec,close:()=>{boardOpenRef.current=false;setBoardOpen(false);},waitForAnimations:()=>cursorMotion.current!.waitForAnimations()};return()=>{delete window.geraldTD;};});
   const getBoardApi=async()=>{for(let i=0;i<100;i++){const api=frame.current?.contentWindow?.geraldBoard;if(api)return api;await new Promise(resolve=>setTimeout(resolve,20));}return null;};
   const sendEvent=(event:Record<string,unknown>)=>{if(channel.current?.readyState==="open")channel.current.send(JSON.stringify(event));};
   const sendContext=async()=>{
@@ -285,23 +358,30 @@ function TD(){
   </article>
     <div className="td-mark-layer" aria-hidden="true">
       <svg width={innerWidth} height={innerHeight}>
-        <defs><marker id="td-arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto"><path d="M 0 0 L 10 5 L 0 10 z" fill="#0067D9"/></marker></defs>
-        {marks.filter(m=>m.kind==="circle").map(m=><ellipse key={m.id} cx={m.rect.x} cy={m.rect.y} rx={m.rect.w/2} ry={m.rect.h/2}/>)}
-        {marks.filter(m=>m.kind==="underline").map(m=><line key={m.id} x1={m.rect.x-m.rect.w/2} x2={m.rect.x+m.rect.w/2} y1={m.rect.y+m.rect.h/2} y2={m.rect.y+m.rect.h/2}/>)}
-        {marks.filter(m=>m.kind==="point").map(m=><circle key={m.id} cx={m.rect.x} cy={m.rect.y} r="5"/> )}
-        {marks.filter(m=>m.kind==="highlight").map(m=><rect key={m.id} x={m.rect.x-m.rect.w/2} y={m.rect.y-m.rect.h/2} width={m.rect.w} height={m.rect.h}/>)}
-        {marks.filter(m=>m.kind==="arrow"&&m.to).map(m=><line key={m.id} x1={m.rect.x} y1={m.rect.y} x2={m.to!.x+m.to!.w/2} y2={m.to!.y+m.to!.h/2} markerEnd="url(#td-arrow)"/> )}
+        <defs>
+          <marker id="td-arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto"><path d="M 0 0 L 10 5 L 0 10 z" fill="#0067D9"/></marker>
+          {marks.filter(m=>m.kind==="arrow"&&m.color).map(m=><marker key={m.id} id={`td-arrow-${m.id}`} viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto"><path d="M 0 0 L 10 5 L 0 10 z" style={{fill:m.color!}}/></marker>)}
+        </defs>
+        {marks.filter(m=>m.kind==="circle").map(m=>{
+          const length=ellipseCircumference(m.rect.w/2,m.rect.h/2),progress=m.progress??1;
+          return <ellipse key={m.id} data-gerald-mark-kind="circle" cx={m.rect.x} cy={m.rect.y} rx={m.rect.w/2} ry={m.rect.h/2}
+            strokeDasharray={`${length} ${length}`} strokeDashoffset={length*(1-progress)} style={{stroke:m.color??undefined}}/>;
+        })}
+        {marks.filter(m=>m.kind==="underline").map(m=><line key={m.id} data-gerald-mark-kind="underline" x1={m.rect.x-m.rect.w/2} x2={m.rect.x-m.rect.w/2+m.rect.w*(m.progress??1)} y1={m.rect.y+m.rect.h/2} y2={m.rect.y+m.rect.h/2} style={{stroke:m.color??undefined}}/>)}
+        {marks.filter(m=>m.kind==="point").map(m=><circle key={m.id} data-gerald-mark-kind="point" cx={m.rect.x} cy={m.rect.y} r="5" style={{fill:m.color??undefined}}/> )}
+        {marks.filter(m=>m.kind==="highlight").map(m=><rect key={m.id} data-gerald-mark-kind="highlight" x={m.rect.x-m.rect.w/2} y={m.rect.y-m.rect.h/2} width={m.rect.w*(m.progress??1)} height={m.rect.h} style={{fill:m.fill??undefined,stroke:m.color??undefined}}/>)}
+        {marks.filter(m=>m.kind==="arrow"&&m.to).map(m=><line key={m.id} data-gerald-mark-kind="arrow" x1={m.rect.x} y1={m.rect.y} x2={m.rect.x+m.rect.w*(m.progress??1)} y2={m.rect.y+m.rect.h*(m.progress??1)} markerEnd={m.color?`url(#td-arrow-${m.id})`:"url(#td-arrow)"} style={{stroke:m.color??undefined}}/> )}
         {marks.filter(m=>(m.kind==="note"||m.kind==="tip")&&m.leader&&m.annotationTarget).map(m=>{
           const line=annotationLeader(m.annotationTarget!,m.rect);
-          return <line key={`${m.id}-leader`} x1={line.x1} y1={line.y1} x2={line.x2} y2={line.y2}/>;
+          return <line key={`${m.id}-leader`} x1={line.x1} y1={line.y1} x2={line.x2} y2={line.y2} style={{stroke:m.color??undefined}}/>;
         })}
         {marks.filter(m=>m.kind==="note"||m.kind==="tip").map(m=>
-          <foreignObject key={m.id} data-gerald-note={m.id} x={m.rect.x} y={m.rect.y} width={m.rect.w} height={m.rect.h}>
-            <div className={m.kind==="note"?"td-note-box":"td-tip-box"}>{m.text}</div>
+          <foreignObject key={m.id} data-gerald-note={m.id} data-gerald-mark-kind={m.kind} x={m.rect.x} y={m.rect.y} width={m.rect.w} height={m.rect.h}>
+            <div className={m.kind==="note"?"td-note-box":"td-tip-box"} style={m.color?{color:m.color,border:`1px solid ${m.color}`}:undefined}>{m.text}</div>
           </foreignObject>)}
-        {marks.filter(m=>m.kind==="write"||m.kind==="write_math").map(m=><text key={m.id} x={m.rect.x} y={m.rect.y} className="td-note">{m.text}</text>)}
+        {marks.filter(m=>m.kind==="write"||m.kind==="write_math").map(m=><text key={m.id} data-gerald-mark-kind={m.kind} x={m.rect.x} y={m.rect.y} className="td-note" style={{fill:m.color??"#111"}}>{m.text}</text>)}
       </svg>
-      {cursor&&<div className="gerald-pointer" style={{left:cursor.x,top:cursor.y}}>➤</div>}
+      <div className="gerald-pointer" aria-hidden="true" style={{left:cursor.x,top:cursor.y,opacity:cursor.visible?1:0}}>➤</div>
     </div>
     <div className="td-assist">
       {!voiceMode&&answer&&<div className="td-answer" key={answer.q}><span className="td-q">{answer.q}</span><p>{answer.text||"…"}</p><button className="td-go" onClick={()=>clickExercise(answer.ex)}>Viens, on va au tableau · {answer.ex.title} →</button></div>}

@@ -2,6 +2,162 @@ export type AnnotationRect = {x: number; y: number; w: number; h: number};
 export type AnnotationKind = "note" | "tip";
 export type AnnotationPlacement = {rect: AnnotationRect; leader: boolean};
 export type BoardTextPart = {type: "text" | "math"; value: string};
+export type ColorIntent = "correction" | "valide" | "remarque";
+export type ArrowEndpoints = {x1: number; y1: number; x2: number; y2: number};
+export type CursorPoint = {x: number; y: number};
+export type CursorVisual = CursorPoint & {visible: boolean};
+export type CursorMotion = {
+  moveTo: (to: CursorPoint, onProgress?: (progress: number) => void) => Promise<void>;
+  enqueue: (action: (motion: CursorMotion) => void | Promise<void>) => Promise<void>;
+  clear: () => void;
+  waitForAnimations: () => Promise<void>;
+  current: () => CursorPoint;
+};
+
+export function arrowEndpoints(
+  from: AnnotationRect,
+  to: AnnotationRect,
+  gap = 10,
+  viewport?: {w: number; h: number},
+): ArrowEndpoints | null {
+  if (![from.x, from.y, from.w, from.h, to.x, to.y, to.w, to.h, gap].every(Number.isFinite)) return null;
+  const separationX = Math.max(0, to.x - (from.x + from.w), from.x - (to.x + to.w));
+  const separationY = Math.max(0, to.y - (from.y + from.h), from.y - (to.y + to.h));
+  const overlaps = separationX <= gap * 2 && separationY <= gap * 2;
+  const fromCenter = {x: from.x + from.w / 2, y: from.y + from.h / 2};
+  const toCenter = {x: to.x + to.w / 2, y: to.y + to.h / 2};
+  const dx = toCenter.x - fromCenter.x;
+  const dy = toCenter.y - fromCenter.y;
+  const length = Math.hypot(dx, dy);
+  const unit = length ? {x: dx / length, y: dy / length} : {x: 0, y: 0};
+  const boundaryDistance = (rect: AnnotationRect, direction: {x: number; y: number}) => Math.min(
+    direction.x === 0 ? Infinity : (rect.w / 2 + gap) / Math.abs(direction.x),
+    direction.y === 0 ? Infinity : (rect.h / 2 + gap) / Math.abs(direction.y),
+  );
+  const startDistance = boundaryDistance(from, unit);
+  const endDistance = boundaryDistance(to, unit);
+  const clippedLength = length - startDistance - endDistance;
+
+  if (!overlaps && clippedLength >= 24) {
+    return {
+      x1: fromCenter.x + unit.x * startDistance,
+      y1: fromCenter.y + unit.y * startDistance,
+      x2: toCenter.x - unit.x * endDistance,
+      y2: toCenter.y - unit.y * endDistance,
+    };
+  }
+
+  const corner = {x: to.x - gap, y: to.y - gap};
+  const bounds = viewport ?? (typeof window === "undefined" ? undefined : {w: window.innerWidth, h: window.innerHeight});
+  const start = {
+    x: Math.max(0, Math.min(bounds?.w ?? Infinity, corner.x - 70)),
+    y: Math.max(0, Math.min(bounds?.h ?? Infinity, corner.y - 70)),
+  };
+  return {x1: start.x, y1: start.y, x2: corner.x, y2: corner.y};
+}
+
+export function animateCursor(
+  from: CursorPoint,
+  to: CursorPoint,
+  onFrame: (point: CursorPoint, progress: number) => void,
+): Promise<void> {
+  const distance = Math.hypot(to.x - from.x, to.y - from.y);
+  const reducedMotion = typeof window !== "undefined"
+    && window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+  if (reducedMotion || distance < 1) {
+    onFrame(to, 1);
+    return Promise.resolve();
+  }
+
+  const duration = Math.min(900, Math.max(280, distance / 1.6));
+  const perpendicular = {x: -(to.y - from.y) / distance, y: (to.x - from.x) / distance};
+  const control = {
+    x: (from.x + to.x) / 2 + perpendicular.x * distance * 0.12,
+    y: (from.y + to.y) / 2 + perpendicular.y * distance * 0.12,
+  };
+  const startedAt = performance.now();
+
+  return new Promise((resolve) => {
+    const frame = (now: number) => {
+      const linear = Math.min(1, (now - startedAt) / duration);
+      const progress = linear < 0.5
+        ? 4 * linear ** 3
+        : 1 - ((-2 * linear + 2) ** 3) / 2;
+      const remaining = 1 - progress;
+      onFrame({
+        x: remaining ** 2 * from.x + 2 * remaining * progress * control.x + progress ** 2 * to.x,
+        y: remaining ** 2 * from.y + 2 * remaining * progress * control.y + progress ** 2 * to.y,
+      }, progress);
+      if (linear < 1) requestAnimationFrame(frame);
+      else resolve();
+    };
+    requestAnimationFrame(frame);
+  });
+}
+
+export function createCursorMotion(
+  initial: CursorPoint,
+  onUpdate: (cursor: CursorVisual) => void,
+): CursorMotion {
+  let position = {...initial};
+  let queue = Promise.resolve();
+  const reducedMotion = typeof window !== "undefined"
+    && window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+  const motion: CursorMotion = {
+    async moveTo(to, onProgress) {
+      const from = {...position};
+      onUpdate({...position, visible: true});
+      if (!reducedMotion) {
+        await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
+      }
+      await animateCursor(from, to, (point, progress) => {
+        position = point;
+        onUpdate({...position, visible: true});
+        onProgress?.(progress);
+      });
+      position = {...to};
+    },
+    enqueue(action) {
+      queue = queue.then(() => action(motion)).catch((error: unknown) => {
+        console.error("Gerald cursor motion failed", error);
+      });
+      return queue;
+    },
+    clear() {
+      onUpdate({...position, visible: false});
+    },
+    async waitForAnimations() {
+      await queue;
+      await new Promise<void>((resolve) => requestAnimationFrame(() => requestAnimationFrame(() => resolve())));
+    },
+    current() {
+      return {...position};
+    },
+  };
+  return motion;
+}
+
+export function ellipseCircumference(rx: number, ry: number): number {
+  return Math.PI * (3 * (rx + ry) - Math.sqrt((3 * rx + ry) * (rx + 3 * ry)));
+}
+
+const intentColors: Record<ColorIntent, string> = {
+  correction: "#DC2626",
+  valide: "#16A34A",
+  remarque: "#2563EB",
+};
+
+export function intentColor(intent: unknown, fallback: string | null = null, alpha = 1): string | null {
+  const mapped = typeof intent === "string" && Object.prototype.hasOwnProperty.call(intentColors, intent)
+    ? intentColors[intent as ColorIntent]
+    : undefined;
+  const color = mapped ?? fallback;
+  if (!color || alpha >= 1) return color;
+  const match = /^#([\da-f]{2})([\da-f]{2})([\da-f]{2})$/iu.exec(color);
+  if (!match) return color;
+  const [red, green, blue] = match.slice(1).map((channel) => Number.parseInt(channel, 16));
+  return `rgba(${red}, ${green}, ${blue}, ${alpha})`;
+}
 
 const gap = 12;
 const mathRuns = /[\\abcxyΔ0-9²√±=+*×\/^().,\s\-−]+/giu;
