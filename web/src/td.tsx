@@ -278,7 +278,6 @@ function TD(){
       const title=element.querySelector<HTMLElement>("[data-id='popup_title'],h1,h2,h3");
       return title?.innerText.trim()||element.getAttribute("aria-label")?.trim()||"Dialog";
     };
-    const activeDialog=dialogs[dialogs.length-1];
     const candidates=nodes.filter(element=>{
       const semantic=element.matches("button,a,input,select,[role='button'],[role='menuitem'],[title],[class*='layer']");
       return (semantic||clickable.has(element))&&!hasClickableAncestor(element);
