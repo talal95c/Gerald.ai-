@@ -40,7 +40,7 @@ MOCK_BRIDGE = """
     session_open: false, recap_pending: false
   };
   const signals = {
-    stateChanged: signal(), modeChanged: signal(), agentStatus: signal(), answer: signal(),
+    stateChanged: signal(), modeChanged: signal(), answer: signal(),
     answerError: signal(), recapReady: signal(), agentStatus: signal()
   };
   window.__mockSignals = signals;
