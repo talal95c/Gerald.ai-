@@ -8,6 +8,7 @@ import json
 import logging
 import math
 import os
+from pathlib import Path
 import re
 import urllib.request
 from typing import Protocol
@@ -16,9 +17,11 @@ from PIL import Image
 
 logger = logging.getLogger(__name__)
 MOONDREAM_REVISION = "2025-06-21"
+MOONDREAM_ENDPOINT = "https://api.moondream.ai/v1"
 MAX_PIXELS = 16384 * 28 * 28
 _executor = ThreadPoolExecutor(max_workers=1, thread_name_prefix="gerald-grounder")
 _instances: dict[tuple[str, ...], Grounder] = {}
+_runtime_backend: str | None = None
 
 
 class Grounder(Protocol):
@@ -168,7 +171,7 @@ class MoondreamCloudGrounder:
     api_key: str
     model: str = "moondream3.1-9B-A2B"
     timeout: float = 4.0
-    endpoint: str = "https://api.moondream.ai/v1/point"
+    endpoint: str = MOONDREAM_ENDPOINT
 
     def locate(self, image: Image.Image, description: str) -> tuple[float, float] | None:
         original = image.convert("RGB")
@@ -185,7 +188,7 @@ class MoondreamCloudGrounder:
             "object": description,
         }
         request = urllib.request.Request(
-            self.endpoint,
+            f"{self.endpoint.rstrip('/')}/point",
             data=json.dumps(payload).encode("utf-8"),
             headers={
                 "Content-Type": "application/json",
@@ -214,18 +217,73 @@ class MoondreamCloudGrounder:
         return float(x) * image.width, float(y) * image.height
 
 
+def _grounder_settings_path() -> Path:
+    return Path.home() / ".gerald" / "grounder.json"
+
+
+def load_moondream_cloud_settings(path: str | Path | None = None) -> dict[str, str]:
+    saved: dict[str, str] = {}
+    try:
+        settings_path = Path(path) if path is not None else _grounder_settings_path()
+        loaded = json.loads(settings_path.read_text(encoding="utf-8"))
+        if isinstance(loaded, dict):
+            saved = loaded
+    except FileNotFoundError:
+        pass
+    except (OSError, json.JSONDecodeError):
+        logger.warning("Could not read Moondream Cloud settings")
+    endpoint = os.getenv("MOONDREAM_ENDPOINT", "").strip() or str(saved.get("endpoint", "")).strip()
+    api_key = os.getenv("MOONDREAM_API_KEY", "").strip() or str(saved.get("api_key", "")).strip()
+    return {
+        "endpoint": endpoint.rstrip("/") or MOONDREAM_ENDPOINT,
+        "api_key": api_key,
+    }
+
+
+def save_moondream_cloud_settings(
+    endpoint: str,
+    api_key: str,
+    path: str | Path | None = None,
+) -> Path:
+    target = Path(path) if path is not None else _grounder_settings_path()
+    target.parent.mkdir(parents=True, exist_ok=True)
+    data = json.dumps(
+        {"endpoint": endpoint.strip().rstrip("/") or MOONDREAM_ENDPOINT, "api_key": api_key},
+        ensure_ascii=False,
+    )
+    descriptor = os.open(target, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
+    with os.fdopen(descriptor, "w", encoding="utf-8") as output:
+        output.write(data)
+    try:
+        os.chmod(target, 0o600)
+    except (OSError, NotImplementedError):
+        pass
+    return target
+
+
+def set_runtime_grounder_backend(backend: str | None) -> None:
+    global _runtime_backend
+    _runtime_backend = backend
+
+
 def configured_grounder(backend: str | None = None) -> Grounder | None:
-    backend = (backend or os.getenv("GERALD_GROUNDER", "none")).casefold()
+    backend = (backend or _runtime_backend or os.getenv("GERALD_GROUNDER", "none")).casefold()
     if backend in {"", "none"}:
         return None
     default_model = "moondream3.1-9B-A2B" if backend == "moondream-cloud" else "bytedance/ui-tars-1.5-7b"
     model = os.getenv("GERALD_GROUNDER_MODEL", default_model)
     coord_mode = os.getenv("GERALD_GROUNDER_COORD_MODE", "")
-    api_key = os.getenv("MOONDREAM_API_KEY", "") if backend == "moondream-cloud" else ""
+    cloud_settings = load_moondream_cloud_settings() if backend == "moondream-cloud" else None
+    api_key = cloud_settings["api_key"] if cloud_settings is not None else ""
     if backend == "moondream-cloud" and not api_key:
         logger.warning("MOONDREAM_API_KEY is not set; Moondream Cloud grounding is disabled")
         return None
-    key = backend, model, coord_mode, api_key
+    endpoint = cloud_settings["endpoint"] if cloud_settings is not None else ""
+    try:
+        timeout = float(os.getenv("GERALD_GROUNDER_TIMEOUT", "4.0"))
+    except ValueError:
+        timeout = 4.0
+    key = backend, model, coord_mode, api_key, endpoint, str(timeout)
     if key in _instances:
         return _instances[key]
     if backend == "openrouter":
@@ -235,7 +293,7 @@ def configured_grounder(backend: str | None = None) -> Grounder | None:
     elif backend == "moondream":
         instance = MoondreamLocalGrounder()
     elif backend == "moondream-cloud":
-        instance = MoondreamCloudGrounder(api_key, model)
+        instance = MoondreamCloudGrounder(api_key, model, timeout=timeout, endpoint=endpoint)
     else:
         logger.warning("Unknown GERALD_GROUNDER backend: %s", backend)
         return None

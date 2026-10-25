@@ -94,10 +94,15 @@ def main() -> int:
     from PyQt6.QtGui import QIcon
     from PyQt6.QtWidgets import (
         QApplication,
+        QDialog,
+        QDialogButtonBox,
+        QFormLayout,
+        QLineEdit,
         QMenu,
         QMessageBox,
         QStyle,
         QSystemTrayIcon,
+        QVBoxLayout,
     )
     from pynput import keyboard
 
@@ -107,6 +112,11 @@ def main() -> int:
     from gerald.capture.session import CaptureRequest
     from gerald.capture.screen import capture_screen
     from gerald.overlay.window import OverlayWindow
+    from gerald.perception.grounder import (
+        load_moondream_cloud_settings,
+        save_moondream_cloud_settings,
+        set_runtime_grounder_backend,
+    )
     from gerald.perception.elements import collect_elements_detailed, serialize_context
 
     settings = load_settings()
@@ -461,6 +471,36 @@ def main() -> int:
             begin_capture(True)
         overlay.open_text_input(submit_typed_question, cancel_typed_question)
 
+    def open_grounder_settings() -> None:
+        current = load_moondream_cloud_settings()
+        dialog = QDialog()
+        dialog.setWindowTitle("Grounder")
+        dialog.setMinimumWidth(420)
+        dialog.setStyleSheet(
+            "QDialog { background: #F5F5F7; color: #1D1D1F; }"
+            "QLineEdit { background: white; border: 1px solid #D2D2D7; "
+            "border-radius: 8px; padding: 8px; }"
+            "QPushButton { background: #FF9F0A; color: #1D1D1F; border: none; "
+            "border-radius: 8px; padding: 8px 16px; }"
+        )
+        layout = QVBoxLayout(dialog)
+        form = QFormLayout()
+        endpoint = QLineEdit(current["endpoint"])
+        api_key = QLineEdit(current["api_key"])
+        api_key.setEchoMode(QLineEdit.EchoMode.Password)
+        form.addRow("Endpoint", endpoint)
+        form.addRow("API key", api_key)
+        layout.addLayout(form)
+        buttons = QDialogButtonBox(
+            QDialogButtonBox.StandardButton.Save | QDialogButtonBox.StandardButton.Cancel
+        )
+        buttons.accepted.connect(dialog.accept)
+        buttons.rejected.connect(dialog.reject)
+        layout.addWidget(buttons)
+        if dialog.exec() == QDialog.DialogCode.Accepted:
+            save_moondream_cloud_settings(endpoint.text(), api_key.text())
+            set_runtime_grounder_backend("moondream-cloud")
+
     def submit_typed_question(question: str) -> None:
         if not question.strip() or not app_state["active"] or not app_state["typed"]:
             return
@@ -701,6 +741,8 @@ def main() -> int:
     recap_action.triggered.connect(open_lesson_recap)
     board_action = menu.addAction("Tableau")
     board_action.triggered.connect(toggle_board)
+    grounder_action = menu.addAction("Grounder…")
+    grounder_action.triggered.connect(open_grounder_settings)
     menu.addSeparator()
     quit_action = menu.addAction("Quitter Gerald")
     quit_action.triggered.connect(app.quit)

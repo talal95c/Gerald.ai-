@@ -49,3 +49,12 @@ Le localisateur visuel optionnel est désactivé par défaut
 Moondream gratuit comprend 5 $ de crédit par mois
 ([tarifs Moondream](https://moondream.ai/pricing)). Le modèle cloud par défaut
 est `moondream3.1-9B-A2B`; `GERALD_GROUNDER_MODEL` permet de le remplacer.
+
+## Free GPU fallback (Colab)
+
+1. Ouvrez [`colab/gerald_grounder.ipynb`](colab/gerald_grounder.ipynb) dans Google Colab.
+2. Dans Runtime > Change runtime type, choisissez un GPU T4, puis lancez Run all.
+3. Quand le tunnel est prêt, copiez `MOONDREAM_ENDPOINT` et `MOONDREAM_API_KEY` dans
+   Grounder… (menu de Gerald), et définissez `GERALD_GROUNDER=moondream-cloud` dans `.env`.
+4. Gardez la session Colab ouverte tant que vous utilisez le tunnel; l'URL quick tunnel
+   est temporaire et ne nécessite pas de compte Cloudflare.
