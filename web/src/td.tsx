@@ -216,6 +216,11 @@ function TD(){
   const audioContext=useRef<AudioContext|null>(null), micAnalyser=useRef<AnalyserNode|null>(null), remoteAnalyser=useRef<AnalyserNode|null>(null);
   const pushToTalk=useRef(false), toggleMic=useRef(false), pttPreviousMic=useRef(false);
   const captionTimer=useRef<number|null>(null), handled=useRef(new Set<string>());
+  const activeResponse=useRef<string|null>(null), responseStartPending=useRef(false);
+  const processingTools=useRef(false), dispatchingResponse=useRef(false);
+  const queuedTurns=useRef<Array<{turn:number;text:string}>>([]);
+  const pendingResponses=useRef<Array<Record<string,unknown>|null>>([]);
+  const responseTurn=useRef(0);
   useEffect(()=>{
     if(!docMode||docId===null)return;
     let active=true;
@@ -396,7 +401,7 @@ function TD(){
   };
   useEffect(()=>{window.geraldTD={elements,exec,close:()=>{boardOpenRef.current=false;setBoardOpen(false);},waitForAnimations:()=>cursorMotion.current!.waitForAnimations()};return()=>{delete window.geraldTD;};});
   const getBoardApi=async()=>{for(let i=0;i<100;i++){const api=frame.current?.contentWindow?.geraldBoard;if(api)return api;await new Promise(resolve=>setTimeout(resolve,20));}return null;};
-  const sendEvent=(event:Record<string,unknown>)=>{if(channel.current?.readyState==="open")channel.current.send(JSON.stringify(event));};
+  const sendEvent=(event:Record<string,unknown>)=>{if(channel.current?.readyState!=="open")return false;channel.current.send(JSON.stringify(event));return true;};
   const documentImage=async()=>{
     if(!docMode||!docFile)return undefined;
     let source:HTMLCanvasElement|HTMLImageElement|null=null;
@@ -453,10 +458,55 @@ function TD(){
     }
     else {const text=elements().map(e=>`[${e.id}] "${e.text}" (${Math.round(e.rect.x)},${Math.round(e.rect.y)},${Math.round(e.rect.w)},${Math.round(e.rect.h)})`).join("\n");sendEvent({type:"conversation.item.create",item:{type:"message",role:"user",content:[{type:"input_text",text:`TD visible elements in CSS pixels:\n${text}`} ]}});}
   };
-  const sendQuestion=async(q:string)=>{if(!q.trim()||channel.current?.readyState!=="open")return;const state=voiceState();state.turn+=1;voiceLog().push({type:"user",turn:state.turn,text:q.trim()});await sendContext();sendEvent({type:"conversation.item.create",item:{type:"message",role:"user",content:[{type:"input_text",text:q.trim()}]}});sendEvent({type:"response.create"});setQuestion("");};
+  const pumpResponses=async()=>{
+    if(activeResponse.current||responseStartPending.current||processingTools.current||dispatchingResponse.current||channel.current?.readyState!=="open")return;
+    if(pendingResponses.current.length){
+      const response=pendingResponses.current.shift()!;
+      responseStartPending.current=true;
+      if(!sendEvent({type:"response.create",...(response?{response}:{})})){
+        responseStartPending.current=false;
+        pendingResponses.current.unshift(response);
+      }
+      return;
+    }
+    const next=queuedTurns.current.shift();
+    if(!next)return;
+    dispatchingResponse.current=true;
+    responseTurn.current=next.turn;
+    try{
+      await sendContext();
+      if(activeResponse.current||responseStartPending.current||processingTools.current||channel.current?.readyState!=="open"){
+        queuedTurns.current.unshift(next);
+        return;
+      }
+      if(!sendEvent({type:"conversation.item.create",item:{type:"message",role:"user",content:[{type:"input_text",text:next.text}]}})){
+        queuedTurns.current.unshift(next);
+        return;
+      }
+      responseStartPending.current=true;
+      if(!sendEvent({type:"response.create"})){
+        responseStartPending.current=false;
+        pendingResponses.current.unshift(null);
+      }
+    }finally{
+      dispatchingResponse.current=false;
+    }
+  };
+  const sendQuestion=async(q:string)=>{
+    const text=q.trim();
+    if(!text||channel.current?.readyState!=="open")return;
+    const state=voiceState();
+    const turn=++state.turn;
+    voiceLog().push({type:"user",turn,text});
+    queuedTurns.current.push({turn,text});
+    setQuestion("");
+    void pumpResponses();
+  };
   const start=async(pushToTalkMode=false)=>{
     window.__geraldLog=[];
     window.__geraldState={turn:0,settledTurn:0,pendingTools:0,settledAt:0,responsesCreated:0,responsesDone:0};
+    activeResponse.current=null;responseStartPending.current=false;processingTools.current=false;dispatchingResponse.current=false;
+    queuedTurns.current=[];pendingResponses.current=[];responseTurn.current=0;handled.current.clear();
     pushToTalk.current=pushToTalkMode;
     toggleMic.current=!pushToTalkMode;
     setVoiceError("");
@@ -481,49 +531,97 @@ function TD(){
         if(event.type==="input_audio_buffer.speech_started"){setStatus("listening");void sendContext();}
         else if(event.type==="input_audio_buffer.speech_stopped")setStatus("thinking");
         else if(event.type==="conversation.item.input_audio_transcription.completed"){const text=String(event.transcript??"");if(text){setCaption(text);setCaptionFading(false);if(captionTimer.current)clearTimeout(captionTimer.current);captionTimer.current=window.setTimeout(()=>{setCaptionFading(true);captionTimer.current=window.setTimeout(()=>{setCaption("");setCaptionFading(false);},400);},2600);}}
-        else if(event.type==="response.created"){state.responsesCreated+=1;setStatus("thinking");setCaption("");setCaptionFading(false);if(captionTimer.current)clearTimeout(captionTimer.current);}
+        else if(event.type==="response.created"){
+          const id=event.response?.id??event.response_id;
+          if(activeResponse.current&&id&&activeResponse.current!=="__active__"&&activeResponse.current!==String(id)){
+            const error={message:"Realtime created a response before the active response finished",active_response:activeResponse.current,new_response:String(id)};
+            console.error("[gerald realtime error]",error);
+            voiceLog().push({type:"error",turn:responseTurn.current||state.turn,error});
+          }
+          activeResponse.current=String(id??"__active__");
+          responseStartPending.current=false;
+          state.responsesCreated+=1;setStatus("thinking");setCaption("");setCaptionFading(false);if(captionTimer.current)clearTimeout(captionTimer.current);
+        }
         else if(event.type==="response.output_audio_buffer.started"||event.type==="response.output_audio_transcript.delta"||event.type==="response.audio_transcript.delta"){setStatus("speaking");if(event.delta){setCaption(v=>v+event.delta);setCaptionFading(false);if(event.delta.toLowerCase().includes("au tableau"))setSuggestion(true);}}
-        else if(event.type==="response.output_audio_transcript.done"||event.type==="response.audio_transcript.done"){if(event.transcript)voiceLog().push({type:"transcript",turn:state.turn,response_id:event.response_id,text:event.transcript});}
+        else if(event.type==="response.output_audio_transcript.done"||event.type==="response.audio_transcript.done"){if(event.transcript)voiceLog().push({type:"transcript",turn:responseTurn.current||state.turn,response_id:event.response_id,text:event.transcript});}
         else if(event.type==="response.output_audio_buffer.stopped")setStatus("idle");
+        else if(event.type==="error"){
+          console.error("[gerald realtime error]",event);
+          voiceLog().push({type:"error",turn:responseTurn.current||state.turn,error:event.error??event});
+          if(responseStartPending.current&&!activeResponse.current)responseStartPending.current=false;
+        }
         else if(event.type==="response.done"){
           const response=event.response??{},calls=(response.output??[]).filter((item:any)=>item.type==="function_call");
+          const responseId=response.id??event.response_id;
+          if(calls.length&&response.id&&handled.current.has(response.id))return;
+          if(responseId&&activeResponse.current&&activeResponse.current!=="__active__"&&activeResponse.current!==String(responseId)){
+            const error={message:"Realtime completed a response other than the active response",active_response:activeResponse.current,completed_response:String(responseId)};
+            console.error("[gerald realtime error]",error);
+            voiceLog().push({type:"error",turn:responseTurn.current||state.turn,error});
+            return;
+          }
+          activeResponse.current=null;
+          responseStartPending.current=false;
           state.responsesDone+=1;
-          voiceLog().push({type:"response_done",turn:state.turn,response_id:response.id,tool_names:calls.map((call:any)=>call.name)});
+          const turn=responseTurn.current||state.turn;
+          voiceLog().push({type:"response_done",turn,response_id:response.id,tool_names:calls.map((call:any)=>call.name)});
           if(calls.length){
-            if(response.id&&handled.current.has(response.id))return;
             if(response.id)handled.current.add(response.id);
             state.pendingTools+=calls.length;
+            processingTools.current=true;
             setStatus("thinking");
             void(async()=>{
-              for(const call of calls){
-                let args:Record<string,unknown>={},output:Record<string,unknown>;
-                const view=call.name==="open_board"?"td":boardOpenRef.current?"board":"td";
-                const callEntry:Record<string,unknown>={type:"tool_call",turn:state.turn,call_id:call.call_id,name:call.name,arguments:call.arguments,view,args:null};
-                voiceLog().push(callEntry);
-                try{
-                  args=JSON.parse(call.arguments||"{}");
-                  callEntry.args=args;
-                  const api=call.name==="open_board"?window.geraldTD:boardOpenRef.current?await getBoardApi():window.geraldTD;
-                  output=await api?.exec(call.name,args)??{ok:false,error:"view unavailable"};
-                }catch(error){
-                  console.error("Voice tool failed",error);
-                  output={ok:false,error:String(error)};
+              const showingTools=new Set(["point","circle","arrow","highlight"]);
+              let showingCalls=0;
+              try{
+                for(const call of calls){
+                  let args:Record<string,unknown>={},output:Record<string,unknown>;
+                  const view=call.name==="open_board"?"td":boardOpenRef.current?"board":"td";
+                  const isShowingTool=paintMode&&showingTools.has(call.name);
+                  const rejectShowingTool=isShowingTool&&showingCalls>0;
+                  if(isShowingTool)showingCalls+=1;
+                  const callEntry:Record<string,unknown>={type:"tool_call",turn,call_id:call.call_id,name:call.name,arguments:call.arguments,view,args:null};
+                  voiceLog().push(callEntry);
+                  try{
+                    args=JSON.parse(call.arguments||"{}");
+                    callEntry.args=args;
+                    if(rejectShowingTool){
+                      output={ok:false,error:"Tu as déjà montré une commande ce tour-ci. Ne rappelle plus d'outil : dis en une phrase ce que l'élève doit faire, puis attends."};
+                    }else{
+                      const api=call.name==="open_board"?window.geraldTD:boardOpenRef.current?await getBoardApi():window.geraldTD;
+                      output=await api?.exec(call.name,args)??{ok:false,error:"view unavailable"};
+                    }
+                  }catch(error){
+                    console.error("Voice tool failed",error);
+                    output=rejectShowingTool
+                      ?{ok:false,error:"Tu as déjà montré une commande ce tour-ci. Ne rappelle plus d'outil : dis en une phrase ce que l'élève doit faire, puis attends."}
+                      :{ok:false,error:String(error)};
+                  }
+                  if(!output.ok){console.error("Voice tool returned an error",call.name,output);setVoiceError(call.name==="plot"?"Le tracé a échoué.":"L’action a échoué.");setStatus("idle");}else setVoiceError("");
+                  voiceLog().push({type:"tool_result",turn,call_id:call.call_id,name:call.name,args,view,result:output,ok:Boolean(output.ok),error:output.error??null});
+                  state.pendingTools-=1;
+                  console.info("[gerald voice tool]",call.name,view,Boolean(output.ok));
+                  sendEvent({type:"conversation.item.create",item:{type:"function_call_output",call_id:call.call_id,output:JSON.stringify(output)}});
                 }
-                if(!output.ok){console.error("Voice tool returned an error",call.name,output);setVoiceError(call.name==="plot"?"Le tracé a échoué.":"L’action a échoué.");setStatus("idle");}else setVoiceError("");
-                voiceLog().push({type:"tool_result",turn:state.turn,call_id:call.call_id,name:call.name,args,view,result:output,ok:Boolean(output.ok),error:output.error??null});
-                state.pendingTools-=1;
-                console.info("[gerald voice tool]",call.name,view,Boolean(output.ok));
-                sendEvent({type:"conversation.item.create",item:{type:"function_call_output",call_id:call.call_id,output:JSON.stringify(output)}});
+                await sendContext();
+                pendingResponses.current.push(paintMode&&showingCalls>0?{tool_choice:"none"}:null);
+              }catch(error){
+                console.error("Voice tool response handling failed",error);
+                voiceLog().push({type:"error",turn,error:String(error)});
+                pendingResponses.current.push(paintMode&&showingCalls>0?{tool_choice:"none"}:null);
+              }finally{
+                processingTools.current=false;
+                void pumpResponses();
               }
-              await sendContext();
-              sendEvent({type:"response.create"});
             })();
             return;
           }
-          if(state.pendingTools===0){state.settledTurn=state.turn;state.settledAt=Date.now();}
+          if(state.pendingTools===0){state.settledTurn=turn;state.settledAt=Date.now();}
           setStatus("idle");
           if(captionTimer.current)clearTimeout(captionTimer.current);
           captionTimer.current=window.setTimeout(()=>{setCaptionFading(true);captionTimer.current=window.setTimeout(()=>{setCaption("");setCaptionFading(false);},400);},2800);
+          if(!queuedTurns.current.length)responseTurn.current=0;
+          void pumpResponses();
         }
       };
       const offer=await pc.createOffer();await pc.setLocalDescription(offer);
@@ -538,7 +636,7 @@ function TD(){
       await pc.setRemoteDescription({type:"answer",sdp});
     }catch(error){console.error("Voice session failed",error);setVoiceError("Impossible de démarrer la voix.");setConnecting(false);setStatus("idle");stop();}
       };
-  const stop=()=>{pushToTalk.current=false;toggleMic.current=false;channel.current?.close();peer.current?.close();stream.current?.getTracks().forEach(t=>t.stop());channel.current=null;peer.current=null;stream.current=null;micAnalyser.current=null;remoteAnalyser.current=null;if(audioContext.current){void audioContext.current.close();audioContext.current=null;}setAudioLevel(0);setMicEnabled(false);setConnecting(false);setStatus("idle");};
+  const stop=()=>{pushToTalk.current=false;toggleMic.current=false;activeResponse.current=null;responseStartPending.current=false;processingTools.current=false;dispatchingResponse.current=false;queuedTurns.current=[];pendingResponses.current=[];responseTurn.current=0;channel.current?.close();peer.current?.close();stream.current?.getTracks().forEach(t=>t.stop());channel.current=null;peer.current=null;stream.current=null;micAnalyser.current=null;remoteAnalyser.current=null;if(audioContext.current){void audioContext.current.close();audioContext.current=null;}setAudioLevel(0);setMicEnabled(false);setConnecting(false);setStatus("idle");};
   const toggleMicrophone=()=>{
     if(channel.current?.readyState==="open"){
       const track=stream.current?.getAudioTracks()[0];
