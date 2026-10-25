@@ -1,8 +1,13 @@
 from __future__ import annotations
 
-from PyQt6.QtWidgets import QWidget
+from PyQt6.QtCore import Qt
+from PyQt6.QtWidgets import QApplication, QWidget
+
+if QApplication.instance() is None:
+    QApplication.setAttribute(Qt.ApplicationAttribute.AA_ShareOpenGLContexts)
 
 _window: QWidget | None = None
+_td_window: QWidget | None = None
 
 
 def _remember(widget: QWidget) -> QWidget:
@@ -37,22 +42,29 @@ def _is_open(widget: QWidget | None) -> bool:
         return True
 
 
-def open_home(store, indexer, settings, on_library_changed, *, ask_fn=None) -> QWidget:
-    global _window
-    from gerald.home.fonts import ensure_fonts
-
-    ensure_fonts()
+def open_home(
+    store, indexer, settings, on_library_changed, *, ask_fn=None, open_board=None, end_session=None
+) -> QWidget:
+    global _window, _td_window
     if _is_open(_window):
         return _open(_window)
 
-    from gerald.home.window import GeraldWindow
+    from gerald.home.bridge import Bridge
+    from gerald.home.demo import seed_demo
+    from gerald.home.notch import NotchWindow, TdWindow
 
-    window = GeraldWindow(
+    seed_demo(store, indexer)
+    bridge = Bridge(
         store,
         indexer,
         settings,
-        on_library_changed,
         ask_fn=ask_fn,
+        open_board=open_board,
+        end_session=end_session,
+        on_library_changed=on_library_changed,
     )
+    window = NotchWindow(bridge)
     _remember(window)
+    _td_window = TdWindow(bridge)
+    _td_window.show_td()
     return _open(window)

@@ -1,0 +1,92 @@
+from __future__ import annotations
+
+import json
+import time
+from types import SimpleNamespace
+
+from PyQt6.QtTest import QTest
+from PyQt6.QtWidgets import QWidget
+
+from gerald.home.bridge import Bridge, greeting_for_hour
+
+
+class EmptyStore:
+    def list_courses(self):
+        return []
+
+    def list_documents(self, _course_id):
+        return []
+
+    def recent_conversations(self):
+        return []
+
+
+def test_greeting_changes_with_local_time():
+    assert greeting_for_hour(8) == "Bonjour."
+    assert greeting_for_hour(14) == "Bon après-midi."
+    assert greeting_for_hour(22) == "Bonsoir."
+
+
+def test_bridge_ask_emits_answer_without_sources(qapplication):
+    bridge = Bridge(
+        EmptyStore(),
+        SimpleNamespace(embedder=object()),
+        SimpleNamespace(api_key="demo"),
+        ask_fn=lambda *_args, **_kwargs: (
+            7,
+            SimpleNamespace(text="La réponse est 42.", sources=[]),
+        ),
+    )
+    received = []
+    bridge.answer.connect(received.append)
+
+    bridge.ask("Combien vaut 6 × 7 ?")
+
+    deadline = time.monotonic() + 2
+    while not received and time.monotonic() < deadline:
+        QTest.qWait(10)
+    assert len(received) == 1
+    payload = json.loads(received[0])
+    assert payload["text"] == "La réponse est 42."
+    assert payload["sources"] == []
+    assert payload["conversation_id"] == 7
+
+
+def test_bridge_open_board_passes_exercise_and_tracks_session():
+    opened = []
+    bridge = Bridge(EmptyStore(), object(), object(), open_board=lambda *args: opened.append(args))
+
+    bridge.openBoard("Exercice 2", '["Résous x² − 1 = 0"]')
+
+    assert opened == [("Exercice 2", ["Résous x² − 1 = 0"])]
+    assert bridge._session_open
+
+
+def test_open_home_returns_a_stable_cached_widget(qapplication, monkeypatch):
+    import gerald.home as home
+    import gerald.home.demo as demo
+    import gerald.home.notch as notch
+
+    class FakeNotch(QWidget):
+        def __init__(self, _bridge):
+            super().__init__()
+
+    class FakeTd(QWidget):
+        def __init__(self, _bridge):
+            super().__init__()
+
+        def show_td(self):
+            self.show()
+
+    monkeypatch.setattr(home, "_window", None)
+    monkeypatch.setattr(home, "_td_window", None)
+    monkeypatch.setattr(demo, "seed_demo", lambda *_args: None)
+    monkeypatch.setattr(notch, "NotchWindow", FakeNotch)
+    monkeypatch.setattr(notch, "TdWindow", FakeTd)
+
+    first = home.open_home(object(), object(), object(), lambda: None)
+    second = home.open_home(object(), object(), object(), lambda: None)
+
+    assert first is second
+    first.close()
+    home._td_window.close()
