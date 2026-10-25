@@ -167,7 +167,8 @@ def test_expired_confirmation_ignores_late_approval():
 
 
 def test_offscreen_screen_mappings_skip_native_monitor_pairing(monkeypatch):
-    QApplication.instance() or QApplication([])
+    app = QApplication.instance() or QApplication([])
+    assert app is not None
     from gerald.overlay import window as window_module
 
     native_calls = []
