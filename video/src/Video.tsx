@@ -38,13 +38,13 @@ const Music: React.FC<{ src: string; volume: number; voiceOver: boolean }> = ({ 
   let duck = 1;
   if (voiceOver) {
     for (const sc of SCENES) {
-      const a = sceneStart(sc.id) + 0.35;
+      const a = sceneStart(sc.id) + (sc.id === "hook" ? 1.0 : 0.35);
       const b = a + VO[sc.id].dur;
       const d = interpolate(t, [a - 0.4, a, b, b + 0.6], [1, 0.45, 0.45, 1], { extrapolateLeft: "clamp", extrapolateRight: "clamp" });
       duck = Math.min(duck, d);
     }
   }
-  const env = interpolate(frame, [0, 1 * fps, durationInFrames - 2.5 * fps, durationInFrames], [0, 1, 1, 0], { extrapolateLeft: "clamp", extrapolateRight: "clamp" });
+  const env = interpolate(frame, [0, 0.1 * fps, durationInFrames - 2.5 * fps, durationInFrames], [0, 1, 1, 0], { extrapolateLeft: "clamp", extrapolateRight: "clamp" });
   return <Audio src={staticFile(`audio/${src}`)} volume={volume * duck * env} />;
 };
 
@@ -66,7 +66,7 @@ export const Launch: React.FC<LaunchProps> = ({ music, musicVolume, voiceOver, f
   return (
     <>
       <Music src={music} volume={musicVolume} voiceOver={voiceOver} />
-      {voiceOver && SCENES.map((s) => <Voice key={s.id} id={s.id} at={sceneStart(s.id) + 0.35} />)}
+      {voiceOver && SCENES.map((s) => <Voice key={s.id} id={s.id} at={sceneStart(s.id) + (s.id === "hook" ? 1.0 : 0.35)} />)}
       <Sfx at={sceneStart("meet")} src="https://remotion.media/whoosh.wav" volume={0.5} />
             <Sfx at={sceneStart("cta") + 0.1} src="https://remotion.media/ding.wav" volume={0.4} />
       <TransitionSeries>

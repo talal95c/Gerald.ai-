@@ -16,8 +16,8 @@ export const RemotionRoot: React.FC = () => {
         width={1920}
         height={1080}
         defaultProps={{
-          music: "motivating-mornings.mp3",
-          musicVolume: 0.3,
+          music: "training.mp3",
+          musicVolume: 0.34,
           voiceOver: true,
           footage: { board: "clip2.mp4", photoshop: "clip3.mp4", td: "clip1.mp4", trim: { board: 9, photoshop: 8, td: 7 } },
         }}
