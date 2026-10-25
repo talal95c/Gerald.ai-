@@ -380,7 +380,7 @@ function TD(){
       ?{x:fromArgs.x,y:fromArgs.y,w:0,h:0}
       :name==="arrow"?resolveTarget(fromArgs):resolveTarget(args);
     const to=name==="arrow"?resolveTarget(args.to??{}):null;
-    const boardClosedHint=boardOpenRef.current?"":" Le tableau est fermé : ce texte n’existe peut-être que sur le tableau. Vise un élément visible du TD ci-dessus, ou rouvre le tableau avec open_board si l’élève parle de ce qu’il y a écrit.";
+    const boardClosedHint=boardOpenRef.current?"":" Le tableau est fermé : ce texte n’existe peut-être que sur le tableau. Si l’élève parle de ce qu’il y a écrit, appelle toi-même open_board dans ce même tour, puis refais l’annotation sur le tableau ; ne lui demande pas de le rouvrir. Sinon, vise un élément visible du TD ci-dessus.";
     if(name==="arrow"&&!to){
       const visible=elements().slice(0,40).map(e=>`[${e.id}] ${e.text.slice(0,100)}`).join("; ");
       return {ok:false,error:`arrow target was not found. Visible targets: ${visible}${boardClosedHint}`};
