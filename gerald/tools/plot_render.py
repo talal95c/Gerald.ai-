@@ -35,6 +35,10 @@ def _font_at_local_size(font_family: str, pixel_size: int, image_to_local_scale:
     return font
 
 
+def _text_flags(alignment: Qt.AlignmentFlag) -> int:
+    return int(alignment) | int(Qt.TextFlag.TextDontClip)
+
+
 def _nice_step(span: float) -> float:
     raw = span / 7
     power = 10 ** math.floor(math.log10(raw))
@@ -130,7 +134,7 @@ def draw_plot(
         label = _format_tick(tick)
         painter.drawText(
             QRectF(x - 30, graph.bottom() + 4, 60, metrics.height()),
-            Qt.AlignmentFlag.AlignHCenter | Qt.AlignmentFlag.AlignTop,
+            _text_flags(Qt.AlignmentFlag.AlignHCenter | Qt.AlignmentFlag.AlignTop),
             label,
         )
     for tick in y_ticks:
@@ -138,7 +142,7 @@ def draw_plot(
         label = _format_tick(tick)
         painter.drawText(
             QRectF(4, y - metrics.height() / 2, left - 12, metrics.height()),
-            Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter,
+            _text_flags(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter),
             label,
         )
 
@@ -209,7 +213,11 @@ def draw_plot(
                 painter.setBrush(QColor(palette.label_fill))
                 painter.drawRoundedRect(pill, 8, 8)
                 painter.setPen(QColor(palette.label_text))
-                painter.drawText(pill, Qt.AlignmentFlag.AlignCenter, point.label)
+                painter.drawText(
+                    pill,
+                    _text_flags(Qt.AlignmentFlag.AlignCenter),
+                    point.label,
+                )
 
     if len(plot.curves) > 1 or plot.curves[0].label != plot.curves[0].expr:
         legend_font = _font_at_local_size(font_family, 14, image_to_local_scale)
