@@ -48,10 +48,10 @@ function Desktop() {
       const zIndex = ++zCounter.current;
       if (current?.open) return {...previous, [app]: {...current, minimized: false, zIndex}};
       const area = usableArea();
-      const width = Math.min(1100, window.innerWidth * .86);
-      const height = Math.min(720, area.height);
+      const width = Math.min(1100, Math.max(0, window.innerWidth * .86 - 56));
+      const height = Math.min(720, Math.max(0, area.height - 56));
       const startX = (window.innerWidth - width) / 2;
-      const startY = area.top + (area.height - height) / 2;
+      const startY = area.top;
       const offset = cascade.current * 28;
       const fits = startX + offset + width <= window.innerWidth && startY + offset + height <= area.bottom;
       const position = clampToUsable(

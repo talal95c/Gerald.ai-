@@ -185,9 +185,21 @@ function App({onTalk}: {onTalk?: (pressed: boolean) => void}) {
   };
   const active = status !== "idle";
   const pillLabel = active ? statusText[status] ?? status : mode === "greeting" ? state.greeting : `Maintiens ${state.hotkey_label}`;
-  if (mode === "greeting" || mode === "collapsed") return <button className={`notch pill-notch m-${mode} s-${status}`} onClick={()=>{clear();go("panel");}}>
-    <Orb status={status} size={24}/><span key={pillLabel}><Reveal text={pillLabel}/></span>
-  </button>;
+  if (mode === "greeting" || mode === "collapsed") return onTalk
+    ? <div className="notch-pill-controls">
+      <button className={`notch pill-notch m-${mode} s-${status}`} onClick={()=>{clear();go("panel");}}>
+        <Orb status={status} size={24}/><span key={pillLabel}><Reveal text={pillLabel}/></span>
+      </button>
+      <button className="notch-talk notch-talk-pill" type="button" aria-label="Maintenir pour parler"
+        onClick={event=>event.stopPropagation()}
+        onPointerDown={event=>{event.preventDefault();onTalk(true);event.currentTarget.setPointerCapture(event.pointerId);}}
+        onPointerUp={()=>onTalk(false)} onPointerCancel={()=>onTalk(false)} onLostPointerCapture={()=>onTalk(false)}>
+        <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3a3 3 0 0 0-3 3v5a3 3 0 0 0 6 0V6a3 3 0 0 0-3-3ZM6 11a6 6 0 0 0 12 0M12 17v4m-3 0h6" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round"/></svg>
+      </button>
+    </div>
+    : <button className={`notch pill-notch m-${mode} s-${status}`} onClick={()=>{clear();go("panel");}}>
+      <Orb status={status} size={24}/><span key={pillLabel}><Reveal text={pillLabel}/></span>
+    </button>;
   return <section className={`notch sheet m-${mode}`} onMouseEnter={clear} onMouseLeave={()=>{ if (mode !== "document" && document.activeElement?.tagName !== "INPUT") later("collapsed", 700); }} onKeyDown={e=>{if(e.key==="Escape")go("collapsed");}}>
     <div className="bar">
       <span className="status"><Orb status={status} size={28}/><span>{active ? statusText[status] ?? status : state.hotkey_label}</span>
