@@ -18,6 +18,7 @@ dependencies = [
   "psutil>=5.9",
   "pynput>=1.7",
   "PyQt6>=6.6",
+  "PyQt6-WebEngine==6.11.0",
   "python-dotenv>=1.0",
   "python-docx>=1.1",
   "pytesseract>=0.3.10",
@@ -44,7 +45,7 @@ include = ["gerald*"]
 
 [tool.setuptools.package-data]
 "gerald.prompts" = ["*.md"]
-"gerald.home.fonts" = ["*.otf", "OFL.txt"]
+"gerald.home" = ["webui/*.html", "webui/assets/*", "webui/fonts/*", "demo_docs/*.md"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

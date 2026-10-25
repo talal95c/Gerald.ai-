@@ -5,11 +5,13 @@ import os
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
 import pytest
-from PyQt6.QtGui import QColor
+from PyQt6.QtCore import QRectF
+from PyQt6.QtGui import QColor, QImage, QPainter
 from PyQt6.QtWidgets import QApplication
 
-from gerald.board import BoardWindow
-from gerald.tools.plot import build_plot, parse_expression
+from gerald.board import BoardWindow, PLOT_PALETTE
+from gerald.tools.plot import PLOT_INSETS, build_plot, parse_expression
+from gerald.tools.plot_render import _curve_path, draw_plot
 from gerald.tools.registry import BOARD_TOOL_NAMES, TOOL_SCHEMAS
 
 
@@ -58,6 +60,86 @@ def test_sampling_breaks_asymptote_jumps():
     assert None in plot.curves[0].samples
 
 
+def test_curve_path_keeps_out_of_range_y_for_render_clipping():
+    plot, _result = build_plot(
+        {**_base_args(), "y_min": -2, "y_max": 8},
+        (800, 600),
+    )
+    left, top, right, bottom = PLOT_INSETS
+    graph = QRectF(left, top, 420 - left - right, 300 - top - bottom)
+
+    path = _curve_path(plot, plot.curves[0], graph, len(plot.curves[0].samples))
+
+    assert path.boundingRect().top() < graph.top()
+
+
+def test_out_of_range_curve_render_is_clipped_to_graph():
+    app = QApplication.instance() or QApplication([])
+    plot, _result = build_plot(
+        {
+            **_base_args(),
+            "functions": [{"expr": "x**2-5*x+6"}],
+            "y_min": -2,
+            "y_max": 8,
+            "x": 20,
+            "y": 20,
+        },
+        (500, 360),
+    )
+    image = QImage(500, 360, QImage.Format.Format_ARGB32)
+    image.fill(QColor("#FFFFFF"))
+    curve_color = QColor(PLOT_PALETTE.curve)
+    painter = QPainter(image)
+    painter.translate(plot.box[0], plot.box[1])
+    draw_plot(painter, plot, 1, "Arial", PLOT_PALETTE)
+    painter.end()
+
+    left, top, right, bottom = PLOT_INSETS
+    graph_left = int(plot.box[0] + left)
+    graph_top = int(plot.box[1] + top)
+    graph_right = int(plot.box[0] + plot.box[2] - right)
+    graph_bottom = int(plot.box[1] + plot.box[3] - bottom)
+    curve_pixels = [
+        (x, y)
+        for y in range(image.height())
+        for x in range(image.width())
+        if image.pixelColor(x, y) == curve_color
+    ]
+
+    assert curve_pixels
+    assert all(
+        graph_left - 1 <= x <= graph_right + 1
+        and graph_top - 1 <= y <= graph_bottom + 1
+        for x, y in curve_pixels
+    )
+    app.processEvents()
+
+
+def test_explicit_plot_box_moves_away_from_occupied_content():
+    args = {
+        **_base_args(),
+        "x": 100,
+        "y": 100,
+        "points": [{"x": 2, "y": 0, "label": "Racine"}],
+    }
+    occupied = [(100, 100, 420, 300)]
+
+    plot, result = build_plot(args, (800, 900), occupied)
+
+    x, y, width, height = plot.box
+    occupied_x, occupied_y, occupied_width, occupied_height = occupied[0]
+    assert (x, y, width, height) != (100, 100, 420, 300)
+    assert (
+        x + width <= occupied_x
+        or x >= occupied_x + occupied_width
+        or y + height <= occupied_y
+        or y >= occupied_y + occupied_height
+    )
+    assert result["box"] == [round(x), round(y), round(width), round(height)]
+    assert x <= result["points"][0]["x_img"] <= x + width
+    assert y <= result["points"][0]["y_img"] <= y + height
+
+
 def test_plot_schema_and_validation_errors():
     assert "plot" in BOARD_TOOL_NAMES
     schema = next(tool for tool in TOOL_SCHEMAS if tool["name"] == "plot")
@@ -99,5 +181,14 @@ def test_board_plot_renders_and_returns_point_image_coordinates():
     image = board.grab().toImage()
     assert not image.isNull()
     assert image.pixelColor(x + 20, y + 20) == QColor("#FFFFFF")
+    plot = board._gerald[0]["plot"]
+    left, top, right, bottom = PLOT_INSETS
+    graph_left, graph_top = left, top
+    graph_width = width - left - right
+    graph_height = height - top - bottom
+    axis_x = round(x + graph_left + (0 - plot.x_min) / (plot.x_max - plot.x_min) * graph_width)
+    curve_y = graph_top + (plot.y_max - 6) / (plot.y_max - plot.y_min) * graph_height
+    probe_y = round(y + (graph_top + curve_y) / 2)
+    assert image.pixelColor(axis_x, probe_y).red() < 100
     board.close()
     app.processEvents()

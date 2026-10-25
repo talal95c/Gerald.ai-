@@ -380,6 +380,50 @@ def test_line_match_joins_consecutive_ocr_elements_and_returns_span_only():
     assert result == ScreenRect(58, 10, 128, 12)
 
 
+def test_exact_duplicate_line_match_uses_nearest_supplied_coordinates():
+    capture = capture_from_image(
+        Image.new("RGB", (400, 200), "white"),
+        MonitorRect(0, 0, 400, 200),
+        max_width=400,
+    )
+    elements = [
+        Element(1, "Text", "return", (20, 20, 42, 12), "ocr"),
+        Element(2, "Text", "total", (66, 20, 38, 12), "ocr"),
+        Element(3, "Text", "return", (20, 100, 42, 12), "ocr"),
+        Element(4, "Text", "total", (66, 100, 38, 12), "ocr"),
+    ]
+
+    result = resolve_target(
+        {"text": "return total", "x": 84, "y": 106},
+        capture,
+        elements,
+    )
+
+    assert result == ScreenRect(20, 100, 84, 12)
+
+
+def test_fuzzy_duplicate_line_match_uses_nearest_supplied_coordinates():
+    capture = capture_from_image(
+        Image.new("RGB", (400, 200), "white"),
+        MonitorRect(0, 0, 400, 200),
+        max_width=400,
+    )
+    elements = [
+        Element(1, "Text", "return", (20, 20, 42, 12), "ocr"),
+        Element(2, "Text", "tota", (66, 20, 30, 12), "ocr"),
+        Element(3, "Text", "return", (20, 100, 42, 12), "ocr"),
+        Element(4, "Text", "tota", (66, 100, 30, 12), "ocr"),
+    ]
+
+    result = resolve_target(
+        {"text": "return total", "x": 80, "y": 106},
+        capture,
+        elements,
+    )
+
+    assert result == ScreenRect(20, 100, 76, 12)
+
+
 def test_french_elision_matches_token_with_curly_apostrophe():
     capture = capture_from_image(
         Image.new("RGB", (400, 200), "white"),

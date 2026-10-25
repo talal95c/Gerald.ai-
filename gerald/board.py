@@ -5,16 +5,16 @@ import math
 import time
 
 from PIL import Image
-from PyQt6.QtCore import QPointF, QRectF, Qt, QTimer
-from PyQt6.QtGui import QColor, QFont, QFontMetricsF, QImage, QPainter, QPainterPath, QPen, QPixmap
+from PyQt6.QtCore import QPointF, QRectF, QSize, Qt, QTimer
+from PyQt6.QtGui import QColor, QFont, QFontMetricsF, QIcon, QImage, QPainter, QPainterPath, QPen, QPixmap
 from PyQt6.QtWidgets import QFrame, QHBoxLayout, QPushButton, QWidget
 
 from gerald.capture.screen import Capture, MonitorRect, capture_from_image
-from gerald.overlay.window import ACCENT, _system_font_family, screen_mapping_for_qscreen
+from gerald.overlay.window import _system_font_family, screen_mapping_for_qscreen
 from gerald.tools.diagram import DiagramCommand
 from gerald.tools.diagram_render import draw_diagram
 from gerald.tools.plot import build_plot
-from gerald.tools.plot_render import draw_plot
+from gerald.tools.plot_render import PlotPalette, draw_plot
 from gerald.tools.registry import (
     ArrowCommand,
     CircleCommand,
@@ -24,6 +24,23 @@ from gerald.tools.registry import (
     NoteCommand,
     PointCommand,
     UnderlineCommand,
+)
+
+PAPER = QColor("#F7F6F3")
+BOARD_MARK = QColor("#E8C547")
+PLOT_PALETTE = PlotPalette(
+    curve="#262626",
+    secondary_curves=("#E8C547", "#545454"),
+    point_fill="#E8C547",
+    point_outline="#262626",
+    label_fill="#F7F6F3",
+    label_border="#E1DFDB",
+    label_text="#262626",
+    grid="#ECEBE7",
+    axis="#262626",
+    tick="#6D6D6D",
+    card="#FFFFFF",
+    card_border="#E1DFDB",
 )
 
 
@@ -70,6 +87,9 @@ def group_strokes(strokes: list[list[tuple[float, float, float]]], distance: flo
 
 class BoardWindow(QWidget):
     def __init__(self) -> None:
+        from gerald.home.typography import ensure_fonts
+
+        ensure_fonts()
         super().__init__(None, Qt.WindowType.FramelessWindowHint | Qt.WindowType.WindowStaysOnTopHint)
         self.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground, False)
         self.setMouseTracking(True)
@@ -79,30 +99,45 @@ class BoardWindow(QWidget):
         self.user_strokes: list[list[tuple[float, float, float]]] = []
         self._current: list[tuple[float, float, float]] | None = None
         self._gerald: list[dict] = []
+        self._exercise_title = ""
+        self._exercise_lines: list[str] = []
         self._capture: Capture | None = None
         self._reveal_timer = QTimer(self)
         self._reveal_timer.setInterval(16)
         self._reveal_timer.timeout.connect(self._advance_reveals)
         self._toolbar = QFrame(self)
         self._toolbar.setStyleSheet(
-            "QFrame { background: rgba(30,30,32,210); border-radius: 18px; }"
-            "QPushButton { color: #F5F5F7; background: transparent; border: 0; padding: 7px 10px; }"
-            "QPushButton:hover { background: rgba(255,255,255,0.18); border-radius: 12px; }"
+            "QFrame { background: #161616; border-radius: 28px; }"
+            "QPushButton { color: #F7F6F3; background: transparent; border: 0; "
+            "padding: 5px 10px; font: 11px 'Google Sans Flex'; }"
+            "QPushButton:hover { background: rgba(255,255,255,0.10); border-radius: 22px; }"
         )
+        self._toolbar.setFixedHeight(56)
         toolbar = QHBoxLayout(self._toolbar)
-        toolbar.setContentsMargins(6, 4, 6, 4)
+        toolbar.setContentsMargins(6, 6, 6, 6)
         toolbar.setSpacing(2)
+        self._tool_buttons: dict[str, QPushButton] = {}
         for name, callback in (
-            ("Pen", lambda: self.set_tool("pen")),
-            ("Eraser", lambda: self.set_tool("eraser")),
-            ("Undo", self.undo),
-            ("Clear", self.clear_user_ink),
-            ("Close", self.close),
+            ("Stylo", lambda: self.set_tool("pen")),
+            ("Gomme", lambda: self.set_tool("eraser")),
+            ("Annuler", self.undo),
+            ("Effacer", self.clear_user_ink),
+            ("Fermer", self.close),
         ):
             button = QPushButton(name, self._toolbar)
+            button.setFixedHeight(44)
             button.clicked.connect(callback)
             toolbar.addWidget(button)
+            if name in {"Stylo", "Gomme"}:
+                self._tool_buttons[name] = button
+        self.set_tool("pen")
         self._position_toolbar()
+
+    def set_exercise(self, title: str, lines: list[str]) -> None:
+        self._exercise_title = title
+        self._exercise_lines = list(lines)
+        self._position_toolbar()
+        self.update()
 
     def open_on_screen(self, screen, dark: bool | None = None) -> None:
         if dark is None:
@@ -128,12 +163,30 @@ class BoardWindow(QWidget):
             return
         self._toolbar.adjustSize()
         x = max(0, (self.width() - self._toolbar.width()) // 2)
+        if self._exercise_title:
+            card_width = min(420, max(280, self.width() - 32))
+            card_left = self.width() - card_width - 24
+            if x + self._toolbar.width() > card_left - 12:
+                x = max(0, card_left - self._toolbar.width() - 12)
         y = min(20, max(0, self.height() - self._toolbar.height()))
         self._toolbar.move(x, y)
         self._toolbar.show()
 
     def set_tool(self, tool: str) -> None:
         self._tool = tool
+        active_name = "Stylo" if tool == "pen" else "Gomme"
+        for name, button in self._tool_buttons.items():
+            pixmap = QPixmap(8, 8)
+            pixmap.fill(Qt.GlobalColor.transparent)
+            painter = QPainter(pixmap)
+            painter.setRenderHint(QPainter.RenderHint.Antialiasing)
+            if name == active_name:
+                painter.setPen(Qt.PenStyle.NoPen)
+                painter.setBrush(QColor("#FFFDBD"))
+                painter.drawEllipse(1, 1, 6, 6)
+            painter.end()
+            button.setIcon(QIcon(pixmap))
+            button.setIconSize(QSize(8, 8))
 
     def undo(self) -> None:
         if self.user_strokes:
@@ -209,7 +262,7 @@ class BoardWindow(QWidget):
         from matplotlib.mathtext import math_to_image
 
         output = BytesIO()
-        math_to_image(f"${latex}$", output, dpi=160, format="png", color=ACCENT.name())
+        math_to_image(f"${latex}$", output, dpi=160, format="png", color=BOARD_MARK.name())
         image = QImage.fromData(output.getvalue(), "PNG")
         x, y = self._image_to_local(x, y)
         image = QPixmap.fromImage(image).scaledToHeight(
@@ -221,10 +274,17 @@ class BoardWindow(QWidget):
         self.update()
 
     def _image_to_local(self, x: float, y: float) -> tuple[float, float]:
+        scale_x, scale_y = self._image_scale_to_local()
+        return x * scale_x, y * scale_y
+
+    def _image_scale_to_local(self) -> tuple[float, float]:
         if self._capture is None:
-            return x, y
-        screen_x, screen_y = self._capture.img_to_screen(x, y)
-        return self._screen_to_local(screen_x, screen_y)
+            return 1.0, 1.0
+        image_width, image_height = self._capture.image.size
+        return (
+            self.width() / max(1, image_width),
+            self.height() / max(1, image_height),
+        )
 
     def _screen_to_local(self, screen_x: float, screen_y: float) -> tuple[float, float]:
         if self._capture is None:
@@ -236,9 +296,7 @@ class BoardWindow(QWidget):
         )
 
     def _image_size_to_logical(self, size: float) -> float:
-        ratio = self.screen().devicePixelRatio() if self.screen() else 1.0
-        scale = self._capture.scale if self._capture is not None else 1.0
-        return size / max(0.01, scale * ratio)
+        return size * self._image_scale_to_local()[1]
 
     def execute_tool(self, name: str, args: dict) -> str:
         import json
@@ -311,6 +369,16 @@ class BoardWindow(QWidget):
                                 item["image"].height() * image_scale_y,
                             )
                         )
+                exercise_rect = self._exercise_card_rect()
+                if exercise_rect is not None:
+                    occupied.append(
+                        (
+                            exercise_rect.x() * image_scale_x,
+                            exercise_rect.y() * image_scale_y,
+                            exercise_rect.width() * image_scale_x,
+                            exercise_rect.height() * image_scale_y,
+                        )
+                    )
                 plot, result = build_plot(args, image_size, occupied)
                 self._gerald.append(
                     {"kind": "plot", "plot": plot, "created": time.monotonic()}
@@ -442,8 +510,8 @@ class BoardWindow(QWidget):
     def paintEvent(self, event) -> None:
         del event
         painter = QPainter(self)
-        paper = QColor("#1C1C1E") if self._dark else QColor("#FAFAF7")
-        ink = QColor("#F5F5F7") if self._dark else QColor("#1C1C1E")
+        paper = QColor("#1C1C1E") if self._dark else PAPER
+        ink = QColor("#F5F5F7") if self._dark else QColor("#262626")
         painter.fillRect(self.rect(), paper)
         painter.setRenderHint(QPainter.RenderHint.Antialiasing)
         for stroke in self.user_strokes:
@@ -451,11 +519,11 @@ class BoardWindow(QWidget):
                 pen = QPen(ink, 2.5 * (first[2] + second[2]) / 2, Qt.PenStyle.SolidLine, Qt.PenCapStyle.RoundCap, Qt.PenJoinStyle.RoundJoin)
                 painter.setPen(pen)
                 painter.drawLine(QPointF(first[0], first[1]), QPointF(second[0], second[1]))
-        painter.setPen(QPen(ACCENT, 3, Qt.PenStyle.SolidLine, Qt.PenCapStyle.RoundCap, Qt.PenJoinStyle.RoundJoin))
+        painter.setPen(QPen(BOARD_MARK, 3, Qt.PenStyle.SolidLine, Qt.PenCapStyle.RoundCap, Qt.PenJoinStyle.RoundJoin))
         for item in self._gerald:
             painter.save()
             if item["kind"] == "text":
-                font = QFont("Noto Sans", max(8, int(item["size"])))
+                font = QFont("Google Sans Flex", max(8, int(item["size"])))
                 painter.setFont(font)
                 text = item["text"]
                 painter.setClipRect(
@@ -501,21 +569,21 @@ class BoardWindow(QWidget):
             elif item["kind"] == "plot":
                 plot = item["plot"]
                 x, y = self._image_to_local(plot.box[0], plot.box[1])
-                scale = self._image_size_to_logical(1)
+                scale_x, scale_y = self._image_scale_to_local()
                 painter.save()
                 painter.translate(x, y)
-                painter.scale(scale, scale)
+                painter.scale(scale_x, scale_y)
                 draw_plot(
                     painter,
                     plot,
                     min(1.0, (time.monotonic() - item["created"]) / 0.6),
-                    _system_font_family(),
-                    ACCENT,
+                    "Google Sans Flex",
+                    PLOT_PALETTE,
                 )
                 painter.restore()
             elif item["kind"] == "command":
                 command = item["command"]
-                painter.setPen(QPen(ACCENT, 3, Qt.PenStyle.SolidLine, Qt.PenCapStyle.RoundCap, Qt.PenJoinStyle.RoundJoin))
+                painter.setPen(QPen(BOARD_MARK, 3, Qt.PenStyle.SolidLine, Qt.PenCapStyle.RoundCap, Qt.PenJoinStyle.RoundJoin))
                 painter.setBrush(Qt.BrushStyle.NoBrush)
                 if isinstance(command, (CircleCommand, HighlightCommand, UnderlineCommand, NoteCommand)):
                     rect = command.rect
@@ -526,12 +594,12 @@ class BoardWindow(QWidget):
                         painter.drawEllipse(QRectF(*area))
                     elif isinstance(command, HighlightCommand):
                         painter.setPen(Qt.PenStyle.NoPen)
-                        painter.setBrush(QColor(ACCENT.red(), ACCENT.green(), ACCENT.blue(), 46))
+                        painter.setBrush(QColor(BOARD_MARK.red(), BOARD_MARK.green(), BOARD_MARK.blue(), 46))
                         painter.drawRoundedRect(QRectF(*area), 8, 8)
                     elif isinstance(command, UnderlineCommand):
                         painter.drawLine(QPointF(area[0], area[1] + area[3]), QPointF(area[0] + area[2], area[1] + area[3]))
                     else:
-                        painter.setFont(QFont("Noto Sans", 13))
+                        painter.setFont(QFont("Google Sans Flex", 13))
                         painter.drawText(QPointF(area[0], area[1]), command.text)
                 elif isinstance(command, (ArrowCommand, LinkCommand)):
                     start = self._screen_to_local(*command.start)
@@ -546,7 +614,68 @@ class BoardWindow(QWidget):
                             )
                 elif isinstance(command, PointCommand):
                     center = self._screen_to_local(*command.rect.center)
-                    painter.setBrush(ACCENT)
+                    painter.setBrush(BOARD_MARK)
                     painter.drawEllipse(QPointF(*center), 5, 5)
             painter.restore()
+        if self._exercise_title:
+            self._paint_exercise(painter)
         painter.end()
+
+    def _paint_exercise(self, painter: QPainter) -> None:
+        rect = self._exercise_card_rect()
+        if rect is None:
+            return
+        label = "EXERCICE"
+        title = self._exercise_title.strip()
+        if title.lower().startswith("exercice"):
+            label, separator, title = title.partition("—")
+            label = label.strip().upper()
+            title = title.strip() if separator else ""
+        elif title:
+            label = "ÉNONCÉ"
+        text = "\n".join(part for part in [title, *self._exercise_lines] if part)
+        font = QFont("Google Sans Flex", 22)
+        painter.save()
+        painter.setPen(QPen(QColor("#E1DFDB"), 1))
+        painter.setBrush(QColor("#EEEEEE"))
+        painter.drawRoundedRect(rect, 16, 16)
+        badge = QRectF(rect.left() + 20, rect.top() + 13, 14, 14)
+        painter.setPen(Qt.PenStyle.NoPen)
+        painter.setBrush(QColor("#262626"))
+        painter.drawRoundedRect(badge, 4, 4)
+        painter.setPen(QPen(QColor("#F7F6F3"), 1.2, Qt.PenStyle.SolidLine, Qt.PenCapStyle.RoundCap))
+        painter.drawLine(QPointF(badge.left() + 4, badge.top() + 5), QPointF(badge.right() - 4, badge.top() + 5))
+        painter.drawLine(QPointF(badge.left() + 4, badge.top() + 9), QPointF(badge.right() - 4, badge.top() + 9))
+        painter.setFont(QFont("Abel", 11))
+        painter.setPen(QColor("#6D6D6D"))
+        painter.drawText(
+            QRectF(rect.left() + 42, rect.top() + 10, rect.width() - 62, 20),
+            int(Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter),
+            label,
+        )
+        painter.setFont(font)
+        painter.setPen(QColor("#262626"))
+        painter.drawText(
+            QRectF(rect.left() + 20, rect.top() + 40, rect.width() - 40, rect.height() - 60),
+            Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignTop | Qt.TextFlag.TextWordWrap,
+            text,
+        )
+        painter.restore()
+
+    def _exercise_card_rect(self) -> QRectF | None:
+        if not self._exercise_title:
+            return None
+        width = min(420, max(280, self.width() - 32))
+        title = self._exercise_title.strip()
+        if title.lower().startswith("exercice"):
+            _, separator, title = title.partition("—")
+            title = title.strip() if separator else ""
+        text = "\n".join(part for part in [title, *self._exercise_lines] if part)
+        metrics = QFontMetricsF(QFont("Google Sans Flex", 22))
+        text_rect = metrics.boundingRect(
+            QRectF(0, 0, width - 40, self.height()),
+            Qt.TextFlag.TextWordWrap,
+            text,
+        )
+        height = min(60 + math.ceil(text_rect.height()), max(80, self.height() - 40))
+        return QRectF(self.width() - width - 24, 20, width, height)

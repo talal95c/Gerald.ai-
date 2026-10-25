@@ -463,13 +463,55 @@ def resolve_target(
             matches.append((element, score, rank, word_rect or element.rect))
         best_single_rank = max((match[2] for match in matches), default=0)
         line_matches = _matched_line_runs(elements, query)
+        line_point = None
+        if line_matches and "x" in args and "y" in args:
+            x, y = args["x"], args["y"]
+            if (
+                not isinstance(x, (int, float))
+                or isinstance(x, bool)
+                or not isinstance(y, (int, float))
+                or isinstance(y, bool)
+            ):
+                raise ValueError("x and y must be numbers")
+            line_point = (float(x), float(y))
         exact_line_matches = [match for match in line_matches if match[1]]
         if exact_line_matches and best_single_rank < 3:
-            chosen = min(exact_line_matches, key=lambda match: match[0][2] * match[0][3])
+            if line_point is None:
+                chosen = min(
+                    exact_line_matches,
+                    key=lambda match: match[0][2] * match[0][3],
+                )
+            else:
+                chosen = min(
+                    exact_line_matches,
+                    key=lambda match: (
+                        hypot(
+                            line_point[0] - (match[0][0] + match[0][2] / 2),
+                            line_point[1] - (match[0][1] + match[0][3] / 2),
+                        ),
+                        match[0][2] * match[0][3],
+                    ),
+                )
             return resolved(_screen_rect(capture, chosen[0]), "text")
         fuzzy_line_matches = [match for match in line_matches if not match[1]]
         if fuzzy_line_matches and best_single_rank < 3:
-            chosen = max(fuzzy_line_matches, key=lambda match: (match[2], -match[0][2] * match[0][3]))
+            if line_point is None:
+                chosen = max(
+                    fuzzy_line_matches,
+                    key=lambda match: (match[2], -match[0][2] * match[0][3]),
+                )
+            else:
+                chosen = min(
+                    fuzzy_line_matches,
+                    key=lambda match: (
+                        hypot(
+                            line_point[0] - (match[0][0] + match[0][2] / 2),
+                            line_point[1] - (match[0][1] + match[0][3] / 2),
+                        ),
+                        -match[2],
+                        match[0][2] * match[0][3],
+                    ),
+                )
             return resolved(_screen_rect(capture, chosen[0]), "text")
         if matches:
             best_rank = max(match[2] for match in matches)

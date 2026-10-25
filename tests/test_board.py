@@ -4,7 +4,8 @@ from types import SimpleNamespace
 
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
-from PyQt6.QtCore import QRect, Qt
+from PyQt6.QtCore import QRect, QRectF, Qt
+from PyQt6.QtGui import QColor
 from PyQt6.QtTest import QTest
 from PyQt6.QtWidgets import QApplication, QPushButton
 
@@ -35,6 +36,70 @@ def test_board_capture_preserves_one_to_one_image_mapping():
     assert capture.image.size == (200, 120)
     assert capture.screen_to_img(25, 30) == (25, 30)
     assert rects == []
+    board.close()
+    app.processEvents()
+
+
+def test_plot_uses_widget_mapping_and_avoids_exercise_on_hidpi_capture():
+    app = QApplication.instance() or QApplication([])
+    board = BoardWindow()
+    board.resize(1200, 800)
+    board.set_exercise("Exercice 1", ["Résous x² − 5x + 6 = 0"])
+    board._capture = SimpleNamespace(
+        image=SimpleNamespace(size=(2400, 1600)),
+        monitor=SimpleNamespace(left=0, top=0),
+        scale=1.0,
+        img_to_screen=lambda x, y: (x, y),
+    )
+    requested = (1540, 80, 600, 400)
+    result = json.loads(
+        board.execute_tool(
+            "plot",
+            {
+                "functions": [{"expr": "x**2-5*x+6"}],
+                "x_min": -1,
+                "x_max": 6,
+                "x": requested[0],
+                "y": requested[1],
+                "w": requested[2],
+                "h": requested[3],
+            },
+        )
+    )
+
+    plot = board._gerald[-1]["plot"]
+    scale_x, scale_y = board._image_scale_to_local()
+    local_x, local_y = board._image_to_local(plot.box[0], plot.box[1])
+    painted_rect = QRectF(
+        local_x,
+        local_y,
+        plot.box[2] * scale_x,
+        plot.box[3] * scale_y,
+    )
+    exercise_rect = board._exercise_card_rect()
+
+    assert result["ok"]
+    assert tuple(plot.box) != requested
+    assert exercise_rect is not None
+    assert 0 <= painted_rect.left() <= painted_rect.right() <= board.width()
+    assert 0 <= painted_rect.top() <= painted_rect.bottom() <= board.height()
+    assert not painted_rect.intersects(exercise_rect)
+
+    board._gerald[-1]["created"] -= 1
+    board.show()
+    app.processEvents()
+    pixmap = board.grab()
+    image = pixmap.toImage()
+    ratio = pixmap.devicePixelRatioF()
+    sample_x = round(painted_rect.center().x() * ratio)
+    sample_y = round(painted_rect.top() * ratio)
+    assert any(
+        image.pixelColor(sample_x + dx, sample_y + dy).lightness() < 245
+        for dx in range(-2, 3)
+        for dy in range(-2, 3)
+        if 0 <= sample_x + dx < image.width()
+        and 0 <= sample_y + dy < image.height()
+    )
     board.close()
     app.processEvents()
 
@@ -138,15 +203,52 @@ def test_toolbar_is_visible_and_centered_at_top():
 
     toolbar = board._toolbar
     assert toolbar.isVisible()
+    assert toolbar.height() == 56
     assert toolbar.y() == 20
     assert toolbar.x() == (board.width() - toolbar.width()) // 2
-    assert [button.text() for button in toolbar.findChildren(QPushButton)] == [
-        "Pen",
-        "Eraser",
-        "Undo",
-        "Clear",
-        "Close",
+    buttons = toolbar.findChildren(QPushButton)
+    assert all(button.height() >= 44 for button in buttons)
+    assert [button.text() for button in buttons] == [
+        "Stylo",
+        "Gomme",
+        "Annuler",
+        "Effacer",
+        "Fermer",
     ]
+    board.close()
+    app.processEvents()
+
+
+def test_exercise_card_is_visible_and_unchanged_by_board_actions():
+    app = QApplication.instance() or QApplication([])
+    board = BoardWindow()
+    board.resize(900, 700)
+    board.set_exercise("Exercice 1", ["Résous dans ℝ : x² − 5x + 6 = 0"])
+    board.show()
+    app.processEvents()
+
+    image = board.grab().toImage()
+    assert image.pixelColor(470, 70) == QColor("#EEEEEE")
+    capture, rects = board.capture()
+    assert capture.image.getpixel((470, 70)) == (238, 238, 238)
+    text_pixels = capture.image.crop((472, 62, 870, 120)).convert("RGB")
+    assert any(
+        text_pixels.getpixel((x, y)) != (238, 238, 238)
+        for y in range(text_pixels.height)
+        for x in range(text_pixels.width)
+    )
+    assert rects == []
+    assert board._exercise_title == "Exercice 1"
+    assert board._exercise_lines == ["Résous dans ℝ : x² − 5x + 6 = 0"]
+
+    board.user_strokes = [[(1, 2, 1.0)], [(3, 4, 1.0)]]
+    board.undo()
+    assert len(board.user_strokes) == 1
+    board.clear_user_ink()
+    board.clear_gerald()
+    assert board._exercise_title == "Exercice 1"
+    assert board._exercise_lines == ["Résous dans ℝ : x² − 5x + 6 = 0"]
+
     board.close()
     app.processEvents()
 
@@ -218,6 +320,41 @@ def test_tablet_eraser_press_uses_eraser_path_without_creating_stroke(monkeypatc
     assert board._current is None
     assert len(board.user_strokes) == 1
     assert event.accepted
+    board.close()
+    app.processEvents()
+
+
+def test_tablet_stroke_retains_pen_pressure():
+    from PyQt6.QtCore import QPointF
+
+    class Event:
+        class Type:
+            TabletPress = 1
+            TabletMove = 2
+
+        def __init__(self, event_type, position, pressure):
+            self._type = event_type
+            self._position = position
+            self._pressure = pressure
+
+        def type(self):
+            return self._type
+
+        def position(self):
+            return self._position
+
+        def pressure(self):
+            return self._pressure
+
+        def accept(self):
+            pass
+
+    app = QApplication.instance() or QApplication([])
+    board = BoardWindow()
+    board.tabletEvent(Event(Event.Type.TabletPress, QPointF(30, 40), 0.7))
+    board.tabletEvent(Event(Event.Type.TabletMove, QPointF(35, 45), 0.4))
+
+    assert board.user_strokes == [[(30.0, 40.0, 0.7), (35.0, 45.0, 0.4)]]
     board.close()
     app.processEvents()
 
