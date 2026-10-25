@@ -169,3 +169,16 @@ body.show-notes #notes{display:block}
 @keyframes breathe{0%,100%{transform:scale(1)}50%{transform:scale(1.07)}}
 @keyframes blink{50%{opacity:0}}
 @media (prefers-reduced-motion:reduce){*,*::before,*::after{animation-duration:.01s!important;transition:none!important}}
+
+/* everything / market / bench */
+.card .num{text-transform:uppercase;letter-spacing:.06em;font-size:19px}
+.claim{font:500 34px "Google Sans Flex";letter-spacing:-.02em;color:var(--mut)}.claim b{color:var(--ink);font-weight:500}
+.market{display:grid;grid-template-columns:1fr 1.3fr 1fr;gap:28px;width:100%}
+.mk-c{padding:36px;border-radius:24px;background:#fff;border:1px solid var(--line);display:flex;flex-direction:column;gap:10px}
+.mk-c strong{font:500 96px/1 "Google Sans Flex";letter-spacing:-.05em}
+.mk-c p{font-size:25px}.mk-c small{font-size:17px;color:var(--mut);margin-top:auto}
+.mk-c.big{background:var(--tex);border:0}.mk-c.big strong{font-size:120px}
+.bench{display:grid;grid-template-columns:repeat(3,1fr);gap:22px 28px;width:100%}
+.b-c{padding:24px 28px;border-radius:22px;background:#fff;border:1px solid var(--line);display:flex;flex-direction:column}
+.b-c strong{font:500 56px/1.05 "Google Sans Flex";letter-spacing:-.04em;color:var(--acc)}
+.b-c span{font:500 26px "Google Sans Flex";letter-spacing:-.02em}.b-c small{font-size:18px;color:var(--mut);margin-top:4px}
