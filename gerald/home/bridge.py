@@ -82,6 +82,32 @@ class Bridge(QObject):
     @pyqtSlot(result=str)
     def state(self) -> str:
         hour = datetime.now().hour
+        recaps = []
+        if self._recap_dir.exists():
+            recap_paths = sorted(
+                self._recap_dir.glob("*.md"),
+                key=lambda path: path.stat().st_mtime,
+                reverse=True,
+            )
+            for path in recap_paths:
+                stat = path.stat()
+                heading = next(
+                    (
+                        line.lstrip().lstrip("#").strip()
+                        for line in path.read_text(encoding="utf-8", errors="replace").splitlines()
+                        if line.lstrip().startswith("#")
+                    ),
+                    path.stem,
+                )
+                recaps.append(
+                    {
+                        "path": str(path),
+                        "title": heading or path.stem,
+                        "created_at": datetime.fromtimestamp(stat.st_mtime)
+                        .astimezone()
+                        .isoformat(),
+                    }
+                )
         documents = [
             {
                 "id": value(document, "id"),
@@ -118,13 +144,14 @@ class Bridge(QObject):
                     if self._last_exercise is not None
                     else None
                 ),
+                "recaps": recaps,
             },
             ensure_ascii=False,
         )
 
     @pyqtSlot(str)
     def setMode(self, mode: str) -> None:
-        if mode not in {"greeting", "collapsed", "panel", "settings"}:
+        if mode not in {"greeting", "collapsed", "panel", "settings", "document"}:
             return
         self.mode = mode
         self.modeChanged.emit(mode)
@@ -175,6 +202,7 @@ class Bridge(QObject):
                 {
                     "role": value(message, "role", ""),
                     "text": value(message, "text", ""),
+                    "created_at": value(message, "created_at", ""),
                     "sources": json_sources(value(message, "sources")),
                 }
                 for message in self.store.get_messages(conversation_id)

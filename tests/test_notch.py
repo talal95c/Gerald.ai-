@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import os
 import threading
 import time
 from types import SimpleNamespace
@@ -76,6 +77,54 @@ def test_bridge_state_tracks_last_opened_exercise():
         "title": "Exercice 2",
         "lines": ["a"],
     }
+
+
+def test_bridge_state_lists_recaps_newest_first(tmp_path):
+    bridge = Bridge(EmptyStore(), object(), object())
+    bridge._recap_dir = tmp_path
+    older = tmp_path / "ancienne.md"
+    older.write_text("Texte\n# Ancienne révision", encoding="utf-8")
+    newer = tmp_path / "fiche-du-jour.md"
+    newer.write_text("# Polynômes du second degré", encoding="utf-8")
+    os.utime(older, (100, 100))
+    os.utime(newer, (200, 200))
+
+    recaps = json.loads(bridge.state())["recaps"]
+
+    assert [recap["path"] for recap in recaps] == [str(newer), str(older)]
+    assert [recap["title"] for recap in recaps] == [
+        "Polynômes du second degré",
+        "Ancienne révision",
+    ]
+    assert all(recap["created_at"] for recap in recaps)
+
+
+def test_bridge_messages_include_created_at():
+    store = EmptyStore()
+    store.get_messages = lambda _conversation_id: [
+        SimpleNamespace(
+            role="assistant",
+            text="Une réponse.",
+            sources=[],
+            created_at="2025-10-25T10:30:00+00:00",
+        )
+    ]
+    bridge = Bridge(store, object(), object())
+
+    assert json.loads(bridge.messages(7))[0]["created_at"] == "2025-10-25T10:30:00+00:00"
+
+
+def test_document_mode_resizes_notch_window(qapplication):
+    from gerald.home.notch import NotchWindow
+
+    bridge = Bridge(EmptyStore(), object(), object())
+    modes = []
+    bridge.modeChanged.connect(modes.append)
+
+    bridge.setMode("document")
+
+    assert modes == ["document"]
+    assert NotchWindow.sizes["document"] == (1100, 760)
 
 
 def test_bridge_open_td_emits_request():

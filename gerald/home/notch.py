@@ -30,7 +30,13 @@ class _WebSurface(QWidget):
 
 
 class NotchWindow(QWidget):
-    sizes = {"greeting": (240, 36), "collapsed": (240, 36), "panel": (760, 72), "settings": (760, 440)}
+    sizes = {
+        "greeting": (240, 36),
+        "collapsed": (240, 36),
+        "panel": (760, 72),
+        "settings": (760, 440),
+        "document": (1100, 760),
+    }
 
     def __init__(self, bridge: Bridge):
         flags = (
@@ -52,7 +58,6 @@ class NotchWindow(QWidget):
         bridge.focusRequested.connect(self.request_focus)
         bridge.recapReady.connect(self._open_recap_in_view)
         self._animation = QPropertyAnimation(self, b"geometry", self)
-        self._animation.setDuration(160)
         self._animation.setEasingCurve(QEasingCurve.Type.OutCubic)
         self._anchor("greeting", animate=False)
         self._apply_capture_exclusion()
@@ -83,11 +88,15 @@ class NotchWindow(QWidget):
             return
         available = screen.availableGeometry()
         width, height = self.sizes.get(mode, self.sizes["greeting"])
+        if mode == "document":
+            width = min(width, max(320, int(available.width() * 0.92)))
+            height = min(height, max(300, int(available.height() * 0.82)))
         target = QRect(available.center().x() - width // 2, available.top(), width, height)
         if not animate or self.geometry().isNull():
             self.setGeometry(target)
         else:
             self._animation.stop()
+            self._animation.setDuration(220 if mode == "document" else 160)
             self._animation.setStartValue(self.geometry())
             self._animation.setEndValue(target)
             self._animation.start()

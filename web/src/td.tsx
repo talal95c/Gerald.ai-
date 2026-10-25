@@ -1,70 +1,326 @@
-import React, { useEffect, useState } from "react";
-import { createRoot } from "react-dom/client";
+import React, {useEffect, useRef, useState} from "react";
+import {createRoot} from "react-dom/client";
 import katex from "katex";
 import "katex/dist/katex.min.css";
 import "./style.css";
-import { getBridge } from "./bridge";
-import { Orb } from "./orb";
-import { Reveal } from "./reveal";
-import { mountNotch } from "./notch";
+import "./board.css";
+import {getBridge} from "./bridge";
+import {Orb} from "./orb";
+import {Reveal} from "./reveal";
+import {annotationLeader, annotationSize, placeAnnotation, type AnnotationRect} from "./annotations";
+import {mountNotch} from "./notch";
+
 const bridge = getBridge();
-
 const exercises = [
-  { title:"Exercice 1", lines:["Résous dans ℝ : x² − 5x + 6 = 0"], math:"x^2 - 5x + 6 = 0", instruction:"Résous l’équation et vérifie tes solutions." },
-  { title:"Exercice 2", lines:["Résous dans ℝ : 2x² + 3x − 2 = 0"], math:"2x^2 + 3x - 2 = 0", instruction:"Résous l’équation et vérifie tes solutions." },
-  { title:"Exercice 3", lines:["Écris sous forme canonique : x² − 4x + 1"], math:"x^2 - 4x + 1", instruction:"Écris l’expression sous forme canonique." },
-  { title:"Exercice 4", lines:["Étudie le signe de −x² + x + 6"], math:"-x^2 + x + 6", instruction:"Dresse le tableau de signes." }
+  {id:"exercice-1", title:"Exercice 1", lines:["Résous dans ℝ : x² − 5x + 6 = 0"], math:"x^2 - 5x + 6 = 0", instruction:"Résous l’équation et vérifie tes solutions."},
+  {id:"exercice-2", title:"Exercice 2", lines:["Résous dans ℝ : 2x² + 3x − 2 = 0"], math:"2x^2 + 3x - 2 = 0", instruction:"Résous l’équation et vérifie tes solutions."},
+  {id:"exercice-3", title:"Exercice 3", lines:["Écris sous forme canonique : x² − 4x + 1"], math:"x^2 - 4x + 1", instruction:"Écris l’expression sous forme canonique."},
+  {id:"exercice-4", title:"Exercice 4", lines:["Étudie le signe de −x² + x + 6"], math:"-x^2 + x + 6", instruction:"Dresse le tableau de signes."},
 ];
+type Rect = {x:number;y:number;w:number;h:number};
+type ViewElement = {id:number;text:string;rect:Rect};
+type ViewApi = {elements:()=>ViewElement[];exec:(name:string,args:Record<string,any>)=>Promise<Record<string,any>>;close?:()=>void};
+type BoardApi = ViewApi & {snapshot:()=>string};
+type GeraldVoiceState = {turn:number;settledTurn:number;pendingTools:number;settledAt:number;responsesCreated:number;responsesDone:number};
+declare global { interface Window { geraldTD?:ViewApi; geraldBoard?:BoardApi; __geraldLog?:Record<string,unknown>[]; __geraldState?:GeraldVoiceState } }
+const voiceMode = new URLSearchParams(location.search).get("voice") === "1";
+const textPattern = (value:string) => new RegExp([...value.trim()].map(char => {
+  const escaped=char.replace(/[.*+?^${}()|[\]\\]/g,"\\$&");
+  return /\s/.test(char)?"\\s+":/[()[\]{}.,:+−\-\/]/.test(char)?`\\s*${escaped}\\s*`:escaped;
+}).join(""),"i");
+const voiceState = () => window.__geraldState ??= {turn:0,settledTurn:0,pendingTools:0,settledAt:0,responsesCreated:0,responsesDone:0};
+const voiceLog = () => window.__geraldLog ??= [];
 
-function exerciseIn(text: string) {
-  const match = text.match(/(?:exercice|exo)\s*(\d)/i);
-  return exercises[(match ? Number(match[1]) : 1) - 1] ?? exercises[0];
+function targetRect(args:Record<string,any>):Rect|null {
+  const elements = [...document.querySelectorAll<HTMLElement>("[data-gerald-id]")];
+  let element = elements.find(e => e.dataset.geraldId === String(args.element_id));
+  if (!element && typeof args.target_text === "string") {
+    const pattern=textPattern(args.target_text);
+    element = elements.find(e => pattern.test(e.innerText));
+  }
+  if (!element) return null;
+  let rect = element.getBoundingClientRect();
+  if (typeof args.target_text === "string" && args.target_text) {
+    const walker = document.createTreeWalker(element, NodeFilter.SHOW_TEXT);
+    const nodes:Text[]=[]; let node:Node|null;
+    while ((node=walker.nextNode())) if (!node.parentElement?.closest(".katex-mathml,[aria-hidden=true]")) nodes.push(node as Text);
+    const raw = nodes.map(n=>n.data).join("");
+    const match=textPattern(args.target_text).exec(raw);
+    if(!match)return null;
+    if (match) {
+      const locate=(offset:number,end:boolean)=>{let base=0;for(const n of nodes){const next=base+n.length;if(offset<next||end&&offset===next)return [n,Math.max(0,Math.min(n.length,offset-base))] as const;base=next;}const last=nodes[nodes.length-1];return [last,last.length] as const;};
+      if(nodes.length){const [start,so]=locate(match.index,false),[finish,fo]=locate(match.index+match[0].length,true);const range=document.createRange();range.setStart(start,so);range.setEnd(finish,fo);rect=range.getBoundingClientRect();}
+    }
+  }
+  return {x:rect.x,y:rect.y,w:rect.width,h:rect.height};
 }
 
-function AskBar() {
-  const [question, setQuestion] = useState("");
-  const [answer, setAnswer] = useState<{q: string; text: string; ex: typeof exercises[number]} | null>(null);
-  const [status, setStatus] = useState("idle");
-  useEffect(() => {
-    const onAnswer = (json: string) => {
-      const text = JSON.parse(json).text ?? "";
-      setAnswer(current => current && {...current, text});
-      setStatus("speaking");
-      window.setTimeout(() => setStatus("idle"), Math.min(6000, text.split(/\s+/).length * 40 + 1200));
-    };
-    const onError = () => setStatus("idle");
-    bridge.answer.connect(onAnswer);
-    bridge.answerError.connect(onError);
-    return () => { bridge.answer.disconnect?.(onAnswer); bridge.answerError.disconnect?.(onError); };
-  }, []);
-  const send = () => {
-    const q = question.trim();
-    if (!q) return;
-    setAnswer({q, text: "", ex: exerciseIn(q)});
-    setStatus("thinking");
-    setQuestion("");
-    bridge.ask(`TD 4 — Polynômes du second degré. ${q}`);
+function TD(){
+  const [question,setQuestion]=useState(""),[status,setStatus]=useState("idle"),[caption,setCaption]=useState(""),[captionFading,setCaptionFading]=useState(false),[connecting,setConnecting]=useState(false),[audioLevel,setAudioLevel]=useState(0),[voiceError,setVoiceError]=useState(""),[micEnabled,setMicEnabled]=useState(false);
+  const [boardOpen,setBoardOpen]=useState(false),[boardSrc,setBoardSrc]=useState("");
+  const [activeExercise,setActiveExercise]=useState(exercises[0]);
+  const [marks,setMarks]=useState<Array<{id:string;kind:string;rect:Rect;text?:string;to?:Rect;annotationTarget?:Rect;leader?:boolean}>>([]);
+  const [cursor,setCursor]=useState<{x:number;y:number;text?:string}|null>(null);
+  const [answer,setAnswer]=useState<{q:string;text:string;ex:typeof exercises[number]}|null>(null);
+  const [suggestion,setSuggestion]=useState(false);
+  const boardOpenRef=useRef(false);
+  const frame=useRef<HTMLIFrameElement>(null), audio=useRef<HTMLAudioElement>(null);
+  const peer=useRef<RTCPeerConnection|null>(null), channel=useRef<RTCDataChannel|null>(null), stream=useRef<MediaStream|null>(null);
+  const audioContext=useRef<AudioContext|null>(null), micAnalyser=useRef<AnalyserNode|null>(null), remoteAnalyser=useRef<AnalyserNode|null>(null);
+  const pushToTalk=useRef(false), toggleMic=useRef(false), pttPreviousMic=useRef(false);
+  const captionTimer=useRef<number|null>(null), handled=useRef(new Set<string>());
+  const attachAnalyser=(media:MediaStream,kind:"mic"|"remote")=>{
+    const context=audioContext.current??new AudioContext();audioContext.current=context;
+    const analyser=context.createAnalyser();analyser.fftSize=512;
+    context.createMediaStreamSource(media).connect(analyser);
+    if(kind==="mic")micAnalyser.current=analyser;else remoteAnalyser.current=analyser;
   };
-  return <div className="td-assist">
-    {answer && <div className="td-answer" key={answer.q}>
-      <span className="td-q">{answer.q}</span>
-      {answer.text ? <p><Reveal text={answer.text}/></p> : <p><span className="thinking"><i/><i/><i/></span></p>}
-      {answer.text && (/(?:exercice|exo)\s*\d/i.test(answer.q) || /tableau/i.test(answer.text)) && <button className="td-go" style={{animationDelay:`${answer.text.split(/\s+/).length*80}ms`}} onClick={()=>bridge.openBoard(answer.ex.title, JSON.stringify(answer.ex.lines))}>Viens, on va au tableau · {answer.ex.title} →</button>}
-    </div>}
-    <form className="td-ask" onSubmit={e=>{e.preventDefault(); send();}}>
-      <Orb status={status} size={30}/>
-      <input value={question} onChange={e=>setQuestion(e.target.value)} onFocus={()=>bridge.requestFocus(true)} onBlur={()=>bridge.requestFocus(false)} placeholder="Une question sur le TD ? Je t’explique."/>
-      <kbd>CTRL + SHIFT</kbd>
-    </form>
-  </div>;
+  const openBoard=(id:string)=>{
+    const ex=exercises.find(item=>item.id===id)??exercises[0]; setActiveExercise(ex);
+    const query=new URLSearchParams({title:ex.title,lines:JSON.stringify(ex.lines),voice:"1"});
+    setBoardSrc(`/board.html?${query}`); boardOpenRef.current=true; setBoardOpen(true);
+  };
+  const elements=():ViewElement[]=>[...document.querySelectorAll<HTMLElement>("[data-gerald-id]")].filter(e=>e.getClientRects().length).map(e=>{const r=e.getBoundingClientRect();return {id:Number(e.dataset.geraldId),text:(e instanceof HTMLInputElement?e.value||e.placeholder:e.innerText||"").trim(),rect:{x:r.x,y:r.y,w:r.width,h:r.height}};});
+  const placeBeside=(target:Rect,text:string,kind:"note"|"tip")=>{
+    const occupied:AnnotationRect[]=[
+      ...elements().map(element=>element.rect),
+      ...marks.filter(mark=>mark.kind==="note"||mark.kind==="tip").map(mark=>mark.rect),
+      target,
+    ];
+    return placeAnnotation(target,annotationSize(text,kind),occupied,{w:innerWidth,h:innerHeight});
+  };
+  const exec=async(name:string,args:Record<string,any>)=>{
+    if(name==="open_board"){openBoard(String(args.exercise_id));return {ok:true};}
+    if(name==="clear_gerald"){setMarks([]);setCursor(null);return {ok:true};}
+    const from=name==="arrow"?targetRect(args.from??{}):targetRect(args);
+    const to=name==="arrow"?targetRect(args.to??{}):null;
+    if(name==="arrow"&&(!from||!to))return {ok:false,error:"arrow targets were not found"};
+    const r=from??(typeof args.target_text!=="string"&&typeof args.x==="number"&&typeof args.y==="number"?{x:args.x,y:args.y,w:Number(args.w)||120,h:Number(args.h)||38}:null);
+    if(name==="tip"){
+      if(typeof args.text!=="string")return {ok:false,error:"tip requires text"};
+      const pos=r??{x:innerWidth/2,y:innerHeight-130,w:0,h:0};
+      const placement=placeBeside(pos,args.text,"tip");
+      if(!placement)return {ok:false,error:"no free space to place the tip beside its target"};
+      setCursor({x:pos.x+pos.w/2,y:pos.y+pos.h/2});
+      setMarks(a=>[...a,{id:crypto.randomUUID(),kind:"tip",rect:placement.rect,text:args.text,annotationTarget:r?pos:undefined,leader:r?placement.leader:false}]);
+      return {ok:true,target:pos,annotation:placement.rect};
+    }
+    if(name==="write"||name==="write_math"){const pos=r??{x:Number(args.x)||120,y:Number(args.y)||160,w:0,h:0};setCursor({x:pos.x,y:pos.y});setMarks(a=>[...a,{id:crypto.randomUUID(),kind:"write",rect:pos,text:String(args.text??args.latex??"")}]);return {ok:true};}
+    if(!r)return {ok:false,error:"target not found"};
+    if(!["circle","underline","point","highlight","arrow","note"].includes(name))return {ok:false,error:`unknown TD tool: ${name}`};
+    const text=String(args.text??args.label??"");
+    if(name==="note"){
+      const placement=placeBeside(r,text,"note");
+      if(!placement)return {ok:false,error:"no free space to place the note beside its target"};
+      setCursor({x:r.x+r.w/2,y:r.y+r.h/2});
+      setMarks(a=>[...a,{id:crypto.randomUUID(),kind:"note",rect:placement.rect,text,annotationTarget:r,leader:placement.leader}]);
+      return {ok:true,target:r,annotation:placement.rect};
+    }
+    const exactText=typeof args.target_text==="string"&&args.target_text.length>0;
+    const rect={x:r.x+r.w/2,y:r.y+r.h/2,w:exactText?r.w:Number(args.w)||r.w,h:exactText?r.h:Number(args.h)||r.h};
+    setCursor(name==="arrow"&&to?{x:to.x+to.w/2,y:to.y+to.h/2}:{x:rect.x,y:rect.y});
+    setMarks(a=>[...a,{id:crypto.randomUUID(),kind:name,rect,text,to}]);
+    return {ok:true,target:{x:rect.x,y:rect.y}};
+  };
+  useEffect(()=>{window.geraldTD={elements,exec,close:()=>{boardOpenRef.current=false;setBoardOpen(false);}};return()=>{delete window.geraldTD;};});
+  const getBoardApi=async()=>{for(let i=0;i<100;i++){const api=frame.current?.contentWindow?.geraldBoard;if(api)return api;await new Promise(resolve=>setTimeout(resolve,20));}return null;};
+  const sendEvent=(event:Record<string,unknown>)=>{if(channel.current?.readyState==="open")channel.current.send(JSON.stringify(event));};
+  const sendContext=async()=>{
+    if(channel.current?.readyState!=="open")return;
+    const board=boardOpenRef.current?await getBoardApi():null;
+    if(board){
+      const image=board.snapshot();
+      const text=board.elements().map(e=>`[${e.id}] "${e.text}" (${Math.round(e.rect.x)},${Math.round(e.rect.y)},${Math.round(e.rect.w)},${Math.round(e.rect.h)})`).join("\n");
+      sendEvent({type:"conversation.item.create",item:{type:"message",role:"user",content:[{type:"input_text",text:`Board visible elements in CSS pixels:\n${text}`},{type:"input_image",image_url:image}]}});
+    }
+    else {const text=elements().map(e=>`[${e.id}] "${e.text}" (${Math.round(e.rect.x)},${Math.round(e.rect.y)},${Math.round(e.rect.w)},${Math.round(e.rect.h)})`).join("\n");sendEvent({type:"conversation.item.create",item:{type:"message",role:"user",content:[{type:"input_text",text:`TD visible elements in CSS pixels:\n${text}`} ]}});}
+  };
+  const sendQuestion=async(q:string)=>{if(!q.trim()||channel.current?.readyState!=="open")return;const state=voiceState();state.turn+=1;voiceLog().push({type:"user",turn:state.turn,text:q.trim()});await sendContext();sendEvent({type:"conversation.item.create",item:{type:"message",role:"user",content:[{type:"input_text",text:q.trim()}]}});sendEvent({type:"response.create"});setQuestion("");};
+  const start=async(pushToTalkMode=false)=>{
+    window.__geraldLog=[];
+    window.__geraldState={turn:0,settledTurn:0,pendingTools:0,settledAt:0,responsesCreated:0,responsesDone:0};
+    pushToTalk.current=pushToTalkMode;
+    toggleMic.current=!pushToTalkMode;
+    setVoiceError("");
+    setConnecting(true);setStatus("thinking");
+    try{
+      stream.current=await navigator.mediaDevices.getUserMedia({audio:true});
+      const micOn=!pushToTalkMode||pushToTalk.current;
+      setMicEnabled(micOn);
+      stream.current.getAudioTracks().forEach(track=>{track.enabled=micOn;});
+      attachAnalyser(stream.current,"mic");
+      const pc=new RTCPeerConnection();peer.current=pc;stream.current.getAudioTracks().forEach(t=>pc.addTrack(t,stream.current!));
+      pc.ontrack=e=>{attachAnalyser(e.streams[0],"remote");if(audio.current){audio.current.srcObject=e.streams[0];void audio.current.play().catch(()=>undefined);}};
+      const dc=pc.createDataChannel("oai-events");channel.current=dc;
+      dc.onerror=event=>{console.error("Realtime data channel failed",event);setVoiceError("La connexion vocale a échoué.");setStatus("idle");};
+      pc.onconnectionstatechange=()=>{if(pc.connectionState==="failed"){console.error("Realtime connection failed");setVoiceError("La connexion vocale a échoué.");setStatus("idle");}};
+      dc.onopen=()=>{setConnecting(false);const micOn=stream.current?.getAudioTracks().some(track=>track.enabled)??false;setMicEnabled(micOn);setStatus(micOn?"listening":"idle");void sendContext();};
+      dc.onmessage=message=>{
+        let event:any;
+        try{event=JSON.parse(message.data);}catch(error){console.error("Invalid Realtime event",error);setVoiceError("Message vocal illisible.");setStatus("idle");return;}
+        console.info("[gerald voice event]",event.type);
+        const state=voiceState();
+        if(event.type==="input_audio_buffer.speech_started"){setStatus("listening");void sendContext();}
+        else if(event.type==="input_audio_buffer.speech_stopped")setStatus("thinking");
+        else if(event.type==="conversation.item.input_audio_transcription.completed"){const text=String(event.transcript??"");if(text){setCaption(text);setCaptionFading(false);if(captionTimer.current)clearTimeout(captionTimer.current);captionTimer.current=window.setTimeout(()=>{setCaptionFading(true);captionTimer.current=window.setTimeout(()=>{setCaption("");setCaptionFading(false);},400);},2600);}}
+        else if(event.type==="response.created"){state.responsesCreated+=1;setStatus("thinking");setCaption("");setCaptionFading(false);if(captionTimer.current)clearTimeout(captionTimer.current);}
+        else if(event.type==="response.output_audio_buffer.started"||event.type==="response.output_audio_transcript.delta"||event.type==="response.audio_transcript.delta"){setStatus("speaking");if(event.delta){setCaption(v=>v+event.delta);setCaptionFading(false);if(event.delta.toLowerCase().includes("au tableau"))setSuggestion(true);}}
+        else if(event.type==="response.output_audio_transcript.done"||event.type==="response.audio_transcript.done"){if(event.transcript)voiceLog().push({type:"transcript",turn:state.turn,response_id:event.response_id,text:event.transcript});}
+        else if(event.type==="response.output_audio_buffer.stopped")setStatus("idle");
+        else if(event.type==="response.done"){
+          const response=event.response??{},calls=(response.output??[]).filter((item:any)=>item.type==="function_call");
+          state.responsesDone+=1;
+          voiceLog().push({type:"response_done",turn:state.turn,response_id:response.id,tool_names:calls.map((call:any)=>call.name)});
+          if(calls.length){
+            if(response.id&&handled.current.has(response.id))return;
+            if(response.id)handled.current.add(response.id);
+            state.pendingTools+=calls.length;
+            setStatus("thinking");
+            void(async()=>{
+              for(const call of calls){
+                let args:Record<string,unknown>={},output:Record<string,unknown>;
+                const view=call.name==="open_board"?"td":boardOpenRef.current?"board":"td";
+                const callEntry:Record<string,unknown>={type:"tool_call",turn:state.turn,call_id:call.call_id,name:call.name,arguments:call.arguments,view,args:null};
+                voiceLog().push(callEntry);
+                try{
+                  args=JSON.parse(call.arguments||"{}");
+                  callEntry.args=args;
+                  const api=call.name==="open_board"?window.geraldTD:boardOpenRef.current?await getBoardApi():window.geraldTD;
+                  output=await api?.exec(call.name,args)??{ok:false,error:"view unavailable"};
+                }catch(error){
+                  console.error("Voice tool failed",error);
+                  output={ok:false,error:String(error)};
+                }
+                if(!output.ok){console.error("Voice tool returned an error",call.name,output);setVoiceError(call.name==="plot"?"Le tracé a échoué.":"L’action a échoué.");setStatus("idle");}else setVoiceError("");
+                voiceLog().push({type:"tool_result",turn:state.turn,call_id:call.call_id,name:call.name,args,view,result:output,ok:Boolean(output.ok),error:output.error??null});
+                state.pendingTools-=1;
+                console.info("[gerald voice tool]",call.name,view,Boolean(output.ok));
+                sendEvent({type:"conversation.item.create",item:{type:"function_call_output",call_id:call.call_id,output:JSON.stringify(output)}});
+              }
+              await sendContext();
+              sendEvent({type:"response.create"});
+            })();
+            return;
+          }
+          if(state.pendingTools===0){state.settledTurn=state.turn;state.settledAt=Date.now();}
+          setStatus("idle");
+          if(captionTimer.current)clearTimeout(captionTimer.current);
+          captionTimer.current=window.setTimeout(()=>{setCaptionFading(true);captionTimer.current=window.setTimeout(()=>{setCaption("");setCaptionFading(false);},400);},2800);
+        }
+      };
+      const offer=await pc.createOffer();await pc.setLocalDescription(offer);
+      if(pc.iceGatheringState!=="complete")await new Promise<void>(resolve=>{const timer=setTimeout(resolve,5000);pc.addEventListener("icegatheringstatechange",()=>{if(pc.iceGatheringState==="complete"){clearTimeout(timer);resolve();}},{once:true});});
+      const response=await fetch("/api/session",{method:"POST",headers:{"Content-Type":"application/sdp"},body:pc.localDescription?.sdp??""});
+      const sdp=await response.text();if(!response.ok)throw new Error(sdp||`session ${response.status}`);
+      await pc.setRemoteDescription({type:"answer",sdp});
+    }catch(error){console.error("Voice session failed",error);setVoiceError("Impossible de démarrer la voix.");setConnecting(false);setStatus("idle");stop();}
+      };
+  const stop=()=>{pushToTalk.current=false;toggleMic.current=false;channel.current?.close();peer.current?.close();stream.current?.getTracks().forEach(t=>t.stop());channel.current=null;peer.current=null;stream.current=null;micAnalyser.current=null;remoteAnalyser.current=null;if(audioContext.current){void audioContext.current.close();audioContext.current=null;}setAudioLevel(0);setMicEnabled(false);setConnecting(false);setStatus("idle");};
+  const toggleMicrophone=()=>{
+    if(channel.current?.readyState==="open"){
+      const track=stream.current?.getAudioTracks()[0];
+      if(!track){const error=new Error("Realtime session has no microphone track");console.error("Microphone toggle failed",error);setVoiceError("Le microphone n'est pas disponible.");setStatus("idle");return;}
+      const enabled=!track.enabled;
+      toggleMic.current=true;
+      pushToTalk.current=false;
+      track.enabled=enabled;
+      setMicEnabled(enabled);
+      setVoiceError("");
+      setStatus(enabled?"listening":"idle");
+      return;
+    }
+    if(!connecting)void start();
+  };
+  const beginPushToTalk=()=>{
+    if(pushToTalk.current)return;
+    pushToTalk.current=true;
+    if(channel.current?.readyState==="open"){
+      pttPreviousMic.current=stream.current?.getAudioTracks().some(track=>track.enabled)??false;
+      stream.current?.getAudioTracks().forEach(track=>{track.enabled=true;});
+      setMicEnabled(true);
+      setStatus("listening");
+    }else if(!connecting)void start(true);
+      };
+  const endPushToTalk=()=>{
+    if(!pushToTalk.current)return;
+    pushToTalk.current=false;
+    if(!toggleMic.current){
+      stream.current?.getAudioTracks().forEach(track=>{track.enabled=false;});
+      setMicEnabled(false);
+      if(channel.current?.readyState==="open")setStatus("thinking");
+    }else{
+      stream.current?.getAudioTracks().forEach(track=>{track.enabled=pttPreviousMic.current;});
+      setMicEnabled(pttPreviousMic.current);
+      if(channel.current?.readyState==="open")setStatus(pttPreviousMic.current?"listening":"idle");
+    }
+  };
+  useEffect(()=>()=>{stop();if(captionTimer.current)clearTimeout(captionTimer.current);},[]);
+  useEffect(()=>{
+    const down=(event:KeyboardEvent)=>{if(event.ctrlKey&&event.shiftKey&&!event.repeat){event.preventDefault();beginPushToTalk();}};
+    const up=(event:KeyboardEvent)=>{if(event.key==="Control"||event.key==="Shift")endPushToTalk();};
+    const blur=()=>endPushToTalk();
+    window.addEventListener("keydown",down);window.addEventListener("keyup",up);window.addEventListener("blur",blur);
+    return()=>{window.removeEventListener("keydown",down);window.removeEventListener("keyup",up);window.removeEventListener("blur",blur);};
+  },[]);
+  useEffect(()=>{
+    const data=new Float32Array(512);let frame=0,last=0;
+    const measure=(time:number)=>{
+      const analyser=status==="listening"?micAnalyser.current:status==="speaking"?remoteAnalyser.current:null;
+      let level=0;
+      if(analyser){analyser.getFloatTimeDomainData(data);let sum=0;for(const sample of data)sum+=sample*sample;level=Math.min(1,Math.sqrt(sum/data.length)*12);}
+      if(time-last>40){setAudioLevel(level);last=time;}
+      frame=requestAnimationFrame(measure);
+    };
+    frame=requestAnimationFrame(measure);
+    return()=>cancelAnimationFrame(frame);
+  },[status]);
+  useEffect(()=>{if(voiceMode)return;const onAnswer=(json:string)=>{const text=JSON.parse(json).text??"";setAnswer(v=>v&&{...v,text});};bridge.answer.connect(onAnswer);return()=>bridge.answer.disconnect?.(onAnswer);},[]);
+  const sendMock=()=>{const q=question.trim();if(!q)return;const ex=exercises.find(item=>q.toLowerCase().includes(item.title.toLowerCase()))??activeExercise;setAnswer({q,text:"",ex});bridge.ask(`TD 4 — Polynômes du second degré. ${q}`);setQuestion("");};
+  const onSubmit=(event:React.FormEvent)=>{event.preventDefault();if(voiceMode)void sendQuestion(question);else sendMock();};
+  const clickExercise=(ex:typeof exercises[number])=>{setActiveExercise(ex);if(voiceMode)openBoard(ex.id);else bridge.openBoard(ex.title,JSON.stringify(ex.lines));};
+  const sessionOpen=channel.current?.readyState==="open";
+  return <main className="td-root"><article className="paper"><header className="td-head" data-gerald-id="1"><div className="td-meta"><span>Lycée — Mathématiques</span><span>TD 4</span></div><h1 data-gerald-id="2">Polynômes du second degré</h1><div className="td-student"><span>Nom : __________________</span><span>Date : ________________</span></div></header>
+    <section className="reminder" data-gerald-id="3"><h2 data-gerald-id="4">Rappel de cours</h2><p data-gerald-id="5">Pour <span dangerouslySetInnerHTML={{__html:katex.renderToString("ax^2+bx+c=0")}} />, le discriminant vaut <span dangerouslySetInnerHTML={{__html:katex.renderToString("\\Delta=b^2-4ac")}} />. Si <span dangerouslySetInnerHTML={{__html:katex.renderToString("\\Delta>0")}} />, l’équation possède deux racines réelles.</p></section>
+    {exercises.map((ex,i)=><section className="exercise" data-gerald-id={10+i*3} key={ex.id} onClick={()=>clickExercise(ex)}><p className="exercise-lead" data-gerald-id={11+i*3}><strong>{ex.title}.</strong><span dangerouslySetInnerHTML={{__html:katex.renderToString(ex.math)}}/></p><p data-gerald-id={12+i*3}>{ex.instruction}</p><button className="open-ex">Ouvrir au tableau →</button></section>)}
+  </article>
+    <div className="td-mark-layer" aria-hidden="true">
+      <svg width={innerWidth} height={innerHeight}>
+        <defs><marker id="td-arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto"><path d="M 0 0 L 10 5 L 0 10 z" fill="#0067D9"/></marker></defs>
+        {marks.filter(m=>m.kind==="circle").map(m=><ellipse key={m.id} cx={m.rect.x} cy={m.rect.y} rx={m.rect.w/2} ry={m.rect.h/2}/>)}
+        {marks.filter(m=>m.kind==="underline").map(m=><line key={m.id} x1={m.rect.x-m.rect.w/2} x2={m.rect.x+m.rect.w/2} y1={m.rect.y+m.rect.h/2} y2={m.rect.y+m.rect.h/2}/>)}
+        {marks.filter(m=>m.kind==="point").map(m=><circle key={m.id} cx={m.rect.x} cy={m.rect.y} r="5"/> )}
+        {marks.filter(m=>m.kind==="highlight").map(m=><rect key={m.id} x={m.rect.x-m.rect.w/2} y={m.rect.y-m.rect.h/2} width={m.rect.w} height={m.rect.h}/>)}
+        {marks.filter(m=>m.kind==="arrow"&&m.to).map(m=><line key={m.id} x1={m.rect.x} y1={m.rect.y} x2={m.to!.x+m.to!.w/2} y2={m.to!.y+m.to!.h/2} markerEnd="url(#td-arrow)"/> )}
+        {marks.filter(m=>(m.kind==="note"||m.kind==="tip")&&m.leader&&m.annotationTarget).map(m=>{
+          const line=annotationLeader(m.annotationTarget!,m.rect);
+          return <line key={`${m.id}-leader`} x1={line.x1} y1={line.y1} x2={line.x2} y2={line.y2}/>;
+        })}
+        {marks.filter(m=>m.kind==="note"||m.kind==="tip").map(m=>
+          <foreignObject key={m.id} data-gerald-note={m.id} x={m.rect.x} y={m.rect.y} width={m.rect.w} height={m.rect.h}>
+            <div className={m.kind==="note"?"td-note-box":"td-tip-box"}>{m.text}</div>
+          </foreignObject>)}
+        {marks.filter(m=>m.kind==="write"||m.kind==="write_math").map(m=><text key={m.id} x={m.rect.x} y={m.rect.y} className="td-note">{m.text}</text>)}
+      </svg>
+      {cursor&&<div className="gerald-pointer" style={{left:cursor.x,top:cursor.y}}>➤</div>}
+    </div>
+    <div className="td-assist">
+      {!voiceMode&&answer&&<div className="td-answer" key={answer.q}><span className="td-q">{answer.q}</span><p>{answer.text||"…"}</p><button className="td-go" onClick={()=>clickExercise(answer.ex)}>Viens, on va au tableau · {answer.ex.title} →</button></div>}
+      {voiceMode&&suggestion&&<button className="td-go" onClick={()=>openBoard(activeExercise.id)}>Viens, on va au tableau · {activeExercise.title} →</button>}
+      {voiceMode&&caption&&<div className={`td-caption${captionFading?" fade":""}`}><Reveal text={caption}/></div>}
+      <form className="td-ask" onSubmit={onSubmit}><div className="voice-status"><Orb status={status} size={30} level={audioLevel}/>{voiceError&&<span className="td-voice-error" role="status">{voiceError}</span>}</div>
+        <input data-gerald-id="30" value={question} onChange={e=>setQuestion(e.target.value)} onFocus={()=>bridge.requestFocus(true)} onBlur={()=>bridge.requestFocus(false)} placeholder="Une question sur le TD ? Je t’explique."/>
+        {voiceMode&&<kbd>CTRL + SHIFT</kbd>}
+        {voiceMode&&<button type="button" className="td-mic" aria-label={sessionOpen?(micEnabled?"Couper le micro":"Activer le micro"):"Parler à Gerald"} aria-pressed={sessionOpen?micEnabled:undefined} disabled={connecting&&!sessionOpen} onClick={toggleMicrophone}>{sessionOpen?(micEnabled?"Couper le micro":"Activer le micro"):connecting?"Connexion…":"Parler à Gerald"}</button>}
+        {voiceMode&&sessionOpen&&<button type="button" className="td-stop" onClick={stop}>Arrêter</button>}
+        {!voiceMode&&<kbd>CTRL + SHIFT</kbd>}
+      </form>
+    </div>
+    {voiceMode&&<div className={`td-board-overlay ${boardOpen?"open":""}`}><button className="td-board-close" onClick={()=>{boardOpenRef.current=false;setBoardOpen(false);}}>Retour au TD</button>{boardSrc&&<iframe ref={frame} title="Tableau" src={boardSrc} />}</div>}
+    <audio ref={audio} autoPlay/>
+  </main>;
 }
-
-function TD(){return <main className="td-root"><article className="paper"><header className="td-head"><div className="td-meta"><span>Lycée — Mathématiques</span><span>TD 4</span></div><h1>Polynômes du second degré</h1><div className="td-student"><span>Nom : __________________</span><span>Date : ________________</span></div></header>
-  <section className="reminder"><h2>Rappel de cours</h2><p>Pour <span dangerouslySetInnerHTML={{__html:katex.renderToString("ax^2+bx+c=0")}} />, le discriminant vaut <span dangerouslySetInnerHTML={{__html:katex.renderToString("\\Delta=b^2-4ac")}} />. Si <span dangerouslySetInnerHTML={{__html:katex.renderToString("\\Delta>0")}} />, l’équation possède deux racines réelles.</p></section>
-  {exercises.map(ex=><section className="exercise" key={ex.title} onClick={()=>bridge.openBoard(ex.title,JSON.stringify(ex.lines))}><p className="exercise-lead"><strong>{ex.title}.</strong><span dangerouslySetInnerHTML={{__html:katex.renderToString(ex.math)}}/></p><p>{ex.instruction}</p><button className="open-ex">Ouvrir au tableau →</button></section>)}
-  </article><AskBar/></main>}
 createRoot(document.getElementById("root")!).render(<TD/>);
-if (!window.qt) {
+if (!window.qt && !voiceMode) {
   const host = document.createElement("div");
   host.className = "preview-notch-host";
   document.body.appendChild(host);

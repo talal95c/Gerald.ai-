@@ -119,6 +119,56 @@ def test_store_deduplicates_document_filenames_and_delete_document_removes_file(
     store.close()
 
 
+def test_deleted_document_during_indexing_leaves_no_copied_file_or_chunks(tmp_path):
+    store = Store(tmp_path / "library")
+    course = store.create_course("Physique", "Physique")
+    source = tmp_path / "notes.txt"
+    source.write_text("Une force agit.", encoding="utf-8")
+    document = store._create_document(course.id, source.name)
+
+    store.delete_document(document.id)
+
+    class NoEmbeddings:
+        def embed(self, _texts):
+            raise AssertionError("deleted document must not be embedded")
+
+    indexer = Indexer(store, NoEmbeddings())
+    indexer._index_document(document, source, None)
+    indexer.close()
+
+    assert not Path(document.stored_path).exists()
+    assert store.get_document(document.id) is None
+    assert store._search_chunks() == []
+    store.close()
+
+
+def test_ask_persists_messages_only_after_successful_answer(tmp_path, monkeypatch):
+    store = Store(tmp_path / "library")
+    conversation = store.create_conversation(None, "chat", "Question")
+    monkeypatch.setattr(library, "search", lambda *_args, **_kwargs: [])
+
+    def fail_answer(*_args, **_kwargs):
+        raise RuntimeError("API indisponible")
+
+    monkeypatch.setattr(library, "answer", fail_answer)
+    with pytest.raises(RuntimeError, match="API indisponible"):
+        library.ask(store, None, "Question", conversation.id, None, "test-key")
+    assert store.get_messages(conversation.id) == []
+
+    monkeypatch.setattr(library, "answer", lambda *_args, **_kwargs: library.Answer("Réponse", []))
+    conversation_id, result = library.ask(
+        store, None, "Question", conversation.id, None, "test-key"
+    )
+
+    assert conversation_id == conversation.id
+    assert result.text == "Réponse"
+    assert [message.role for message in store.get_messages(conversation.id)] == [
+        "user",
+        "assistant",
+    ]
+    store.close()
+
+
 def test_extract_text_from_txt_markdown_docx_and_pdf(tmp_path, monkeypatch):
     text = tmp_path / "cours.txt"
     text.write_bytes(b"Bonjour \xff")

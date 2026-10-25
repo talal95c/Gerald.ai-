@@ -64,8 +64,10 @@ ask(store, embedder, question, conversation_id, course_id, api_key, model=None)
 
 `ask` creates a `chat` conversation when needed, searches up to five passages,
 includes at most ten prior messages, and persists the user and assistant
-messages with cited-source metadata. Network calls are synchronous; callers
-should invoke `ask` off the UI thread and marshal results back to Qt.
+messages with cited-source metadata only after a successful answer. A failed
+search or answer leaves no new messages in the conversation. Network calls are
+synchronous; callers should invoke `ask` off the UI thread and marshal results
+back to Qt.
 
 ## Row types
 

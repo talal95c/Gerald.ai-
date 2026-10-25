@@ -21,9 +21,10 @@ MOCK_BRIDGE = """
 (() => {
   const storageKey = "gerald-preview-state";
   const saved = JSON.parse(sessionStorage.getItem(storageKey) || "{}");
+  const hoursAgo = hours => new Date(Date.now() - hours * 60 * 60 * 1000).toISOString();
   const persist = () => sessionStorage.setItem(storageKey, JSON.stringify({
     session_open: state.session_open, recap_pending: state.recap_pending,
-    recap: state.recap, last_exercise: state.last_exercise
+    recap: state.recap, last_exercise: state.last_exercise, recaps: state.recaps
   }));
   const signal = () => {
     const listeners = [];
@@ -40,11 +41,13 @@ MOCK_BRIDGE = """
       {id: 6, filename: "Cours — Suites.pdf", status: "ready", error: "", folder: "Suites numériques"}
     ],
     conversations: [
-      {id: 1, title: "Résoudre une équation du second degré", source: "chat", updated_at: "2025-02-15T12:00:00+00:00"},
-      {id: 2, title: "Méthode du discriminant", source: "agent", updated_at: "2025-02-14T12:00:00+00:00"}
+      {id: 1, title: "Résoudre une équation du second degré", source: "chat", updated_at: hoursAgo(1)},
+      {id: 2, title: "Méthode du discriminant", source: "agent", updated_at: hoursAgo(5)},
+      {id: 3, title: "Comprendre le discriminant", source: "chat", updated_at: hoursAgo(26)},
+      {id: 4, title: "Préparer le contrôle", source: "agent", updated_at: hoursAgo(72)}
     ],
     session_open: saved.session_open ?? false, recap_pending: saved.recap_pending ?? false,
-    recap: saved.recap ?? "", last_exercise: saved.last_exercise ?? null
+    recap: saved.recap ?? "", last_exercise: saved.last_exercise ?? null, recaps: saved.recaps ?? []
   };
   const signals = {
     stateChanged: signal(), modeChanged: signal(), answer: signal(),
@@ -92,8 +95,8 @@ MOCK_BRIDGE = """
       ? `Polynômes du second degré\n\nUn polynôme du second degré s’écrit f(x) = ax² + bx + c avec a ≠ 0.\n\nDiscriminant\nOn pose Δ = b² − 4ac.\n• Si Δ > 0 : deux racines x₁ = (−b − √Δ) / 2a et x₂ = (−b + √Δ) / 2a.\n• Si Δ = 0 : une racine double x₀ = −b / 2a.\n• Si Δ < 0 : pas de racine réelle.\n\nExemple\nx² − 5x + 6 = 0 : a = 1, b = −5, c = 6, Δ = 25 − 24 = 1, donc x₁ = 2 et x₂ = 3.`
       : "Aperçu de démonstration de ce document."),
     messages: (_id, callback) => callback(JSON.stringify([
-      {role: "assistant", text: "On commence par calculer le discriminant."},
-      {role: "user", text: "Je ne comprends pas cette étape."}
+      {role: "assistant", text: "On commence par calculer le discriminant.", created_at: hoursAgo(1)},
+      {role: "user", text: "Je ne comprends pas cette étape.", created_at: hoursAgo(.9)}
     ])),
     addDocuments: () => {},
     deleteDocument: () => {},
@@ -111,6 +114,7 @@ MOCK_BRIDGE = """
       state.recap_pending = true; persist(); signals.stateChanged.emit(JSON.stringify(state));
       setTimeout(() => {
         state.session_open = false; state.recap_pending = false; state.recap = "fiche.html";
+        state.recaps = [...state.recaps, {path:"fiche.html", title:"Polynômes du second degré", created_at:new Date().toISOString()}];
         persist(); signals.recapReady.emit(state.recap); signals.stateChanged.emit(JSON.stringify(state));
       }, 1200);
     },
@@ -118,18 +122,27 @@ MOCK_BRIDGE = """
     quit: () => {}
   };
   let listening = false;
-  window.addEventListener("keydown", event => {
-    if (event.ctrlKey && event.shiftKey && !listening) {
-      listening = true; signals.agentStatus.emit("listening");
-    }
-  });
-  window.addEventListener("keyup", event => {
-    if (listening && ["Control", "Shift"].includes(event.key)) {
-      listening = false; signals.agentStatus.emit("thinking");
-      setTimeout(() => signals.agentStatus.emit("speaking"), 900);
-      setTimeout(() => signals.agentStatus.emit("idle"), 2600);
-    }
-  });
+  let held = false;
+  const start = () => { if (listening) return; listening = true; signals.agentStatus.emit("listening"); };
+  const stop = () => {
+    if (!listening) return;
+    listening = false; signals.agentStatus.emit("thinking");
+    setTimeout(() => signals.agentStatus.emit("speaking"), 900);
+    setTimeout(() => signals.agentStatus.emit("idle"), 2600);
+  };
+  window.addEventListener("load", () => window.focus());
+  window.addEventListener("keydown", event => { if (event.ctrlKey && event.shiftKey) start(); }, true);
+  window.addEventListener("keyup", event => { if (["Control", "Shift"].includes(event.key)) stop(); }, true);
+  window.addEventListener("blur", stop);
+  window.addEventListener("pointerdown", event => {
+    if (!(event.target instanceof Element) || !event.target.closest(".orb-wrap")) return;
+    event.preventDefault(); event.stopPropagation(); held = true; start();
+  }, true);
+  window.addEventListener("pointerup", () => { if (held) { held = false; stop(); } }, true);
+  window.addEventListener("pointercancel", () => { if (held) { held = false; stop(); } }, true);
+  window.addEventListener("click", event => {
+    if (event.target instanceof Element && event.target.closest(".orb-wrap")) { event.preventDefault(); event.stopPropagation(); }
+  }, true);
 })();
 """
 

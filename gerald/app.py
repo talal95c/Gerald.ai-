@@ -411,6 +411,11 @@ def main() -> int:
 
     home_window = {"widget": None}
 
+    def open_board_from_home(title: str, lines: list[str]) -> None:
+        board.set_exercise(title, lines)
+        if not board.isVisible():
+            toggle_board()
+
     def open_home_window() -> None:
         if open_home is None:
             return
@@ -420,6 +425,8 @@ def main() -> int:
                 indexer,
                 settings,
                 on_library_changed,
+                open_board=open_board_from_home,
+                end_session=open_lesson_recap,
             )
         home_window["widget"].show()
         home_window["widget"].raise_()

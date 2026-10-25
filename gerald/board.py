@@ -280,10 +280,17 @@ class BoardWindow(QWidget):
         self.update()
 
     def _image_to_local(self, x: float, y: float) -> tuple[float, float]:
+        scale_x, scale_y = self._image_scale_to_local()
+        return x * scale_x, y * scale_y
+
+    def _image_scale_to_local(self) -> tuple[float, float]:
         if self._capture is None:
-            return x, y
-        screen_x, screen_y = self._capture.img_to_screen(x, y)
-        return self._screen_to_local(screen_x, screen_y)
+            return 1.0, 1.0
+        image_width, image_height = self._capture.image.size
+        return (
+            self.width() / max(1, image_width),
+            self.height() / max(1, image_height),
+        )
 
     def _local_to_image(self, x: float, y: float) -> tuple[float, float]:
         if self._capture is None:
@@ -309,14 +316,12 @@ class BoardWindow(QWidget):
         )
 
     def _image_size_to_logical(self, size: float) -> float:
-        ratio = self.screen().devicePixelRatio() if self.screen() else 1.0
-        scale = self._capture.scale if self._capture is not None else 1.0
-        return size / max(0.01, scale * ratio)
+        return size * self._image_scale_to_local()[1]
 
     def _plot_local_rect(self, plot) -> QRectF:
         x, y = self._image_to_local(plot.box[0], plot.box[1])
-        scale = self._image_size_to_logical(1)
-        return QRectF(x, y, plot.box[2] * scale, plot.box[3] * scale)
+        scale_x, scale_y = self._image_scale_to_local()
+        return QRectF(x, y, plot.box[2] * scale_x, plot.box[3] * scale_y)
 
     def _plot_chrome_hit(self, point: QPointF) -> tuple[dict, str] | None:
         for item in reversed(self._gerald):
@@ -415,9 +420,9 @@ class BoardWindow(QWidget):
         x, y, width, height = interaction["box"]
         press = interaction["press"]
         dx, dy = point.x() - press.x(), point.y() - press.y()
-        scale = self._image_size_to_logical(1)
+        scale_x, scale_y = self._image_scale_to_local()
         local_x, local_y = self._image_to_local(x, y)
-        local_width, local_height = width * scale, height * scale
+        local_width, local_height = width * scale_x, height * scale_y
 
         if interaction["mode"] == "move":
             local_x = min(max(0.0, local_x + dx), max(0.0, self.width() - local_width))
@@ -523,6 +528,16 @@ class BoardWindow(QWidget):
                                 item["image"].height() * image_scale_y,
                             )
                         )
+                exercise_rect = self._exercise_card_rect()
+                if exercise_rect is not None:
+                    occupied.append(
+                        (
+                            exercise_rect.x() * image_scale_x,
+                            exercise_rect.y() * image_scale_y,
+                            exercise_rect.width() * image_scale_x,
+                            exercise_rect.height() * image_scale_y,
+                        )
+                    )
                 plot, result = build_plot(args, image_size, occupied)
                 self._gerald.append(
                     {
@@ -736,11 +751,11 @@ class BoardWindow(QWidget):
             elif item["kind"] == "plot":
                 plot = item["plot"]
                 x, y = self._image_to_local(plot.box[0], plot.box[1])
-                scale = self._image_size_to_logical(1)
+                scale_x, scale_y = self._image_scale_to_local()
                 painter.save()
                 titlebar_bottom = y + min(
                     PLOT_TITLEBAR_HEIGHT,
-                    plot.box[3] * scale,
+                    plot.box[3] * scale_y,
                 )
                 painter.setClipRect(
                     QRectF(
@@ -752,14 +767,14 @@ class BoardWindow(QWidget):
                     Qt.ClipOperation.IntersectClip,
                 )
                 painter.translate(x, y)
-                painter.scale(scale, scale)
+                painter.scale(scale_x, scale_y)
                 draw_plot(
                     painter,
                     plot,
                     min(1.0, (time.monotonic() - item["created"]) / 0.6),
                     "Google Sans Flex",
                     PLOT_PALETTE,
-                    scale,
+                    scale_y,
                 )
                 painter.restore()
                 self._paint_plot_chrome(painter, item)
@@ -884,7 +899,9 @@ class BoardWindow(QWidget):
         painter.restore()
 
     def _paint_exercise(self, painter: QPainter) -> None:
-        width = min(420, max(280, self.width() - 32))
+        rect = self._exercise_card_rect()
+        if rect is None:
+            return
         label = "EXERCICE"
         title = self._exercise_title.strip()
         if title.lower().startswith("exercice"):
@@ -895,14 +912,6 @@ class BoardWindow(QWidget):
             label = "ÉNONCÉ"
         text = "\n".join(part for part in [title, *self._exercise_lines] if part)
         font = QFont("Google Sans Flex", 22)
-        metrics = QFontMetricsF(font)
-        text_rect = metrics.boundingRect(
-            QRectF(0, 0, width - 40, self.height()),
-            Qt.TextFlag.TextWordWrap,
-            text,
-        )
-        height = min(60 + math.ceil(text_rect.height()), max(80, self.height() - 40))
-        rect = QRectF(self.width() - width - 24, 20, width, height)
         painter.save()
         painter.setPen(QPen(QColor("#E1DFDB"), 1))
         painter.setBrush(QColor("#EEEEEE"))
@@ -929,3 +938,21 @@ class BoardWindow(QWidget):
             text,
         )
         painter.restore()
+
+    def _exercise_card_rect(self) -> QRectF | None:
+        if not self._exercise_title:
+            return None
+        width = min(420, max(280, self.width() - 32))
+        title = self._exercise_title.strip()
+        if title.lower().startswith("exercice"):
+            _, separator, title = title.partition("—")
+            title = title.strip() if separator else ""
+        text = "\n".join(part for part in [title, *self._exercise_lines] if part)
+        metrics = QFontMetricsF(QFont("Google Sans Flex", 22))
+        text_rect = metrics.boundingRect(
+            QRectF(0, 0, width - 40, self.height()),
+            Qt.TextFlag.TextWordWrap,
+            text,
+        )
+        height = min(60 + math.ceil(text_rect.height()), max(80, self.height() - 40))
+        return QRectF(self.width() - width - 24, 20, width, height)

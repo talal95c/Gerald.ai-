@@ -7,12 +7,39 @@ import { Reveal } from "./reveal";
 
 const bridge = getBridge();
 const tabs = ["Tableau", "Documents", "Historique", "Raccourcis"];
-type NotchState = AppState & {recap_error?: string | null};
+type Recap = {path: string; title: string; created_at: string};
+type NotchState = AppState & {recaps?: Recap[]; recap_error?: string | null};
+type HistoryMessage = {role: string; text: string; created_at?: string};
 const emptyState: NotchState = {
   greeting: "Bonjour.", hotkey_label: "CTRL + SHIFT", documents: [],
-  conversations: [], session_open: false, recap_pending: false, last_exercise: null
+  conversations: [], session_open: false, recap_pending: false, last_exercise: null, recaps: []
 };
 const statusText: Record<string, string> = {listening: "J’écoute", thinking: "Je réfléchis", speaking: "Je parle", error: "Micro indisponible", offline: "Hors ligne"};
+
+function localTime(value: string) {
+  const date = new Date(value);
+  return Number.isNaN(date.getTime()) ? "" : date.toLocaleTimeString("fr-FR", {hour:"2-digit", minute:"2-digit"});
+}
+
+function dayLabel(value: string) {
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return "Date inconnue";
+  const now = new Date();
+  const dateDay = new Date(date.getFullYear(), date.getMonth(), date.getDate()).getTime();
+  const today = new Date(now.getFullYear(), now.getMonth(), now.getDate()).getTime();
+  const yesterday = new Date(now.getFullYear(), now.getMonth(), now.getDate() - 1).getTime();
+  if (dateDay === today) return "Aujourd’hui";
+  if (dateDay === yesterday) return "Hier";
+  return new Intl.DateTimeFormat("fr-FR", {weekday:"short", day:"numeric", month:"short"}).format(date);
+}
+
+function groupedHistory(conversations: AppState["conversations"]) {
+  return conversations.slice().sort((a, b) => Date.parse(b.updated_at) - Date.parse(a.updated_at))
+    .reduce<Record<string, AppState["conversations"]>>((groups, conversation) => {
+      (groups[dayLabel(conversation.updated_at)] ??= []).push(conversation);
+      return groups;
+    }, {});
+}
 
 const icons: Record<string, React.ReactNode> = {
   "Tableau": <><rect x="3" y="4" width="14" height="10" rx="2"/><path className="cut" d="M6 11.2c1.4-3.6 2.6-3.6 4 0s2.6 3.6 4 0M7 17h6M10 14v3"/></>,
@@ -62,22 +89,33 @@ function DocView({doc, folder, hotkey, onBack}: {doc: AppState["documents"][numb
     setAnswer({q, text: ""}); setWaiting(true); setQuestion("");
     bridge.ask(`À propos du document « ${doc.filename} » : ${q}`);
   };
+  const isTd = /^TD\b/i.test(doc.filename);
   return <div className="doc-view">
     <div className="doc-head"><button className="add" onClick={onBack}>← {folder}</button><b>{doc.filename}</b></div>
     <article className="doc-page">{text ? text.split("\n").map((l,i)=><p key={i}>{l || "\u00a0"}</p>) : <p className="muted">{doc.status === "ready" ? "Aperçu indisponible." : "Indexation en cours…"}</p>}</article>
     {answer && <div className="doc-answer"><small>{answer.q}</small><p>{waiting ? <span className="thinking"><i/><i/><i/></span> : <Reveal text={answer.text}/>}</p></div>}
+    {isTd && <button className="doc-open-td" onClick={()=>bridge.openTd()}>Ouvrir le TD</button>}
     <form className="doc-ask" onSubmit={e=>{e.preventDefault();send();}}>
       <i className="dot-live"/><input onFocus={()=>bridge.requestFocus(true)} onBlur={()=>bridge.requestFocus(false)} value={question} onChange={e=>setQuestion(e.target.value)} placeholder="Une question sur ce document ?"/><kbd>{hotkey}</kbd>
     </form>
   </div>;
 }
 
-function Folders({docs, hotkey}: {docs: AppState["documents"]; hotkey: string}) {
+function Folders({docs, recaps, hotkey, onDocumentOpen, onBack}: {
+  docs: AppState["documents"]; recaps: Recap[]; hotkey: string;
+  onDocumentOpen: () => void; onBack: () => void;
+}) {
   const [doc, setDoc] = useState<AppState["documents"][number] | null>(null);
-  const onOpen = (d: AppState["documents"][number]) => /^TD\b/i.test(d.filename) ? bridge.openTd() : setDoc(d);
+  const onOpen = (d: AppState["documents"][number]) => { setDoc(d); onDocumentOpen(); };
   const [open, setOpen] = useState<string | null>(null);
   const groups = docs.reduce<Record<string, AppState["documents"]>>((acc, d) => { (acc[d.folder || "Mes cours"] ??= []).push(d); return acc; }, {});
-  if (doc) return <DocView doc={doc} folder={doc.folder || "Mes cours"} hotkey={hotkey} onBack={()=>setDoc(null)}/>;
+  if (doc) return <DocView doc={doc} folder={doc.folder || "Mes cours"} hotkey={hotkey} onBack={()=>{setDoc(null);onBack();}}/>;
+  if (open === "Fiches") return <div className="folder-open">
+    <button className="add" onClick={()=>setOpen(null)}>← Dossiers</button><span className="folder-title">Fiches</span>
+    <div className="fan">{recaps.map(recap=><button className="recap-card" key={recap.path} onClick={()=>bridge.openRecap(recap.path)}>
+      <b>{recap.title}</b><small>Fiche du {new Date(recap.created_at).toLocaleDateString("fr-FR",{day:"numeric",month:"short"})}</small>
+    </button>)}</div>
+  </div>;
   if (open && groups[open]) return <div className="folder-open">
     <button className="add" onClick={()=>setOpen(null)}>← Dossiers</button><span className="folder-title">{open}</span>
     <div className="fan">{groups[open].map((doc,i)=><article className="sheet-card" key={doc.id} onClick={()=>onOpen(doc)} style={{animationDelay:`${i*45}ms`}}>
@@ -89,17 +127,18 @@ function Folders({docs, hotkey}: {docs: AppState["documents"]; hotkey: string}) 
       <span className="papers">{items.slice(0,3).map((d,i)=><i key={d.id} style={{"--i":i} as React.CSSProperties}/>)}</span>
       <span className="pocket"/><span className="folder-name">{name}</span><span className="folder-count">{items.length} fichier{items.length>1?"s":""}</span>
     </button>)}
+    {recaps.length > 0 && <button className="folder" onClick={()=>setOpen("Fiches")}><span className="papers"><i style={{"--i":0} as React.CSSProperties}/></span><span className="pocket"/><span className="folder-name">Fiches</span><span className="folder-count">{recaps.length} fiche{recaps.length>1?"s":""}</span></button>}
     <button className="folder add-folder" onClick={()=>bridge.addDocuments()}><span className="plus">+</span><span className="folder-name">Ajouter</span></button>
   </div>;
 }
 
 function App() {
   const [mode, setMode] = useState(window.qt || !/(td|board|fiche)\.html$/.test(location.pathname) ? "greeting" : "collapsed");
-  const [state, setState] = useState(emptyState);
+  const [state, setState] = useState<NotchState>(emptyState);
   const [status, setStatus] = useState("idle");
   const [tab, setTab] = useState("Documents");
   const [recap, setRecap] = useState("");
-  const [historyMessages, setHistoryMessages] = useState<{role: string; text: string}[] | null>(null);
+  const [historyMessages, setHistoryMessages] = useState<HistoryMessage[] | null>(null);
   const timer = useRef<number | null>(null);
   const go = (next: string) => { setMode(next); bridge.setMode(next); };
   const clear = () => { if (timer.current !== null) window.clearTimeout(timer.current); };
@@ -122,6 +161,10 @@ function App() {
     later("collapsed", 2600);
     return clear;
   }, []);
+  useEffect(() => {
+    document.body.classList.toggle("qt-notch", Boolean(window.qt));
+    document.body.classList.toggle("notch-document-open", mode === "document");
+  }, [mode]);
   const pick = (name: string) => {
     if (name === "Tableau") {
       bridge.openBoard(
@@ -131,6 +174,7 @@ function App() {
       go("collapsed");
       return;
     }
+    if (mode === "document" && name === "Documents") return;
     setHistoryMessages(null);
     if (mode === "settings" && tab === name) { go("panel"); return; }
     setTab(name); go("settings");
@@ -140,19 +184,23 @@ function App() {
   if (mode === "greeting" || mode === "collapsed") return <button className={`notch pill-notch m-${mode} s-${status}`} onClick={()=>{clear();go("panel");}}>
     <Orb status={status} size={24}/><span key={pillLabel}><Reveal text={pillLabel}/></span>
   </button>;
-  return <section className={`notch sheet m-${mode}`} onMouseEnter={clear} onMouseLeave={()=>{ if (document.activeElement?.tagName !== "INPUT") later("collapsed", 700); }} onKeyDown={e=>{if(e.key==="Escape")go("collapsed");}}>
+  return <section className={`notch sheet m-${mode}`} onMouseEnter={clear} onMouseLeave={()=>{ if (mode !== "document" && document.activeElement?.tagName !== "INPUT") later("collapsed", 700); }} onKeyDown={e=>{if(e.key==="Escape")go("collapsed");}}>
     <div className="bar">
       <span className="status"><Orb status={status} size={28}/><span>{active ? statusText[status] ?? status : state.hotkey_label}</span></span>
-      <NavBar active={mode === "settings" ? tab : ""} onChange={pick}/>
+      <NavBar active={mode === "settings" ? tab : mode === "document" ? "Documents" : ""} onChange={pick}/>
       {state.session_open ? <button className="end" title={state.recap_error || undefined} onClick={()=>bridge.endSession()}>{state.recap_pending ? "Fiche…" : state.recap_error ? "Réessayer la fiche" : "Fin de session"}</button>
         : recap ? <button className="end" onClick={()=>bridge.openRecap(recap)}>Fiche →</button>
         : <button className="quit" onClick={()=>bridge.quit()} aria-label="Quitter">⏻</button>}
     </div>
     {state.session_open && state.recap_error && !state.recap_pending && <p className="recap-error" role="status">{state.recap_error}</p>}
-    {mode === "settings" && <div className="content" key={tab}>
-      {tab === "Documents" && <Folders docs={state.documents} hotkey={state.hotkey_label}/>}
-      {tab === "Historique" && (historyMessages ? <><button className="add" onClick={()=>setHistoryMessages(null)}>← Retour</button>{historyMessages.map((m,i)=><p className={`msg ${m.role}`} key={i}>{m.text}</p>)}</>
-        : state.conversations.map(c=><button className="row link" key={c.id} onClick={()=>bridge.messages(c.id, json=>setHistoryMessages(JSON.parse(json)))}><i className={`tag ${c.source}`}>{c.source === "agent" ? "Voix" : "Écrit"}</i><span>{c.title}</span></button>))}
+    {(mode === "settings" || mode === "document") && <div className={`content ${mode === "document" ? "document-content" : ""}`} key={tab}>
+      {(mode === "document" || tab === "Documents") && <Folders
+        docs={state.documents} recaps={state.recaps ?? []} hotkey={state.hotkey_label}
+        onDocumentOpen={()=>go("document")} onBack={()=>go("settings")}
+      />}
+      {mode === "settings" && tab === "Historique" && (historyMessages
+        ? <><button className="add" onClick={()=>setHistoryMessages(null)}>← Retour</button>{historyMessages.map((m,i)=><p className={`msg ${m.role}`} key={i}><span>{m.text}</span>{m.created_at && <time>{localTime(m.created_at)}</time>}</p>)}</>
+        : Object.entries(groupedHistory(state.conversations)).map(([day, conversations])=><section className="history-group" key={day}><h3>{day}</h3>{conversations.map(c=><button className="row link history-row" key={c.id} onClick={()=>bridge.messages(c.id,json=>setHistoryMessages(JSON.parse(json)))}><i className={`tag ${c.source}`}>{c.source === "agent" ? "Voix" : "Écrit"}</i><span>{c.title}</span><time>{localTime(c.updated_at)}</time></button>)}</section>))}
       {tab === "Raccourcis" && <div className="shortcuts">
         {[[state.hotkey_label, "Maintiens pour parler", "Relâche : il te répond à voix haute et montre à l’écran."],
           ["Échap", "Ferme l’encoche", "Revient à la petite pilule."],
