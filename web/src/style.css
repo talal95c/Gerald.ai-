@@ -15,3 +15,13 @@ footer{display:flex;align-items:center;gap:8px}footer input{min-width:0;flex:1;h
 .td-root{min-height:100vh;background:#eee;color:#282828;padding:48px 18px;font-family:"Latin Modern Roman","Computer Modern",serif}.paper{max-width:760px;min-height:980px;margin:0 auto;background:#fff;padding:68px 72px;box-shadow:0 4px 24px rgba(0,0,0,.08)}.td-head{text-align:center;border-bottom:1px solid #aaa;padding-bottom:22px;margin-bottom:28px}.td-head p{font-size:14px}.td-head h1{font:24px "Latin Modern Roman",serif;letter-spacing:0;margin:12px 0}.reminder{border:1px solid #ccc;background:#fafafa;padding:15px 18px;margin-bottom:22px}.reminder h2,.exercise h2{font:18px "Latin Modern Roman",serif;margin:0 0 10px}.exercise{padding:14px 16px;border:1px solid transparent;border-radius:8px;margin:10px 0;transition:background .15s,border-color .15s}.exercise:hover{background:#fffdbd55;border-color:#e8c547}.exercise p{margin:8px 0}.open-ex{opacity:0;border:0;border-radius:999px;padding:7px 11px;background:#161616;color:#fff;font:12px "Google Sans Flex",sans-serif;transition:opacity .15s}.exercise:hover .open-ex,.open-ex:focus{opacity:1}.katex{font-size:1.08em}
 @keyframes slide{from{opacity:0;transform:translateY(-8px)}to{opacity:1;transform:translateY(0)}}@keyframes blur-reveal{from{filter:blur(8px);opacity:0;transform:translateY(4px)}to{filter:blur(0);opacity:1;transform:translateY(0)}}@media(prefers-reduced-motion:reduce){*,*::before,*::after{animation-duration:.01ms!important;transition-duration:.01ms!important}}
 .row span{flex:1;min-width:0}.row small{display:block;color:#eaa39e;font-size:10px}.dot{flex:none}.dot.indexing{background:#aaa}.filters{margin-bottom:10px}.filters button.active{background:var(--yellow);color:var(--ink)}.history-back{border:0;background:transparent;color:rgba(247,246,243,.7);padding:6px 0}.history-message{font-size:12px;line-height:1.45;padding:8px 10px;border-radius:10px;background:#292929}.history-message.user{background:#343434}
+.td-head{display:block;text-align:left;padding-bottom:20px}
+.td-meta{display:flex;justify-content:space-between;gap:16px;font-size:13px;letter-spacing:.06em;text-transform:uppercase;white-space:nowrap}
+.td-head h1{font:24px "Latin Modern Roman",serif;text-align:center;white-space:nowrap;margin:14px 0}
+.td-student{display:flex;justify-content:center;gap:24px;font-size:13px;white-space:nowrap}
+.exercise-lead{display:flex;align-items:baseline;gap:10px;font-size:16px;margin:0 0 8px!important}
+.exercise-lead strong{font-weight:700}
+.exercise-lead .katex{font-size:1em}
+.panel footer .pill{height:44px;display:flex;align-items:center;padding-top:0;padding-bottom:0}
+.panel footer input{height:44px}
+.panel footer .send{width:44px;height:44px;flex:none}

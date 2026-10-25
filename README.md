@@ -64,7 +64,8 @@ réseau n’est requis pour afficher le TD ou les formules KaTeX.
 
 Captures : [accueil](docs/notch-greeting.png), [encoche réduite](docs/notch-collapsed.png),
 [chat](docs/notch-panel.png), [documents](docs/notch-settings-documents.png),
-[historique](docs/notch-settings-historique.png), [TD](docs/td-exercises.png) et
+[historique](docs/notch-settings-historique.png), [TD](docs/td-exercises.png),
+[exercice au survol](docs/td-hover.png) et
 [exercice au tableau](docs/board-exercise.png).
 
 ## Free GPU fallback (Colab)

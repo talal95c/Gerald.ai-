@@ -603,21 +603,20 @@ class BoardWindow(QWidget):
         elif title:
             label = "ÉNONCÉ"
         text = "\n".join(part for part in [title, *self._exercise_lines] if part)
-        font = QFont("Abel", 22)
+        font = QFont("Google Sans Flex", 22)
         metrics = QFontMetricsF(font)
         text_rect = metrics.boundingRect(
             QRectF(0, 0, width - 40, self.height()),
             Qt.TextFlag.TextWordWrap,
             text,
         )
-        height = max(96, 58 + int(text_rect.height()))
-        height = min(height, max(72, self.height() - 48))
-        rect = QRectF(self.width() - width - 24, 24, width, height)
+        height = min(60 + math.ceil(text_rect.height()), max(80, self.height() - 40))
+        rect = QRectF(self.width() - width - 24, 20, width, height)
         painter.save()
         painter.setPen(QPen(QColor("#E1DFDB"), 1))
         painter.setBrush(QColor("#EEEEEE"))
         painter.drawRoundedRect(rect, 16, 16)
-        badge = QRectF(rect.left() + 16, rect.top() + 15, 14, 14)
+        badge = QRectF(rect.left() + 20, rect.top() + 13, 14, 14)
         painter.setPen(Qt.PenStyle.NoPen)
         painter.setBrush(QColor("#262626"))
         painter.drawRoundedRect(badge, 4, 4)
@@ -627,14 +626,14 @@ class BoardWindow(QWidget):
         painter.setFont(QFont("Abel", 11))
         painter.setPen(QColor("#6D6D6D"))
         painter.drawText(
-            QRectF(rect.left() + 38, rect.top() + 12, rect.width() - 54, 20),
+            QRectF(rect.left() + 42, rect.top() + 10, rect.width() - 62, 20),
             int(Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter),
             label,
         )
         painter.setFont(font)
         painter.setPen(QColor("#262626"))
         painter.drawText(
-            QRectF(rect.left() + 16, rect.top() + 38, rect.width() - 32, rect.height() - 50),
+            QRectF(rect.left() + 20, rect.top() + 40, rect.width() - 40, rect.height() - 60),
             Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignTop | Qt.TextFlag.TextWordWrap,
             text,
         )

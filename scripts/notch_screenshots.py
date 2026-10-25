@@ -125,6 +125,9 @@ def capture_web_screenshots() -> None:
         page.goto((WEBUI / "td.html").as_uri(), wait_until="networkidle")
         page.locator(".paper").wait_for()
         page.screenshot(path=str(DOCS / "td-exercises.png"), full_page=True)
+        page.locator(".exercise").first.hover()
+        page.wait_for_timeout(200)
+        page.screenshot(path=str(DOCS / "td-hover.png"), full_page=True)
         browser.close()
 
 
@@ -157,6 +160,7 @@ def main() -> None:
         "notch-settings-documents.png",
         "notch-settings-historique.png",
         "td-exercises.png",
+        "td-hover.png",
         "board-exercise.png",
     ):
         print(DOCS / path)
