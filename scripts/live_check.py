@@ -67,9 +67,11 @@ async def run() -> int:
     client = RealtimeClient(settings.api_key, settings.model, settings.voice, instructions, on_event=on_event, on_commands=on_commands)
     try:
         await client.connect()
+        runner = asyncio.create_task(client.run())
         await client.finish_turn(capture, elements, context, args.question, has_audio=False)
         await asyncio.wait_for(completed.wait(), timeout=120)
     finally:
+        runner.cancel() if 'runner' in locals() else None
         await client.close()
     elapsed = time.monotonic() - started
     print(f"\nLatency: {elapsed:.2f}s")
