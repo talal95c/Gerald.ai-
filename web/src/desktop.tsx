@@ -32,15 +32,42 @@ function Desktop() {
   const zCounter = useRef(10);
   const cascade = useRef(0);
   const zoomTimers = useRef<Partial<Record<DesktopApp, number>>>({});
+  const dockHideTimer = useRef<number | null>(null);
+  const [dockRevealed, setDockRevealed] = useState(false);
   const hotkeyHeld = useRef(false);
   const hotkeyTarget = useRef<"Photoshop" | "Notes" | null>(null);
   const demo = new URLSearchParams(location.search).get("demo") === "1";
+  const dockAutoHide = runningApps.some(app => {
+    const item = windows[app];
+    return Boolean(item?.open && !item.minimized && item.maximized);
+  });
 
   const usableArea = useCallback(() => {
     const top = 52;
     const bottom = Math.max(top, window.innerHeight - 112);
     return {top, bottom, height: bottom - top};
   }, []);
+  const maximizedRect = useCallback(() => {
+    const top = usableArea().top;
+    return {x: 0, y: top, width: window.innerWidth, height: window.innerHeight - top};
+  }, [usableArea]);
+  const clearDockHideTimer = useCallback(() => {
+    if (dockHideTimer.current !== null) {
+      window.clearTimeout(dockHideTimer.current);
+      dockHideTimer.current = null;
+    }
+  }, []);
+  const revealDock = useCallback(() => {
+    clearDockHideTimer();
+    setDockRevealed(true);
+  }, [clearDockHideTimer]);
+  const scheduleDockHide = useCallback(() => {
+    clearDockHideTimer();
+    dockHideTimer.current = window.setTimeout(() => {
+      dockHideTimer.current = null;
+      setDockRevealed(false);
+    }, 400);
+  }, [clearDockHideTimer]);
   const clampDrag = useCallback((x: number, y: number, width: number) => ({
     x: Math.max(0, Math.min(x, Math.max(0, window.innerWidth - width))),
     y: Math.max(0, Math.min(y, window.innerHeight - 38)),
@@ -94,8 +121,8 @@ function Desktop() {
     setWindows(previous => {
       const item = previous[app];
       if (!item) return previous;
-      const area = usableArea();
       if (item.maximized) {
+        const area = usableArea();
         const saved = item.restoreRect ?? {x: 0, y: area.top, width: Math.min(1100, window.innerWidth), height: Math.min(720, area.height)};
         const width = Math.min(saved.width, window.innerWidth);
         const height = Math.min(saved.height, area.height);
@@ -103,7 +130,7 @@ function Desktop() {
         return {...previous, [app]: {...item, ...position, width, height, maximized: false, restoreRect: null, zoomTransition: !reducedMotion}};
       }
       return {...previous, [app]: {
-        ...item, x: 0, y: area.top, width: window.innerWidth, height: area.height,
+        ...item, ...maximizedRect(),
         maximized: true, restoreRect: {x: item.x, y: item.y, width: item.width, height: item.height},
         zoomTransition: !reducedMotion,
       }};
@@ -118,7 +145,7 @@ function Desktop() {
     } else {
       delete zoomTimers.current[app];
     }
-  }, [clampToUsable, usableArea, windows]);
+  }, [clampToUsable, maximizedRect, usableArea, windows]);
   const restoreForDrag = useCallback((app: DesktopApp, clientX: number, clientY: number, grabX: number, grabY: number): WindowRect => {
     const item = windows[app];
     if (!item) return {x: 0, y: 0, width: 480, height: 320};
@@ -192,6 +219,14 @@ function Desktop() {
   }, []);
 
   useEffect(() => {
+    if (!dockAutoHide) {
+      clearDockHideTimer();
+      setDockRevealed(false);
+    }
+    return () => clearDockHideTimer();
+  }, [clearDockHideTimer, dockAutoHide]);
+
+  useEffect(() => {
     const down = (event: KeyboardEvent) => {
       if (!event.ctrlKey || !event.shiftKey || event.repeat || hotkeyHeld.current) return;
       event.preventDefault();
@@ -232,6 +267,7 @@ function Desktop() {
   useEffect(() => {
     const reclamp = () => {
       const area = usableArea();
+      const fullPageRect = maximizedRect();
       setWindows(previous => {
         const next = {...previous};
         runningApps.forEach(app => {
@@ -239,7 +275,7 @@ function Desktop() {
           if (!item?.open) return;
           if (item.maximized) {
             next[app] = {
-              ...item, x: 0, y: area.top, width: window.innerWidth, height: area.height,
+              ...item, ...fullPageRect,
               zoomTransition: false,
             };
             return;
@@ -254,7 +290,7 @@ function Desktop() {
     };
     window.addEventListener("resize", reclamp);
     return () => window.removeEventListener("resize", reclamp);
-  }, [clampToUsable, usableArea]);
+  }, [clampToUsable, maximizedRect, usableArea]);
 
   const openApp = (app: DesktopApp) => {
     setSelected(app);
@@ -277,14 +313,14 @@ function Desktop() {
     const area = usableArea();
     const maxWidth = Math.max(0, window.innerWidth);
     const maxHeight = area.height;
-    const minWidth = Math.min(480, maxWidth);
-    const minHeight = Math.min(320, maxHeight);
-    const width = Math.max(minWidth, Math.min(requestedWidth, maxWidth));
-    const height = Math.max(minHeight, Math.min(requestedHeight, maxHeight));
-    const position = clampToUsable(x, y, width, height, area);
     setWindows(previous => {
       const item = previous[app];
       if (!item || item.maximized) return previous;
+      const minWidth = Math.min(480, maxWidth, requestedWidth);
+      const minHeight = Math.min(320, maxHeight, requestedHeight);
+      const width = Math.max(minWidth, Math.min(requestedWidth, maxWidth));
+      const height = Math.max(minHeight, Math.min(requestedHeight, maxHeight));
+      const position = clampToUsable(x, y, width, height, area);
       return {...previous, [app]: {...item, ...position, width, height, zoomTransition: false}};
     });
   };
@@ -363,7 +399,12 @@ function Desktop() {
       </DesktopWindow>;
     })}
     <div className="desktop-notch-host" ref={notch}/>
-    <nav className="desktop-dock" aria-label="Applications">
+    <nav
+      className={`desktop-dock${dockAutoHide ? " dock-autohide" : ""}${dockAutoHide && dockRevealed ? " dock-revealed" : ""}`}
+      aria-label="Applications"
+      onPointerEnter={()=>{if(dockAutoHide)revealDock();}}
+      onPointerLeave={()=>{if(dockAutoHide)scheduleDockHide();}}
+    >
       {dockApps.map((app,index)=><span key={app} className="dock-entry">
         {index===2&&<i className="dock-divider" aria-hidden="true"/>}
         <button type="button" className={`dock-item${hovered===app?" hovered":""}${Math.abs(hoverIndex-index)===1?" neighbor":""}${bouncing===app?" bouncing":""}`}
@@ -375,6 +416,10 @@ function Desktop() {
         </button>
       </span>)}
     </nav>
+    {dockAutoHide && <div
+      className="dock-hot-zone" aria-hidden="true"
+      onPointerEnter={revealDock} onPointerLeave={scheduleDockHide}
+    />}
   </main>;
 }
 

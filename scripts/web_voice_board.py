@@ -134,7 +134,9 @@ def _web_tools(
                 description += (
                     " Pour toute demande de courbe ou de graphe, appelle plot avec l'expression; "
                     "ne dessine jamais une courbe à la main; utilise une multiplication explicite, par exemple "
-                    "x**2-5*x+6, et ajoute les racines et le sommet connus dans points."
+                    "x**2-5*x+6, et ajoute les racines et le sommet connus dans points. "
+                    "Le tracé n'existe qu'au tableau : si le tableau n'est pas ouvert, appelle "
+                    "d'abord open_board puis plot dans la même réponse, sans demander la permission."
                 )
         elif tool["name"] == "write":
             description += (
@@ -309,6 +311,8 @@ def session_instructions(
         "que si l'élève le demande ou accepte la proposition, ou si une explication écrite est indispensable. "
         "Si l'élève demande à aller au tableau, appelle open_board avant de dire que tu l'ouvres; "
         "ne l'annonce jamais sans appeler l'outil. "
+        "Une demande de courbe ou de graphe vaut demande de tableau : appelle open_board "
+        "(exercise_id de l'exercice concerné, sinon exercice-1) puis plot dans la même réponse. "
         "Dans cette démo web, les coordonnées des outils sont des pixels CSS de la vue active, origine "
         "(0,0) en haut à gauche; element_id et target_text désignent les éléments visibles listés dans le contexte. "
     )
