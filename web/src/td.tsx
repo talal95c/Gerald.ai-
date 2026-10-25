@@ -7,7 +7,7 @@ import "./board.css";
 import {getBridge} from "./bridge";
 import {Orb} from "./orb";
 import {Reveal} from "./reveal";
-import {annotationLeader, annotationSize, arrowEndpoints, createCursorMotion, ellipseCircumference, intentColor, placeAnnotation, type AnnotationRect, type CursorVisual} from "./annotations";
+import {annotationLeader, annotationSize, arrowEndpoints, createCursorMotion, cursorRestBeside, intentColor, placeAnnotation, pointsToPath, seedFrom, sketchArrow, sketchEllipsePoints, type AnnotationRect, type CursorMotion, type CursorPoint, type CursorVisual} from "./annotations";
 import {mountNotch} from "./notch";
 
 const bridge = getBridge();
@@ -23,6 +23,27 @@ type ViewApi = {elements:()=>ViewElement[];exec:(name:string,args:Record<string,
 type BoardApi = ViewApi & {snapshot:()=>string};
 type GeraldVoiceState = {turn:number;settledTurn:number;pendingTools:number;settledAt:number;responsesCreated:number;responsesDone:number};
 declare global { interface Window { geraldTD?:ViewApi; geraldBoard?:BoardApi; __geraldLog?:Record<string,unknown>[]; __geraldState?:GeraldVoiceState } }
+function boundsOfPoints(points:CursorPoint[],padding=0):AnnotationRect {
+  const xs=points.map(({x})=>x),ys=points.map(({y})=>y),left=Math.min(...xs),top=Math.min(...ys);
+  return {x:left-padding,y:top-padding,w:Math.max(...xs)-left+padding*2,h:Math.max(...ys)-top+padding*2};
+}
+function unionBounds(...rects:AnnotationRect[]):AnnotationRect {
+  const left=Math.min(...rects.map(rect=>rect.x)),top=Math.min(...rects.map(rect=>rect.y));
+  const right=Math.max(...rects.map(rect=>rect.x+rect.w)),bottom=Math.max(...rects.map(rect=>rect.y+rect.h));
+  return {x:left,y:top,w:right-left,h:bottom-top};
+}
+function pointsLength(points:CursorPoint[]):number {
+  return points.reduce((length,point,index)=>index?length+Math.hypot(point.x-points[index-1].x,point.y-points[index-1].y):0,0);
+}
+function moveToRest(queue:CursorMotion,to:CursorPoint):Promise<void> {
+  const current=queue.current();
+  return Math.hypot(to.x-current.x,to.y-current.y)<4?Promise.resolve():queue.moveTo(to);
+}
+function animateHeadProgress(onProgress:(progress:number)=>void):Promise<void> {
+  if(window.matchMedia("(prefers-reduced-motion: reduce)").matches){onProgress(1);return Promise.resolve();}
+  const start=performance.now();
+  return new Promise(resolve=>{const frame=(now:number)=>{const progress=Math.min(1,(now-start)/180);onProgress(progress);if(progress<1)requestAnimationFrame(frame);else resolve();};requestAnimationFrame(frame);});
+}
 const voiceMode = new URLSearchParams(location.search).get("voice") === "1";
 const textPattern = (value:string) => new RegExp([...value.trim()].map(char => {
   const escaped=char.replace(/[.*+?^${}()|[\]\\]/g,"\\$&");
@@ -59,7 +80,7 @@ function TD(){
   const [question,setQuestion]=useState(""),[status,setStatus]=useState("idle"),[caption,setCaption]=useState(""),[captionFading,setCaptionFading]=useState(false),[connecting,setConnecting]=useState(false),[audioLevel,setAudioLevel]=useState(0),[voiceError,setVoiceError]=useState(""),[micEnabled,setMicEnabled]=useState(false);
   const [boardOpen,setBoardOpen]=useState(false),[boardSrc,setBoardSrc]=useState("");
   const [activeExercise,setActiveExercise]=useState(exercises[0]);
-  const [marks,setMarks]=useState<Array<{id:string;kind:string;rect:Rect;text?:string;to?:Rect;annotationTarget?:Rect;leader?:boolean;color?:string|null;fill?:string|null;progress?:number}>>([]);
+  const [marks,setMarks]=useState<Array<{id:string;kind:string;rect:Rect;text?:string;to?:Rect;annotationTarget?:Rect;leader?:boolean;color?:string|null;fill?:string|null;progress?:number;head?:number;points?:CursorPoint[];ghostPoints?:CursorPoint[];shaftPoints?:CursorPoint[];headPoints?:[CursorPoint,CursorPoint,CursorPoint]}>>([]);
   const cursorRest={x:innerWidth/2,y:innerHeight-90};
   const [cursor,setCursor]=useState<CursorVisual>({...cursorRest,visible:false});
   const cursorMotion=useRef<ReturnType<typeof createCursorMotion>|null>(null);
@@ -85,18 +106,21 @@ function TD(){
     setBoardSrc(`/board.html?${query}`); boardOpenRef.current=true; setBoardOpen(true);
   };
   const elements=():ViewElement[]=>[...document.querySelectorAll<HTMLElement>("[data-gerald-id]")].filter(e=>e.getClientRects().length).map(e=>{const r=e.getBoundingClientRect();return {id:Number(e.dataset.geraldId),text:(e instanceof HTMLInputElement?e.value||e.placeholder:e.innerText||"").trim(),rect:{x:r.x,y:r.y,w:r.width,h:r.height}};});
-  const placeBeside=(target:Rect,text:string,kind:"note"|"tip")=>{
-    const occupied:AnnotationRect[]=[
+  const annotationOccupants=(target?:AnnotationRect,extra:AnnotationRect[]=[]):AnnotationRect[]=>[
       ...elements().map(element=>element.rect),
       ...marks.filter(mark=>mark.kind==="note"||mark.kind==="tip").map(mark=>mark.rect),
       ...pendingAnnotations.current.values(),
-      target,
+      ...(target?[target]:[]),...extra,
     ];
-    return placeAnnotation(target,annotationSize(text,kind),occupied,{w:innerWidth,h:innerHeight});
-  };
+  const viewport=()=>({w:innerWidth,h:innerHeight});
+  const placeBeside=(target:Rect,text:string,kind:"note"|"tip")=>
+    placeAnnotation(target,annotationSize(text,kind),annotationOccupants(target),viewport());
+  const restBeside=(bounds:AnnotationRect,extra:AnnotationRect[]=[])=>
+    cursorRestBeside(bounds,annotationOccupants(bounds,extra),viewport());
   const waitForPaint=()=>new Promise<void>(resolve=>requestAnimationFrame(()=>requestAnimationFrame(()=>resolve())));
   const addMark=(mark:typeof marks[number])=>setMarks(items=>[...items,mark]);
   const updateMarkProgress=(id:string,progress:number)=>setMarks(items=>items.map(mark=>mark.id===id?{...mark,progress}:mark));
+  const updateMarkHead=(id:string,head:number)=>setMarks(items=>items.map(mark=>mark.id===id?{...mark,head}:mark));
   const exec=async(name:string,args:Record<string,any>)=>{
     if(name==="open_board"){openBoard(String(args.exercise_id));return {ok:true};}
     const motion=cursorMotion.current!;
@@ -123,7 +147,9 @@ function TD(){
       motion.enqueue(async queue=>{
         await queue.moveTo({x:pos.x+pos.w/2,y:pos.y+pos.h/2});
         addMark({id,kind:"tip",rect:placement.rect,text:args.text,color,annotationTarget:r?pos:undefined,leader:r?placement.leader:false});
+        await waitForPaint();
         pendingAnnotations.current.delete(id);
+        await moveToRest(queue,restBeside(unionBounds(pos,placement.rect),[pos,placement.rect]));
       });
       return {ok:true,target:pos,annotation:placement.rect};
     }
@@ -133,6 +159,8 @@ function TD(){
       motion.enqueue(async queue=>{
         await queue.moveTo({x:pos.x,y:pos.y});
         addMark({id,kind:"write",rect:pos,text:String(args.text??args.latex??""),color:color??"#111"});
+        const text=String(args.text??args.latex??""),size=Number(args.size)||32;
+        await moveToRest(queue,restBeside({x:pos.x,y:pos.y-size,w:Math.max(size,text.length*size*.65),h:size*1.25}));
       });
       return {ok:true};
     }
@@ -147,7 +175,9 @@ function TD(){
       motion.enqueue(async queue=>{
         await queue.moveTo({x:r.x+r.w/2,y:r.y+r.h/2});
         addMark({id,kind:"note",rect:placement.rect,text,color,annotationTarget:r,leader:placement.leader});
+        await waitForPaint();
         pendingAnnotations.current.delete(id);
+        await moveToRest(queue,restBeside(unionBounds(r,placement.rect),[r,placement.rect]));
       });
       return {ok:true,target:r,annotation:placement.rect};
     }
@@ -156,11 +186,15 @@ function TD(){
     if(name==="arrow"&&endpoints){
       const {x1,y1,x2,y2}=endpoints;
       const id=crypto.randomUUID();
+      const {shaft,head}=sketchArrow(x1,y1,x2,y2,seedFrom(id));
+      const bounds=boundsOfPoints([...shaft,...head],2);
       motion.enqueue(async queue=>{
-        await queue.moveTo({x:x1,y:y1});
-        addMark({id,kind:"arrow",rect:{x:x1,y:y1,w:x2-x1,h:y2-y1},text,to:{x:x2,y:y2,w:0,h:0},color,progress:0});
+        await queue.moveTo(shaft[0]);
+        addMark({id,kind:"arrow",rect:{x:x1,y:y1,w:x2-x1,h:y2-y1},text,to:{x:x2,y:y2,w:0,h:0},color,progress:0,head:0,shaftPoints:shaft,headPoints:head});
         await waitForPaint();
-        await queue.moveTo({x:x2,y:y2},progress=>updateMarkProgress(id,progress));
+        await queue.moveAlong(shaft,Math.max(380,Math.min(800,pointsLength(shaft)*2.5)),progress=>updateMarkProgress(id,progress));
+        await animateHeadProgress(progress=>updateMarkHead(id,progress));
+        await moveToRest(queue,restBeside(bounds));
       });
       return {ok:true,target:{x:x2,y:y2},from:{x:x1,y:y1},to:{x:x2,y:y2}};
     }
@@ -174,23 +208,26 @@ function TD(){
         addMark({...mark,progress:0});
         await waitForPaint();
         await queue.moveTo(end,progress=>updateMarkProgress(id,progress));
+        const bounds=name==="underline"?{x:rect.x-rect.w/2,y:rect.y+rect.h/2-2,w:rect.w,h:4}:{x:rect.x-rect.w/2,y:rect.y-rect.h/2,w:rect.w,h:rect.h};
+        await moveToRest(queue,restBeside(bounds));
       });
     }else if(name==="circle"){
-      const start={x:rect.x+rect.w/2,y:rect.y};
+      const points=sketchEllipsePoints(rect.x,rect.y,rect.w/2,rect.h/2,seedFrom(id));
+      const ghostPoints=sketchEllipsePoints(rect.x,rect.y,rect.w/2,rect.h/2,seedFrom(id)+.37);
+      const bounds=boundsOfPoints([...points,...ghostPoints],2);
       motion.enqueue(async queue=>{
-        await queue.moveTo(start);
-        addMark({...mark,progress:0});
+        await queue.moveTo(points[0]);
+        addMark({...mark,progress:0,points,ghostPoints});
         await waitForPaint();
-        for(let segment=1;segment<=4;segment+=1){
-          const angle=segment*Math.PI/2;
-          const end={x:rect.x+rect.w/2*Math.cos(angle),y:rect.y+rect.h/2*Math.sin(angle)};
-          await queue.moveTo(end,progress=>updateMarkProgress(id,(segment-1+progress)/4));
-        }
+        await queue.moveAlong(points,Math.max(650,Math.min(1100,pointsLength(points)*2.2)),progress=>updateMarkProgress(id,progress));
+        await moveToRest(queue,restBeside(bounds));
       });
     }else{
+      const bounds=name==="point"?{x:rect.x-5,y:rect.y-5,w:10,h:10}:rect;
       motion.enqueue(async queue=>{
         await queue.moveTo({x:rect.x,y:rect.y});
         addMark({...mark,progress:1});
+        await moveToRest(queue,restBeside(bounds));
       });
     }
     return {ok:true,target:{x:rect.x,y:rect.y}};
@@ -358,19 +395,23 @@ function TD(){
   </article>
     <div className="td-mark-layer" aria-hidden="true">
       <svg width={innerWidth} height={innerHeight}>
-        <defs>
-          <marker id="td-arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto"><path d="M 0 0 L 10 5 L 0 10 z" fill="#0067D9"/></marker>
-          {marks.filter(m=>m.kind==="arrow"&&m.color).map(m=><marker key={m.id} id={`td-arrow-${m.id}`} viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto"><path d="M 0 0 L 10 5 L 0 10 z" style={{fill:m.color!}}/></marker>)}
-        </defs>
         {marks.filter(m=>m.kind==="circle").map(m=>{
-          const length=ellipseCircumference(m.rect.w/2,m.rect.h/2),progress=m.progress??1;
-          return <ellipse key={m.id} data-gerald-mark-kind="circle" cx={m.rect.x} cy={m.rect.y} rx={m.rect.w/2} ry={m.rect.h/2}
-            strokeDasharray={`${length} ${length}`} strokeDashoffset={length*(1-progress)} style={{stroke:m.color??undefined}}/>;
+          const progress=m.progress??1;
+          return <g key={m.id} data-gerald-mark-kind="circle">
+            <path d={pointsToPath(m.points??[])} pathLength={1} strokeDasharray="1 1" strokeDashoffset={1-progress} style={{stroke:m.color??undefined}}/>
+            <path className="sketch-ghost" d={pointsToPath(m.ghostPoints??[])} pathLength={1} strokeDasharray="1 1" strokeDashoffset={1-progress} style={{stroke:m.color??undefined}}/>
+          </g>;
         })}
         {marks.filter(m=>m.kind==="underline").map(m=><line key={m.id} data-gerald-mark-kind="underline" x1={m.rect.x-m.rect.w/2} x2={m.rect.x-m.rect.w/2+m.rect.w*(m.progress??1)} y1={m.rect.y+m.rect.h/2} y2={m.rect.y+m.rect.h/2} style={{stroke:m.color??undefined}}/>)}
         {marks.filter(m=>m.kind==="point").map(m=><circle key={m.id} data-gerald-mark-kind="point" cx={m.rect.x} cy={m.rect.y} r="5" style={{fill:m.color??undefined}}/> )}
         {marks.filter(m=>m.kind==="highlight").map(m=><rect key={m.id} data-gerald-mark-kind="highlight" x={m.rect.x-m.rect.w/2} y={m.rect.y-m.rect.h/2} width={m.rect.w*(m.progress??1)} height={m.rect.h} style={{fill:m.fill??undefined,stroke:m.color??undefined}}/>)}
-        {marks.filter(m=>m.kind==="arrow"&&m.to).map(m=><line key={m.id} data-gerald-mark-kind="arrow" x1={m.rect.x} y1={m.rect.y} x2={m.rect.x+m.rect.w*(m.progress??1)} y2={m.rect.y+m.rect.h*(m.progress??1)} markerEnd={m.color?`url(#td-arrow-${m.id})`:"url(#td-arrow)"} style={{stroke:m.color??undefined}}/> )}
+        {marks.filter(m=>m.kind==="arrow"&&m.headPoints).map(m=>{
+          const [wingA,tip,wingB]=m.headPoints!;
+          return <g key={m.id} data-gerald-mark-kind="arrow">
+            <path d={pointsToPath(m.shaftPoints??[])} pathLength={1} strokeDasharray="1 1" strokeDashoffset={1-(m.progress??1)} style={{stroke:m.color??undefined}}/>
+            <path d={`M ${wingA.x} ${wingA.y} L ${tip.x} ${tip.y} L ${wingB.x} ${wingB.y}`} pathLength={1} strokeDasharray="1 1" strokeDashoffset={1-(m.head??1)} style={{stroke:m.color??undefined}}/>
+          </g>;
+        })}
         {marks.filter(m=>(m.kind==="note"||m.kind==="tip")&&m.leader&&m.annotationTarget).map(m=>{
           const line=annotationLeader(m.annotationTarget!,m.rect);
           return <line key={`${m.id}-leader`} x1={line.x1} y1={line.y1} x2={line.x2} y2={line.y2} style={{stroke:m.color??undefined}}/>;
@@ -381,7 +422,7 @@ function TD(){
           </foreignObject>)}
         {marks.filter(m=>m.kind==="write"||m.kind==="write_math").map(m=><text key={m.id} data-gerald-mark-kind={m.kind} x={m.rect.x} y={m.rect.y} className="td-note" style={{fill:m.color??"#111"}}>{m.text}</text>)}
       </svg>
-      <div className="gerald-pointer" aria-hidden="true" style={{left:cursor.x,top:cursor.y,opacity:cursor.visible?1:0}}>➤</div>
+      <div className="gerald-pointer" aria-hidden="true" style={{left:cursor.x,top:cursor.y,opacity:cursor.visible?1:0}}><i/>Gerald</div>
     </div>
     <div className="td-assist">
       {!voiceMode&&answer&&<div className="td-answer" key={answer.q}><span className="td-q">{answer.q}</span><p>{answer.text||"…"}</p><button className="td-go" onClick={()=>clickExercise(answer.ex)}>Viens, on va au tableau · {answer.ex.title} →</button></div>}
@@ -389,10 +430,9 @@ function TD(){
       {voiceMode&&caption&&<div className={`td-caption${captionFading?" fade":""}`}><Reveal text={caption}/></div>}
       <form className="td-ask" onSubmit={onSubmit}><div className="voice-status"><Orb status={status} size={30} level={audioLevel}/>{voiceError&&<span className="td-voice-error" role="status">{voiceError}</span>}</div>
         <input data-gerald-id="30" value={question} onChange={e=>setQuestion(e.target.value)} onFocus={()=>bridge.requestFocus(true)} onBlur={()=>bridge.requestFocus(false)} placeholder="Une question sur le TD ? Je t’explique."/>
-        {voiceMode&&<kbd>CTRL + SHIFT</kbd>}
+        <span className="td-hold">Maintiens <kbd>Ctrl</kbd> + <kbd>Shift</kbd></span><span className={`td-wave${status==="speaking"||status==="listening"?" on":""}`} aria-hidden="true">{Array.from({length:12},(_,i)=><i key={i} style={{animationDelay:`${i*70}ms`}}/>)}</span>
         {voiceMode&&<button type="button" className="td-mic" aria-label={sessionOpen?(micEnabled?"Couper le micro":"Activer le micro"):"Parler à Gerald"} aria-pressed={sessionOpen?micEnabled:undefined} disabled={connecting&&!sessionOpen} onClick={toggleMicrophone}>{sessionOpen?(micEnabled?"Couper le micro":"Activer le micro"):connecting?"Connexion…":"Parler à Gerald"}</button>}
         {voiceMode&&sessionOpen&&<button type="button" className="td-stop" onClick={stop}>Arrêter</button>}
-        {!voiceMode&&<kbd>CTRL + SHIFT</kbd>}
       </form>
     </div>
     {voiceMode&&<div className={`td-board-overlay ${boardOpen?"open":""}`}><button className="td-board-close" onClick={()=>{boardOpenRef.current=false;setBoardOpen(false);}}>Retour au TD</button>{boardSrc&&<iframe ref={frame} title="Tableau" src={boardSrc} />}</div>}
