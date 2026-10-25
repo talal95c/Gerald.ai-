@@ -1,0 +1,30 @@
+{
+ "hook": {
+  "text": "11 p.m. One exercise. Stuck. Alone. That ends today.",
+  "dur": 6.48
+ },
+ "chat": {
+  "text": "Chatbots hand you the answer. You learn nothing. And private tutors cost a fortune.",
+  "dur": 7.13
+ },
+ "meet": {
+  "text": "Meet Gerald. The private tutor that lives on your screen.",
+  "dur": 3.66
+ },
+ "td": {
+  "text": "Drop your courses. Gerald knows them, and reads your worksheet with you.",
+  "dur": 6.16
+ },
+ "board": {
+  "text": "You write on the board. Gerald follows every line, explains out loud, plots the exact curve. And you find the answer yourself.",
+  "dur": 9.61
+ },
+ "desktop": {
+  "text": "One key, any app. Gerald guides you step by step, all the way to the red square. And you do the clicking.",
+  "dur": 7.97
+ },
+ "cta": {
+  "text": "Gerald. It doesn't give you the answer. It helps you find it.",
+  "dur": 4.75
+ }
+}

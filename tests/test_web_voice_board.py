@@ -153,6 +153,8 @@ def test_session_posts_sdp_and_filtered_realtime_config(monkeypatch, server):
     assert len(tool_names) == len(session["tools"])
     tools_by_name = {tool["name"]: tool for tool in session["tools"]}
     assert "write_math" in tools_by_name["write"]["description"]
+    assert "y" not in tools_by_name["write_math"]["parameters"].get("required", [])
+    assert "from" not in tools_by_name["arrow"]["parameters"].get("required", [])
     assert "LaTeX" in tools_by_name["write_math"]["description"]
     assert r"\Delta = b^2 - 4ac" in tools_by_name["write_math"]["description"]
     assert "le target_text de to" in tools_by_name["arrow"]["description"]
@@ -503,3 +505,29 @@ def test_healthz_skips_host_check(server):
     status, body, _ = _request(server, "GET", "/healthz", headers={"Host": "10.0.0.5:10000"})
     assert status == 200
     assert json.loads(body) == {"ok": True}
+
+
+def test_minipaint_bundle_is_shipped(server):
+    status, body, _headers = _request(server, "GET", "/vendor/minipaint/dist/bundle.js")
+    assert status == 200
+    assert len(body) > 1_000_000
+
+
+def test_td_and_document_prompts_open_board_before_plot():
+    for live, doc in ((False, False), (False, True)):
+        config = web_voice_board.build_session_config(
+            "gpt-realtime-2", "Exercice 1", ["x² − 5x + 6 = 0"], live, doc, False
+        )
+        plot = next(tool for tool in config["tools"] if tool["name"] == "plot")
+        assert "appelle d'abord open_board puis plot" in plot["description"]
+    td = web_voice_board.build_session_config(
+        "gpt-realtime-2", "Exercice 1", ["x² − 5x + 6 = 0"], False, False, False
+    )
+    assert "appelle open_board" in td["instructions"] and "puis plot" in td["instructions"]
+
+
+def test_paint_guidance_names_the_shown_control_and_the_drawing_canvas():
+    guidance = web_voice_board.PAINT_MODE_GUIDANCE.read_text(encoding="utf-8")
+    assert "must name the exact control you show" in guidance
+    assert "Zone de dessin (canvas principal)" in guidance
+    assert "Make the showing call first" in guidance

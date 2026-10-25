@@ -7,6 +7,8 @@ __pycache__/
 .coverage
 build/
 dist/
+!web/public/vendor/minipaint/dist/
+!gerald/home/webui/vendor/minipaint/dist/
 *.egg-info/
 node_modules/
 .idea/

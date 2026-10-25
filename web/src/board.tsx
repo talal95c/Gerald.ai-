@@ -3,7 +3,7 @@ import { createRoot } from "react-dom/client";
 import katex from "katex";
 import "katex/dist/katex.min.css";
 import "./board.css";
-import {annotationLeader, annotationSize, arrowEndpoints, createCursorMotion, cursorRestBeside, intentColor, placeAnnotation, pointsToPath, seedFrom, sketchArrow, sketchEllipsePoints, segmentBoardText, type AnnotationRect, type BoardTextPart, type CursorMotion, type CursorPoint, type CursorVisual} from "./annotations";
+import {annotationLeader, annotationSize, arrowEndpointsAroundTarget, arrowEndpointsFromSource, createCursorMotion, cursorRestBeside, intentColor, placeAnnotation, pointsToPath, seedFrom, sketchArrow, sketchEllipsePoints, segmentBoardText, type AnnotationRect, type BoardTextPart, type CursorMotion, type CursorPoint, type CursorVisual} from "./annotations";
 import { mountNotch } from "./notch";
 
 type Pt = {x: number; y: number; p: number};
@@ -43,6 +43,25 @@ function unionBounds(...rects: AnnotationRect[]): AnnotationRect {
   const right = Math.max(...rects.map((rect) => rect.x + rect.w));
   const bottom = Math.max(...rects.map((rect) => rect.y + rect.h));
   return {x: left, y: top, w: right - left, h: bottom - top};
+}
+
+function measuredWriteBounds(element: HTMLElement): AnnotationRect {
+  const mathRects = [...element.querySelectorAll<HTMLElement>(".katex")]
+    .map((math) => math.getBoundingClientRect())
+    .filter((rect) => rect.width > 0 && rect.height > 0)
+    .map((rect) => ({x: rect.x, y: rect.y, w: rect.width, h: rect.height}));
+  if (mathRects.length) return unionBounds(...mathRects);
+  const rect = element.getBoundingClientRect();
+  return {x: rect.x, y: rect.y, w: rect.width, h: rect.height};
+}
+
+const WRITE_LAYOUT_GAP = 8;
+
+function writeBoundsOverlap(left: AnnotationRect, right: AnnotationRect): boolean {
+  return left.x < right.x + right.w + WRITE_LAYOUT_GAP
+    && left.x + left.w + WRITE_LAYOUT_GAP > right.x
+    && left.y < right.y + right.h + WRITE_LAYOUT_GAP
+    && left.y + left.h + WRITE_LAYOUT_GAP > right.y;
 }
 
 function traceSketchPath(ctx: CanvasRenderingContext2D, points: CursorPoint[]) {
@@ -829,6 +848,13 @@ function Board() {
     const ink = elements().find((item) => item.id === elementId && item.id >= 10000);
     if (ink) return ink.rect;
     if (!wanted && isNumber(args.x) && isNumber(args.y)) {
+      if (!isNumber(args.w) && !isNumber(args.h)) {
+        const containing = elements().filter((item) =>
+          args.x >= item.rect.x && args.x <= item.rect.x + item.rect.w
+          && args.y >= item.rect.y && args.y <= item.rect.y + item.rect.h,
+        ).sort((left, right) => left.rect.w * left.rect.h - right.rect.w * right.rect.h);
+        if (containing[0]) return containing[0].rect;
+      }
       return {x: args.x, y: args.y, w: isNumber(args.w) ? args.w : 120, h: isNumber(args.h) ? args.h : 38};
     }
     return null;
@@ -857,10 +883,11 @@ function Board() {
     }
     if (name === "write" || name === "write_math") {
       const text = name === "write" ? args.text : args.latex;
-      if (typeof text !== "string" || !isNumber(args.x) || !isNumber(args.y)) {
-        return {ok: false, error: "write requires text or latex and numeric x,y coordinates"};
+      if (typeof text !== "string" || !isNumber(args.x) || (args.y !== undefined && !isNumber(args.y))) {
+        return {ok: false, error: "write requires text or latex and numeric x coordinates"};
       }
       const size = isNumber(args.size) ? args.size : 32;
+      const requestedY = isNumber(args.y) ? Number(args.y) : null;
       const html = name === "write_math"
         ? katex.renderToString(text, {throwOnError: false, output: "htmlAndMathml"})
         : undefined;
@@ -870,12 +897,32 @@ function Board() {
           : part)
         : undefined;
       const x = Math.max(Number(args.x), minBoardContentX());
-      const y = Number(args.y);
       motion.enqueue(async (queue) => {
+        const previousRects = [...document.querySelectorAll<HTMLElement>(".gerald-write")]
+          .map(measuredWriteBounds);
+        const occupiedRects = [
+          ...previousRects,
+          ...elements().filter((element) => element.id >= 10000).map((element) => element.rect),
+        ];
+        const occupiedBottom = occupiedRects.reduce((bottom, rect) => Math.max(bottom, rect.y + rect.h), 0);
+        const automaticY = Math.max(160, occupiedBottom + 12);
+        let y = requestedY ?? automaticY;
         await queue.moveTo({x, y});
         setGeraldTexts((items) => [...items, {id, text, x, y, size, color: color ?? "#111", html, parts}]);
-        const bounds = {x, y: y - size, w: Math.max(size, text.length * size * 0.65), h: size * 1.25};
-        await moveToRest(queue, restBeside(bounds));
+        await new Promise<void>((resolve) => requestAnimationFrame(() => requestAnimationFrame(() => resolve())));
+        let line = document.querySelector<HTMLElement>(`[data-gerald-text-id="${id}"]`);
+        let bounds = line ? measuredWriteBounds(line) : null;
+        const shouldStartBelowAll = requestedY === null
+          || (bounds !== null && occupiedRects.some((rect) => writeBoundsOverlap(bounds, rect)));
+        if (bounds && shouldStartBelowAll && bounds.y < automaticY - 1) {
+          y += automaticY - bounds.y;
+          setGeraldTexts((items) => items.map((item) => item.id === id ? {...item, y} : item));
+          await new Promise<void>((resolve) => requestAnimationFrame(() => requestAnimationFrame(() => resolve())));
+          line = document.querySelector<HTMLElement>(`[data-gerald-text-id="${id}"]`);
+          bounds = line ? measuredWriteBounds(line) : null;
+        }
+        const measured = bounds ?? {x, y, w: Math.max(size, text.length * size * 0.65), h: size * 1.25};
+        await moveToRest(queue, restBeside(measured));
       });
       return {ok: true};
     }
@@ -898,10 +945,26 @@ function Board() {
       return {ok: true, target: {x: point.x, y: point.y, w: point.w, h: point.h}, annotation: placement.rect};
     }
     if (name === "arrow") {
-      const from = targetRect((args.from ?? {}) as Record<string, unknown>);
+      const fromArgs = (args.from ?? {}) as Record<string, unknown>;
+      const fromIsPoint = isNumber(fromArgs.x) && isNumber(fromArgs.y)
+        && !isNumber(fromArgs.w) && !isNumber(fromArgs.h)
+        && typeof fromArgs.target_text !== "string" && !isNumber(fromArgs.element_id);
+      const from = fromIsPoint
+        ? {x: Number(fromArgs.x), y: Number(fromArgs.y), w: 0, h: 0}
+        : targetRect(fromArgs);
       const to = targetRect((args.to ?? {}) as Record<string, unknown>);
-      if (!from || !to) return {ok: false, error: `target not found. Visible targets: ${visibleTargetSummary()}`};
-      const endpoints = arrowEndpoints(from, to);
+      if (!to) return {ok: false, error: `target not found. Visible targets: ${visibleTargetSummary()}`};
+      const containsTarget = !!from && (
+        to.x >= from.x - 2 && to.y >= from.y - 2
+          && to.x + to.w <= from.x + from.w + 2 && to.y + to.h <= from.y + from.h + 2
+        || from.w === 0 && from.h === 0 && from.x >= to.x - 2 && from.x <= to.x + to.w + 2
+          && from.y >= to.y - 2 && from.y <= to.y + to.h + 2
+        || from.x < to.x + to.w && from.x + from.w > to.x
+          && from.y < to.y + to.h && from.y + from.h > to.y
+      );
+      const endpoints = !from || containsTarget
+        ? arrowEndpointsAroundTarget(to, elements().map((item) => item.rect), viewport())
+        : arrowEndpointsFromSource(from, to, elements().map((item) => item.rect), viewport());
       if (!endpoints) return {ok: false, error: "arrow endpoints could not be calculated"};
       const {x1, y1, x2, y2} = endpoints;
       const {shaft, head} = sketchArrow(x1, y1, x2, y2, seedFrom(id));
@@ -1022,7 +1085,7 @@ function Board() {
     <canvas ref={canvas} className={tool} onPointerDown={down} onPointerMove={move}/>
     {!liveMode&&<aside className="ex-card" ref={exerciseCard} data-gerald-id="100"><div className="ex-label"><i/>{title.toUpperCase()}</div>{lines.map((line, index) => <p key={index} data-gerald-id={101 + index}>{line}</p>)}</aside>}
     <div className="gerald-text-layer">
-      {geraldTexts.map((item,index) => <div key={item.id} className="gerald-write" data-gerald-id={300+index} style={{left: item.x, top: item.y, fontSize: item.size, color: item.color}}>
+      {geraldTexts.map((item,index) => <div key={item.id} className="gerald-write" data-gerald-id={300+index} data-gerald-text-id={item.id} style={{left: item.x, top: item.y, fontSize: item.size, color: item.color}}>
         {item.html ? <span dangerouslySetInnerHTML={{__html: item.html}}/> : item.parts
           ? item.parts.map((part, partIndex) => part.html
             ? <span key={partIndex} dangerouslySetInnerHTML={{__html: part.html}}/>

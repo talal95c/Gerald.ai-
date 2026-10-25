@@ -7,7 +7,7 @@ import "./board.css";
 import {getBridge} from "./bridge";
 import {Orb} from "./orb";
 import {Reveal} from "./reveal";
-import {annotationLeader, annotationSize, arrowEndpoints, createCursorMotion, cursorRestBeside, intentColor, placeAnnotation, pointsToPath, seedFrom, sketchArrow, sketchEllipsePoints, type AnnotationRect, type CursorMotion, type CursorPoint, type CursorVisual} from "./annotations";
+import {annotationLeader, annotationSize, arrowEndpointsAroundTarget, arrowEndpointsFromSource, createCursorMotion, cursorRestBeside, intentColor, placeAnnotation, pointsToPath, seedFrom, sketchArrow, sketchEllipsePoints, type AnnotationRect, type CursorMotion, type CursorPoint, type CursorVisual} from "./annotations";
 import {mountNotch} from "./notch";
 import * as pdfjs from "pdfjs-dist";
 import pdfWorker from "pdfjs-dist/build/pdf.worker.min.mjs?url";
@@ -172,6 +172,19 @@ function targetRect(args:Record<string,any>):Rect|null {
     const pattern=textPattern(args.target_text);
     element = elements.find(e => pattern.test(e.innerText));
   }
+  if (!element && typeof args.target_text !== "string" && typeof args.x === "number" && typeof args.y === "number") {
+    if (typeof args.w !== "number" && typeof args.h !== "number") {
+      const containing = elements.filter(item=>item.getClientRects().length).map(item => {
+        const rect=item.getBoundingClientRect();
+        return {element:item,rect:{x:rect.x,y:rect.y,w:rect.width,h:rect.height}};
+      }).filter(item =>
+        args.x >= item.rect.x && args.x <= item.rect.x + item.rect.w
+        && args.y >= item.rect.y && args.y <= item.rect.y + item.rect.h,
+      ).sort((left,right)=>left.rect.w*left.rect.h-right.rect.w*right.rect.h);
+      if(containing[0])return containing[0].rect;
+    }
+    return {x:args.x,y:args.y,w:typeof args.w==="number"?args.w:120,h:typeof args.h==="number"?args.h:38};
+  }
   if (!element) return null;
   let rect = element.getBoundingClientRect();
   if (typeof args.target_text === "string" && args.target_text) {
@@ -212,6 +225,7 @@ function TD(){
   const [suggestion,setSuggestion]=useState(false);
   const boardOpenRef=useRef(liveMode||boardMode);
   const frame=useRef<HTMLIFrameElement>(null), paintFrame=useRef<HTMLIFrameElement>(null), audio=useRef<HTMLAudioElement>(null);
+  const paintHotkeysCleanup=useRef<(()=>void)|null>(null);
   const paintIds=useRef(new WeakMap<Element,number>()), nextPaintId=useRef(7000);
   const peer=useRef<RTCPeerConnection|null>(null), channel=useRef<RTCDataChannel|null>(null), stream=useRef<MediaStream|null>(null);
   const audioContext=useRef<AudioContext|null>(null), micAnalyser=useRef<AnalyserNode|null>(null), remoteAnalyser=useRef<AnalyserNode|null>(null);
@@ -283,6 +297,8 @@ function TD(){
       return title?.innerText.trim()||element.getAttribute("aria-label")?.trim()||"Dialog";
     };
     const candidates=nodes.filter(element=>{
+      if(element.id==="canvas_minipaint")return true;
+      if(/^ok$/i.test(element.innerText?.trim()??"")&&dialogs.some(dialog=>dialog.contains(element)&&dialog.querySelector(".effectsPreview")))return false;
       const semantic=element.matches("button,a,input,select,[role='button'],[role='menuitem'],[title],[class*='layer']");
       return (semantic||clickable.has(element))&&!hasClickableAncestor(element);
     });
@@ -300,7 +316,7 @@ function TD(){
       const inputContainer=input?.closest<HTMLElement>(".item,.row");
       const inputLabelRaw=[...(input?.labels??[])].map(label=>label.innerText.trim()).find(Boolean)
         ||inputContainer?.querySelector<HTMLElement>("label,.label")?.innerText.trim()
-        ||(input?.id==="color_hex"?"Hex":input?.getAttribute("aria-label")||input?.title||input?.placeholder||input?.id.replaceAll("_"," ")||"");
+        ||(/(?:^|_)color_hex$/.test(input?.id??"")?"Hex":input?.getAttribute("aria-label")||input?.title||input?.placeholder||input?.id.replaceAll("_"," ")||"");
       const inputLabel=inputLabelRaw.replace(/[:：]\s*$/,"");
       const inputText=input?(inputValue?`${inputLabel?`${inputLabel} `:""}${inputValue}`:inputLabel):inputValue;
       const checkbox=Boolean(input?.type==="checkbox"||element.getAttribute("role")==="checkbox"
@@ -312,7 +328,9 @@ function TD(){
         ||element.getAttribute("title")?.trim()||element.getAttribute("aria-label")?.trim()
         ||inputText
         ||element.parentElement?.innerText?.trim()||"").trim();
-      const text=`${baseText}${checkbox?(checked?" ✓":" ✗"):""}`.trim();
+      const canvasLabel=element.id==="canvas_minipaint"?"Zone de dessin (canvas principal, glisser ici pour tracer)"
+        :element.id==="canvas_preview"?"Aperçu (miniature, pas la zone de dessin)":"";
+      const text=canvasLabel||`${baseText}${checkbox?(checked?" ✓":" ✗"):""}`.trim();
       const containingDialog=dialogs.filter(dialog=>dialog.contains(element)).pop();
       return {order:index,item:{
         id,text,active,selected,checked:checkbox?checked:undefined,isColor:input?.type==="color"||input?.id==="color_hex",
@@ -325,11 +343,24 @@ function TD(){
       ||Number(b.item.active||b.item.selected)-Number(a.item.active||a.item.selected)
       ||a.order-b.order).slice(0,150).map(entry=>entry.item);
   };
-  const paintTargetRect=(args:Record<string,any>):Rect|null=>{
+  const paintShown=(args:Record<string,any>)=>{
+    if(!paintMode)return {};
+    const elements=paintElements();
+    const label=(elements.find(item=>item.id===Number(args.element_id))
+      ??(typeof args.target_text==="string"?elements.find(item=>textPattern(args.target_text).test(item.text)):undefined))?.text.slice(0,80);
+    return label?{shown:label,say:`Dis en une phrase complète ce que l'élève doit faire avec « ${label} », la commande que tu viens de montrer (ex. « Clique sur ${label} » ou, pour un champ, la valeur exacte à taper). Ne parle d'aucune autre commande ni de l'étape suivante.`}:{};
+  };
+  const paintTargetRect=(args:Record<string,any>,scroll=true):Rect|null=>{
     const elements=paintElements();
     const element=elements.find(item=>item.id===Number(args.element_id))
       ??(typeof args.target_text==="string"?elements.find(item=>textPattern(args.target_text).test(item.text)):undefined);
-    return element?.rect??null;
+    if(!element)return null;
+    const iframe=paintFrame.current,node=iframe?.contentDocument?.querySelector<HTMLElement>(`[data-gerald-id="${element.id}"]`);
+    if(!iframe||!node)return element.rect;
+    if(scroll)node.scrollIntoView({block:"nearest",inline:"nearest"});
+    const frameRect=iframe.getBoundingClientRect(),rect=node.getBoundingClientRect();
+    const scaleX=frameRect.width/Math.max(1,iframe.clientWidth),scaleY=frameRect.height/Math.max(1,iframe.clientHeight);
+    return {x:frameRect.x+rect.x*scaleX,y:frameRect.y+rect.y*scaleY,w:rect.width*scaleX,h:rect.height*scaleY};
   };
   const elements=():ViewElement[]=>paintMode?paintElements():[...document.querySelectorAll<HTMLElement>("[data-gerald-id]")].filter(e=>e.getClientRects().length).map(e=>{const r=e.getBoundingClientRect();return {id:Number(e.dataset.geraldId),text:(e instanceof HTMLInputElement?e.value||e.placeholder:e.innerText||"").trim(),rect:{x:r.x,y:r.y,w:r.width,h:r.height}};});
   const annotationOccupants=(target?:AnnotationRect,extra:AnnotationRect[]=[]):AnnotationRect[]=>[
@@ -358,17 +389,33 @@ function TD(){
     const color=intentColor(args.intent);
     const highlightFill=intentColor(args.intent,null,0.16);
     const resolveTarget=(target:Record<string,any>)=>paintMode?paintTargetRect(target):targetRect(target);
-    const from=name==="arrow"?resolveTarget(args.from??{}):resolveTarget(args);
+    const fromArgs=name==="arrow"?args.from??{}:{};
+    const fromIsPoint=name==="arrow"&&typeof fromArgs.x==="number"&&typeof fromArgs.y==="number"
+      &&typeof fromArgs.w!=="number"&&typeof fromArgs.h!=="number"
+      &&typeof fromArgs.target_text!=="string"&&typeof fromArgs.element_id!=="number";
+    let from=name==="arrow"&&fromIsPoint
+      ?{x:fromArgs.x,y:fromArgs.y,w:0,h:0}
+      :name==="arrow"?resolveTarget(fromArgs):resolveTarget(args);
     const to=name==="arrow"?resolveTarget(args.to??{}):null;
+    const boardClosedHint=boardOpenRef.current?"":" Le tableau est fermé : ce texte n’existe peut-être que sur le tableau. Si l’élève parle de ce qu’il y a écrit, appelle toi-même open_board dans ce même tour, puis refais l’annotation sur le tableau ; ne lui demande pas de le rouvrir. Sinon, vise un élément visible du TD ci-dessus.";
+    if(paintMode&&name==="arrow"&&from&&!fromIsPoint)from=paintTargetRect(args.from??{},false);
     if(name==="arrow"&&!to){
       const visible=elements().slice(0,40).map(e=>`[${e.id}] ${e.text.slice(0,100)}`).join("; ");
-      return {ok:false,error:`arrow target was not found. Visible targets: ${visible}`};
+      return {ok:false,error:`arrow target was not found. Visible targets: ${visible}${boardClosedHint}`};
     }
-    const containsTarget=!!(from&&to&&to.x>=from.x-2&&to.y>=from.y-2&&to.x+to.w<=from.x+from.w+2&&to.y+to.h<=from.y+from.h+2);
+    const containsTarget=!!(from&&to&&(
+      to.x>=from.x-2&&to.y>=from.y-2&&to.x+to.w<=from.x+from.w+2&&to.y+to.h<=from.y+from.h+2
+      ||from.w===0&&from.h===0&&from.x>=to.x-2&&from.x<=to.x+to.w+2&&from.y>=to.y-2&&from.y<=to.y+to.h+2
+      ||from.x<to.x+to.w&&from.x+from.w>to.x&&from.y<to.y+to.h&&from.y+from.h>to.y
+    ));
     const arrowFrom=name==="arrow"&&to&&(!from||containsTarget)
       ? {x:Math.min(innerWidth-2,to.x+to.w+60),y:Math.max(2,to.y-60),w:1,h:1}
       : from;
-    const endpoints=name==="arrow"&&arrowFrom&&to?arrowEndpoints(arrowFrom,to):null;
+    const endpoints=name==="arrow"&&arrowFrom&&to
+      ? !from||containsTarget
+        ? arrowEndpointsAroundTarget(to,elements().map(e=>e.rect),viewport())
+        : arrowEndpointsFromSource(arrowFrom,to,elements().map(e=>e.rect),viewport())
+      : null;
     if(name==="arrow"&&!endpoints)return {ok:false,error:"arrow endpoints could not be calculated"};
     const r=name==="arrow"?to:from??(typeof args.target_text!=="string"&&typeof args.x==="number"&&typeof args.y==="number"?{x:args.x,y:args.y,w:Number(args.w)||120,h:Number(args.h)||38}:null);
     if(name==="tip"){
@@ -400,7 +447,7 @@ function TD(){
     }
     if(!r){
       const visible=elements().slice(0,40).map(e=>`[${e.id}] ${e.text.slice(0,100)}`).join("; ");
-      return {ok:false,error:`target not found. Visible targets: ${visible}`};
+      return {ok:false,error:`target not found. Visible targets: ${visible}${boardClosedHint}`};
     }
     if(!["circle","underline","point","highlight","arrow","note"].includes(name))return {ok:false,error:`unknown TD tool: ${name}`};
     const text=String(args.text??args.label??"");
@@ -433,7 +480,7 @@ function TD(){
         await animateHeadProgress(progress=>updateMarkHead(id,progress));
         await moveToRest(queue,restBeside(bounds));
       });
-      return {ok:true,target:{x:x2,y:y2},from:{x:x1,y:y1},to:{x:x2,y:y2}};
+      return {ok:true,target:{x:x2,y:y2},from:{x:x1,y:y1},to:{x:x2,y:y2},...paintShown(args.to??{})};
     }
     const id=crypto.randomUUID();
     const mark={id,kind:name,rect,text,color,fill:name==="highlight"?highlightFill:null};
@@ -467,7 +514,7 @@ function TD(){
         await moveToRest(queue,restBeside(bounds));
       });
     }
-    return {ok:true,target:{x:rect.x,y:rect.y}};
+    return {ok:true,target:{x:rect.x,y:rect.y},...paintShown(args)};
   };
   useEffect(()=>{window.geraldTD={elements,exec,close:()=>{boardOpenRef.current=false;setBoardOpen(false);},waitForAnimations:()=>cursorMotion.current!.waitForAnimations()};return()=>{delete window.geraldTD;};});
   const getBoardApi=async()=>{for(let i=0;i<100;i++){const api=frame.current?.contentWindow?.geraldBoard;if(api)return api;await new Promise(resolve=>setTimeout(resolve,20));}return null;};
@@ -785,7 +832,7 @@ function TD(){
       if(channel.current?.readyState==="open")setStatus(pttPreviousMic.current?"listening":"idle");
     }
   };
-  useEffect(()=>()=>{stop();if(captionTimer.current)clearTimeout(captionTimer.current);},[]);
+  useEffect(()=>()=>{paintHotkeysCleanup.current?.();stop();if(captionTimer.current)clearTimeout(captionTimer.current);},[]);
   useEffect(()=>{
     const down=(event:KeyboardEvent)=>{if(event.ctrlKey&&event.shiftKey&&!event.repeat){event.preventDefault();beginPushToTalk();}};
     const up=(event:KeyboardEvent)=>{if(event.key==="Control"||event.key==="Shift")endPushToTalk();};
@@ -817,7 +864,21 @@ function TD(){
   const onSubmit=(event:React.FormEvent)=>{event.preventDefault();if(voiceMode)void sendQuestion(question);else sendMock();};
   const clickExercise=(ex:typeof exercises[number])=>{setActiveExercise(ex);if(voiceMode)openBoard(ex.id);else bridge.openBoard(ex.title,JSON.stringify(ex.lines));};
   const sessionOpen=channel.current?.readyState==="open";
-  return <main className={`td-root${docMode?" document-mode":""}${paintMode?" paint-mode":""}`}>{paintMode&&<iframe ref={paintFrame} className="paint-editor" title="miniPaint" src="/vendor/minipaint/index.html"/>}{!liveMode&&!docMode&&!paintMode&&<article className="paper"><header className="td-head" data-gerald-id="1"><div className="td-meta"><span>Lycée — Mathématiques</span><span>TD 4</span></div><h1 data-gerald-id="2">Polynômes du second degré</h1><div className="td-student"><span>Nom : __________________</span><span>Date : ________________</span></div></header>
+  const attachPaintHotkeys=()=>{
+    paintHotkeysCleanup.current?.();
+    const frameWindow=paintFrame.current?.contentWindow;
+    if(!frameWindow)return;
+    const down=(event:KeyboardEvent)=>{if(event.ctrlKey&&event.shiftKey&&!event.repeat){event.preventDefault();beginPushToTalk();}};
+    const up=(event:KeyboardEvent)=>{if(event.key==="Control"||event.key==="Shift")endPushToTalk();};
+    const blur=()=>endPushToTalk();
+    const cleanup=()=>{frameWindow.removeEventListener("keydown",down);frameWindow.removeEventListener("keyup",up);frameWindow.removeEventListener("blur",blur);frameWindow.removeEventListener("pagehide",cleanup);if(paintHotkeysCleanup.current===cleanup)paintHotkeysCleanup.current=null;};
+    paintHotkeysCleanup.current=cleanup;
+    frameWindow.addEventListener("keydown",down);frameWindow.addEventListener("keyup",up);frameWindow.addEventListener("blur",blur);
+    frameWindow.addEventListener("pagehide",cleanup,{once:true});
+  };
+  return <main className={`td-root${docMode?" document-mode":""}${paintMode?" paint-mode":""}`}>
+    {paintMode&&<iframe ref={paintFrame} className="paint-editor" title="miniPaint" src="/vendor/minipaint/index.html" onLoad={attachPaintHotkeys}/>}
+    {!liveMode&&!docMode&&!paintMode&&<article className="paper"><header className="td-head" data-gerald-id="1"><div className="td-meta"><span>Lycée — Mathématiques</span><span>TD 4</span></div><h1 data-gerald-id="2">Polynômes du second degré</h1><div className="td-student"><span>Nom : __________________</span><span>Date : ________________</span></div></header>
     <section className="reminder" data-gerald-id="3"><h2 data-gerald-id="4">Rappel de cours</h2><p data-gerald-id="5">Pour <span dangerouslySetInnerHTML={{__html:katex.renderToString("ax^2+bx+c=0")}} />, le discriminant vaut <span dangerouslySetInnerHTML={{__html:katex.renderToString("\\Delta=b^2-4ac")}} />. Si <span dangerouslySetInnerHTML={{__html:katex.renderToString("\\Delta>0")}} />, l’équation possède deux racines réelles.</p></section>
     {exercises.map((ex,i)=><section className="exercise" data-gerald-id={10+i*3} key={ex.id} onClick={()=>clickExercise(ex)}><p className="exercise-lead" data-gerald-id={11+i*3}><strong>{ex.title}.</strong><span dangerouslySetInnerHTML={{__html:katex.renderToString(ex.math)}}/></p><p data-gerald-id={12+i*3}>{ex.instruction}</p><button className="open-ex">Ouvrir au tableau →</button></section>)}
   </article>}

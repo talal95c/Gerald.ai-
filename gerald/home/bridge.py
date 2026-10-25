@@ -14,6 +14,7 @@ from PyQt6.QtWidgets import QApplication, QDialog, QFileDialog, QTextBrowser, QV
 
 from gerald.home.events import events
 from gerald.home.qa import default_ask
+from gerald.tools.recap import has_file_association
 
 
 def value(item, name: str, default=None):
@@ -303,18 +304,20 @@ class Bridge(QObject):
 
     @pyqtSlot(str)
     def openRecap(self, path: str) -> None:
-        if QDesktopServices.openUrl(QUrl.fromLocalFile(path)):
-            return
         if os.name == "nt":
-            try:
-                os.startfile(path)
-                return
-            except OSError:
+            if has_file_association(Path(path).suffix):
                 try:
-                    subprocess.Popen(["notepad.exe", path])
+                    os.startfile(path)
                     return
                 except OSError:
                     pass
+            try:
+                subprocess.Popen(["notepad.exe", path])
+                return
+            except OSError:
+                pass
+        elif QDesktopServices.openUrl(QUrl.fromLocalFile(path)):
+            return
         self._show_recap_in_app(path)
 
     def _show_recap_in_app(self, path: str) -> None:

@@ -1,44 +1,67 @@
 const stage=document.getElementById('stage');
 const slides=[...document.querySelectorAll('.slide')];
-const label=document.getElementById('label'),count=document.getElementById('count'),bar=document.querySelector('#progress i');
-let cur=0,demoTimer=null;
+const label=document.getElementById('label'),count=document.getElementById('count'),bar=document.querySelector('#progress i'),notes=document.getElementById('notes');
+let cur=-1,timers=[];
 
 function fit(){const s=Math.min(innerWidth/1920,innerHeight/1080);stage.style.transform=`translate(-50%,-50%) scale(${s})`}
 addEventListener('resize',fit);fit();
-
 slides.forEach(sl=>sl.querySelectorAll('.r').forEach((el,i)=>el.style.setProperty('--i',i)));
+const later=(f,ms)=>timers.push(setTimeout(f,ms));
+const every=(f,ms)=>timers.push(setInterval(f,ms));
+const clear=()=>{timers.forEach(t=>{clearTimeout(t);clearInterval(t)});timers=[]};
 
-const lines=[
-  "You opened exercise 1. Shall we do it together?",
-  "No worries. Look first: there's an x², so it's not linear. It's a parabola.",
-  "Let me plot it. Solving the equation means finding where it crosses the axis.",
-  "It crosses at two points. Compute Δ = b² − 4ac to find them. Your turn!",
-  "Well done. I've prepared your revision sheet for this session."
-];
-function demo(on){
-  const board=document.querySelector('.board'),items=[...document.querySelectorAll('.steps li')],say=document.querySelector('.say');
-  clearInterval(demoTimer);let s=0;
-  if(!board.querySelector('.sheet'))board.insertAdjacentHTML('beforeend','<div class="sheet"><p class="eyebrow"><b></b>Revision sheet</p><h4>Quadratics</h4><ul><li>x² → a parabola, not a line</li><li>Δ = b² − 4ac ; Δ &gt; 0 → two roots</li><li>x² − 5x + 6 = 0 → x = 2 or x = 3</li><li>To review: order of a and b</li></ul></div>');
-  const set=i=>{board.dataset.s=i;items.forEach((li,k)=>li.classList.toggle('on',k===i));say.textContent=lines[i];say.classList.remove('swap');void say.offsetWidth;say.classList.add('swap')};
-  if(!on){set(0);return}
-  set(0);demoTimer=setInterval(()=>{s=(s+1)%lines.length;set(s)},3200);
-  items.forEach((li,k)=>li.onclick=()=>{clearInterval(demoTimer);s=k;set(k)});
+// Slide 3: retyping the notebook into a chat box, with the usual fumbles.
+const script=[["x^2 - 5x + 6 = 0",0],["\nD = b^2 - 4*a*c",0],["\ndelta",5],["Δ? how do I type delta",22],["\nD = 25 + 24",0]];
+function typing(){
+  const el=document.getElementById('typed');el.textContent='';let txt='',q=[];
+  script.forEach(([s,back])=>{for(let i=0;i<back;i++)q.push(-1);for(const c of s)q.push(c)});
+  let i=0;later(function step(){if(i>=q.length)return;const c=q[i++];txt=c===-1?txt.slice(0,-1):txt+c;el.textContent=txt.split('\n').slice(-2).join('\n');later(step,c===-1?40:c==='\n'?500:70)},1400);
 }
 
+// Slide 5: same board story as the landing hero.
+function board(){
+  const b=document.getElementById('board');let k=0;
+  const set=()=>{b.querySelectorAll('[data-k]').forEach(e=>e.classList.toggle('on',k>=+e.dataset.k));
+    b.querySelectorAll('[data-win]').forEach(e=>{const[a,z]=e.dataset.win.split('-').map(Number);e.classList.toggle('on',k>=a&&k<=z)});
+    b.querySelector('.gcur').className='gcur'+(k>=4&&k<6?' at-err':k>=6?' at-end':'')};
+  set();every(()=>{k=(k+1)%10;set()},1500);
+}
+
+function clips(sl,on){
+  sl.querySelectorAll('.clip video').forEach(v=>{
+    if(!on){v.pause();return}
+    v.currentTime=0;v.muted=true;v.play().catch(()=>{});
+  });
+}
+document.querySelectorAll('.clip').forEach(f=>{
+  const v=f.querySelector('video');
+  v.addEventListener('loadeddata',()=>f.classList.add('ready'));
+  v.addEventListener('click',()=>v.paused?v.play():v.pause());
+  v.src=f.dataset.clip;
+});
+
 function go(n){
-  cur=Math.max(0,Math.min(slides.length-1,n));
+  n=Math.max(0,Math.min(slides.length-1,n));if(n===cur)return;
+  if(cur>=0)clips(slides[cur],false);
+  cur=n;clear();
   slides.forEach((sl,i)=>sl.classList.toggle('active',i===cur));
-  label.textContent=slides[cur].dataset.title;
+  const sl=slides[cur];
+  label.textContent=sl.dataset.title;
   count.textContent=`${String(cur+1).padStart(2,'0')} / ${slides.length}`;
   bar.style.width=`${(cur+1)/slides.length*100}%`;
+  notes.textContent=sl.querySelector('.notes')?.textContent||'';
   history.replaceState(null,'',`#${cur+1}`);
-  demo(slides[cur].classList.contains('demo'));
+  if(sl.classList.contains('pain'))typing();
+  if(sl.querySelector('#board'))board();
+  clips(sl,true);
 }
 addEventListener('keydown',e=>{
   if(['ArrowRight','PageDown',' ','Enter'].includes(e.key)){e.preventDefault();go(cur+1)}
   if(['ArrowLeft','PageUp','Backspace'].includes(e.key)){e.preventDefault();go(cur-1)}
   if(e.key==='Home')go(0);if(e.key==='End')go(slides.length-1);
   if(e.key==='f')document.documentElement.requestFullscreen?.();
+  if(e.key==='n')document.body.classList.toggle('show-notes');
+  if(e.key==='m')slides[cur].querySelectorAll('video').forEach(v=>v.muted=!v.muted);
 });
 document.getElementById('next').onclick=()=>go(cur+1);
 document.getElementById('prev').onclick=()=>go(cur-1);
