@@ -49,14 +49,44 @@ function Wave({status}: {status: string}) {
   return <span className={`wave ${status}`} aria-hidden="true">{[0,1,2,3,4].map(i=><i key={i} style={{animationDelay:`${i*90}ms`}}/>)}</span>;
 }
 
-function Folders({docs}: {docs: AppState["documents"]}) {
+function DocView({doc, folder, hotkey, onBack}: {doc: AppState["documents"][number]; folder: string; hotkey: string; onBack: () => void}) {
+  const [text, setText] = useState("");
+  const [question, setQuestion] = useState("");
+  const [answer, setAnswer] = useState<{q: string; text: string} | null>(null);
+  const [waiting, setWaiting] = useState(false);
+  useEffect(() => { bridge.documentText(doc.id, setText); }, [doc.id]);
+  useEffect(() => {
+    const done = (json: string) => { setWaiting(false); setAnswer(a => ({q: a?.q ?? "", text: JSON.parse(json).text})); };
+    const fail = (message: string) => { setWaiting(false); setAnswer(a => ({q: a?.q ?? "", text: message})); };
+    bridge.answer.connect(done); bridge.answerError.connect(fail);
+    return () => { bridge.answer.disconnect?.(done); bridge.answerError.disconnect?.(fail); };
+  }, []);
+  const send = () => {
+    const q = question.trim(); if (!q) return;
+    setAnswer({q, text: ""}); setWaiting(true); setQuestion("");
+    bridge.ask(`À propos du document « ${doc.filename} » : ${q}`);
+  };
+  return <div className="doc-view">
+    <div className="doc-head"><button className="add" onClick={onBack}>← {folder}</button><b>{doc.filename}</b></div>
+    <article className="doc-page">{text ? text.split("\n").map((l,i)=><p key={i}>{l || "\u00a0"}</p>) : <p className="muted">{doc.status === "ready" ? "Aperçu indisponible." : "Indexation en cours…"}</p>}</article>
+    {answer && <div className="doc-answer"><small>{answer.q}</small><p>{waiting ? <span className="thinking"><i/><i/><i/></span> : <Reveal text={answer.text}/>}</p></div>}
+    <form className="doc-ask" onSubmit={e=>{e.preventDefault();send();}}>
+      <i className="dot-live"/><input onFocus={()=>bridge.requestFocus(true)} onBlur={()=>bridge.requestFocus(false)} value={question} onChange={e=>setQuestion(e.target.value)} placeholder="Une question sur ce document ?"/><kbd>{hotkey}</kbd>
+    </form>
+  </div>;
+}
+
+function Folders({docs, hotkey}: {docs: AppState["documents"]; hotkey: string}) {
+  const [doc, setDoc] = useState<AppState["documents"][number] | null>(null);
+  const onOpen = (d: AppState["documents"][number]) => setDoc(d);
   const [open, setOpen] = useState<string | null>(null);
   const groups = docs.reduce<Record<string, AppState["documents"]>>((acc, d) => { (acc[d.folder || "Mes cours"] ??= []).push(d); return acc; }, {});
+  if (doc) return <DocView doc={doc} folder={doc.folder || "Mes cours"} hotkey={hotkey} onBack={()=>setDoc(null)}/>;
   if (open && groups[open]) return <div className="folder-open">
     <button className="add" onClick={()=>setOpen(null)}>← Dossiers</button><span className="folder-title">{open}</span>
-    <div className="fan">{groups[open].map((doc,i)=><article className="sheet-card" key={doc.id} style={{animationDelay:`${i*45}ms`}}>
+    <div className="fan">{groups[open].map((doc,i)=><article className="sheet-card" key={doc.id} onClick={()=>onOpen(doc)} style={{animationDelay:`${i*45}ms`}}>
       <i className={`dot ${doc.status}`} /><b>{doc.filename}</b><small>{doc.status === "ready" ? "Prêt" : doc.error || "Indexation…"}</small>
-      <button aria-label={`Supprimer ${doc.filename}`} onClick={()=>bridge.deleteDocument(doc.id)}>×</button></article>)}</div>
+      <button aria-label={`Supprimer ${doc.filename}`} onClick={e=>{e.stopPropagation();bridge.deleteDocument(doc.id);}}>×</button></article>)}</div>
   </div>;
   return <div className="folders">
     {Object.entries(groups).map(([name, items])=><button className="folder" key={name} onClick={()=>setOpen(name)}>
@@ -82,7 +112,7 @@ function App() {
     const connect = () => {
       bridge.state(json => setState(JSON.parse(json)));
       bridge.stateChanged.connect(json => setState(JSON.parse(json)));
-      bridge.modeChanged.connect(setMode);
+      bridge.modeChanged.connect(next => { clear(); setMode(next); });
       bridge.recapReady.connect(setRecap);
       bridge.agentStatus?.connect(setStatus);
     };
@@ -102,7 +132,7 @@ function App() {
   if (mode === "greeting" || mode === "collapsed") return <button className={`notch pill-notch m-${mode} s-${status}`} onClick={()=>{clear();go("panel");}}>
     {active ? <Wave status={status}/> : <i className="dot-live" />}<span key={pillLabel}><Reveal text={pillLabel}/></span>
   </button>;
-  return <section className={`notch sheet m-${mode}`} onMouseEnter={clear} onMouseLeave={()=>later("collapsed", 700)} onKeyDown={e=>{if(e.key==="Escape")go("collapsed");}}>
+  return <section className={`notch sheet m-${mode}`} onMouseEnter={clear} onMouseLeave={()=>{ if (document.activeElement?.tagName !== "INPUT") later("collapsed", 700); }} onKeyDown={e=>{if(e.key==="Escape")go("collapsed");}}>
     <div className="bar">
       <span className="status">{active ? <Wave status={status}/> : <i className="dot-live" />}<span>{active ? statusText[status] ?? status : state.hotkey_label}</span></span>
       <NavBar active={mode === "settings" ? tab : ""} onChange={pick}/>
@@ -111,10 +141,15 @@ function App() {
         : <button className="quit" onClick={()=>bridge.quit()} aria-label="Quitter">⏻</button>}
     </div>
     {mode === "settings" && <div className="content" key={tab}>
-      {tab === "Documents" && <Folders docs={state.documents}/>}
+      {tab === "Documents" && <Folders docs={state.documents} hotkey={state.hotkey_label}/>}
       {tab === "Historique" && (historyMessages ? <><button className="add" onClick={()=>setHistoryMessages(null)}>← Retour</button>{historyMessages.map((m,i)=><p className={`msg ${m.role}`} key={i}>{m.text}</p>)}</>
         : state.conversations.map(c=><button className="row link" key={c.id} onClick={()=>bridge.messages(c.id, json=>setHistoryMessages(JSON.parse(json)))}><i className={`tag ${c.source}`}>{c.source === "agent" ? "Voix" : "Écrit"}</i><span>{c.title}</span></button>))}
-      {tab === "Raccourcis" && <p className="row"><span>Maintenir pour parler</span><kbd>{state.hotkey_label}</kbd></p>}
+      {tab === "Raccourcis" && <div className="shortcuts">
+        {[[state.hotkey_label, "Maintiens pour parler", "Relâche : il te répond à voix haute et montre à l’écran."],
+          ["Échap", "Ferme l’encoche", "Revient à la petite pilule."],
+          ["Clic", "Ouvre l’encoche", "Tableau, documents, historique."]].map(([k, t, d], i)=>
+          <div className="shortcut" key={t} style={{animationDelay:`${i*50}ms`}}><span className="keys">{k.split("+").map(x=><kbd key={x}>{x.trim()}</kbd>)}</span><b>{t}</b><small>{d}</small></div>)}
+      </div>}
     </div>}
   </section>;
 }

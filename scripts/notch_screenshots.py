@@ -56,6 +56,9 @@ MOCK_BRIDGE = """
       text: "Le discriminant vaut Δ = b² − 4ac. Ici, Δ = 1, donc l’équation possède deux racines réelles.",
       sources: [{document: "Polynômes du second degré.md", page: 2}]
     })),
+    documentText: (id, callback) => callback(id === 1
+      ? "Polynômes du second degré\n\nUn polynôme du second degré s’écrit f(x) = ax² + bx + c avec a ≠ 0.\n\nDiscriminant\nOn pose Δ = b² − 4ac.\n• Si Δ > 0 : deux racines x₁ = (−b − √Δ) / 2a et x₂ = (−b + √Δ) / 2a.\n• Si Δ = 0 : une racine double x₀ = −b / 2a.\n• Si Δ < 0 : pas de racine réelle.\n\nExemple\nx² − 5x + 6 = 0 : a = 1, b = −5, c = 6, Δ = 25 − 24 = 1, donc x₁ = 2 et x₂ = 3."
+      : "Aperçu de démonstration de ce document."),
     messages: (_id, callback) => callback(JSON.stringify([
       {role: "assistant", text: "On commence par calculer le discriminant."},
       {role: "user", text: "Je ne comprends pas cette étape."}

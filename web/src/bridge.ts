@@ -9,7 +9,7 @@ export type AppState = {
   recap_pending: boolean;
 };
 
-type Signal<T> = { connect: (callback: (value: T) => void) => void };
+type Signal<T> = { connect: (callback: (value: T) => void) => void; disconnect?: (callback: (value: T) => void) => void };
 export type GeraldBridge = {
   state: (callback: (json: string) => void) => void;
   stateChanged: Signal<string>;
@@ -20,6 +20,7 @@ export type GeraldBridge = {
   agentStatus?: Signal<string>;
   setMode: (mode: string) => void;
   ask: (question: string) => void;
+  documentText: (id: number, callback: (text: string) => void) => void;
   messages: (id: number, callback: (json: string) => void) => void;
   addDocuments: () => void;
   deleteDocument: (id: number) => void;
@@ -46,7 +47,7 @@ const mock: GeraldBridge = {
   })),
   stateChanged: mockSignal<string>(), modeChanged: mockSignal<string>(),
   answer: mockSignal<string>(), answerError: mockSignal<string>(), recapReady: mockSignal<string>(),
-  setMode: () => undefined, ask: () => undefined, messages: (_id, cb) => cb("[]"),
+  setMode: () => undefined, ask: () => undefined, messages: (_id, cb) => cb("[]"), documentText: (_id, cb) => cb(""),
   addDocuments: () => undefined, deleteDocument: () => undefined, openBoard: () => undefined,
   endSession: () => undefined, openRecap: () => undefined, requestFocus: () => undefined,
   quit: () => undefined

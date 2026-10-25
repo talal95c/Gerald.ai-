@@ -81,7 +81,7 @@ class Bridge(QObject):
                 "filename": value(document, "filename", ""),
                 "status": value(document, "status", "ready"),
                 "error": value(document, "error"),
-                "folder": value(document, "folder") or value(document, "course") or "Mes cours",
+                "folder": value(course, "title") or "Mes cours",
             }
             for course in self.store.list_courses()
             for document in self.store.list_documents(value(course, "id"))
@@ -149,6 +149,11 @@ class Bridge(QObject):
                 self.answerError.emit(str(error) or "Une erreur est survenue.")
 
         threading.Thread(target=run, name="gerald-home-ask", daemon=True).start()
+
+    @pyqtSlot(int, result=str)
+    def documentText(self, document_id: int) -> str:
+        reader = getattr(self.store, "document_text", None)
+        return reader(document_id) if reader else ""
 
     @pyqtSlot(int, result=str)
     def messages(self, conversation_id: int) -> str:

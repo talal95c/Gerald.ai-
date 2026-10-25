@@ -30,7 +30,7 @@ class _WebSurface(QWidget):
 
 
 class NotchWindow(QWidget):
-    sizes = {"greeting": (240, 36), "collapsed": (240, 36), "panel": (660, 64), "settings": (660, 300)}
+    sizes = {"greeting": (240, 36), "collapsed": (240, 36), "panel": (760, 72), "settings": (760, 440)}
 
     def __init__(self, bridge: Bridge):
         flags = (
