@@ -1,16 +1,16 @@
 from __future__ import annotations
 
+import os
 from pathlib import Path
 
 
 def seed_demo(store, indexer) -> None:
-    if store.get_profile() is None:
-        store.save_profile("", None, ["Maths"])
+    if os.getenv("GERALD_DEMO", "").strip().lower() in {"0", "false", "off"}:
+        return
+    if store.get_profile() is not None or store.list_courses():
+        return
 
-    courses = store.list_courses()
-    course = next((item for item in courses if item.title == "Maths — Second degré"), None)
-    if course is None:
-        course = store.create_course("Maths — Second degré", "Maths")
+    course = store.create_course("Maths — Second degré", "Maths")
 
     existing = {item.filename for item in store.list_documents(course.id)}
     root = Path(__file__).with_name("demo_docs")

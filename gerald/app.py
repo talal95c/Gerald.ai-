@@ -218,6 +218,37 @@ def _finalize_board_collection(
     return final_elements
 
 
+def make_home_opener(
+    open_home,
+    store,
+    indexer,
+    settings,
+    on_library_changed,
+    *,
+    open_board,
+    end_session,
+):
+    home_window = {"widget": None}
+
+    def open_home_window() -> None:
+        if open_home is None:
+            return
+        if home_window["widget"] is None:
+            home_window["widget"] = open_home(
+                store,
+                indexer,
+                settings,
+                on_library_changed,
+                open_board=open_board,
+                end_session=end_session,
+            )
+        home_window["widget"].show()
+        home_window["widget"].raise_()
+        home_window["widget"].activateWindow()
+
+    return open_home_window
+
+
 def main() -> int:
     set_physical_dpi_awareness()
     from PyQt6.QtCore import QObject, QTimer, pyqtSignal, pyqtSlot
@@ -392,7 +423,7 @@ def main() -> int:
 
     threading.Thread(target=run_loop, name="gerald-realtime", daemon=True).start()
 
-    def schedule(coroutine) -> None:
+    def schedule(coroutine, *, on_error=None) -> None:
         future = asyncio.run_coroutine_threadsafe(coroutine, loop)
 
         def report(error_future) -> None:
@@ -400,6 +431,8 @@ def main() -> int:
                 error_future.result()
             except Exception as error:
                 logger.warning("Realtime action failed: %s", error)
+                if on_error is not None:
+                    on_error()
                 bridge.capture_failed.emit(str(error))
 
         future.add_done_callback(report)
@@ -407,28 +440,10 @@ def main() -> int:
     def on_library_changed() -> None:
         schedule(client.update_instructions(current_agent_instructions()))
 
-    home_window = {"widget": None}
-
     def open_board_from_home(title: str, lines: list[str]) -> None:
         board.set_exercise(title, lines)
         if not board.isVisible():
             toggle_board()
-
-    def open_home_window() -> None:
-        if open_home is None:
-            return
-        if home_window["widget"] is None:
-            home_window["widget"] = open_home(
-                store,
-                indexer,
-                settings,
-                on_library_changed,
-                open_board=open_board_from_home,
-                end_session=open_lesson_recap,
-            )
-        home_window["widget"].show()
-        home_window["widget"].raise_()
-        home_window["widget"].activateWindow()
 
     app_state = {
         "pressed": set(),
@@ -827,9 +842,12 @@ def main() -> int:
     proactive_timer.start(1000)
     app.aboutToQuit.connect(watcher.close)
 
-    def open_lesson_recap() -> None:
+    def open_lesson_recap() -> bool:
+        if not app_state["connected"]:
+            overlay.show_timed_error("Hors ligne : la fiche sera possible une fois Gerald reconnecté.")
+            return False
         if app_state["recap_pending"]:
-            return
+            return False
         mic.stop()
         request = app_state.get("capture_request")
         if request is not None:
@@ -845,7 +863,18 @@ def main() -> int:
             response_active=False,
         )
         overlay.close_text_input()
-        schedule(client.send_recap())
+        schedule(client.send_recap(), on_error=lambda: app_state.update(recap_pending=False))
+        return True
+
+    open_home_window = make_home_opener(
+        open_home,
+        store,
+        indexer,
+        settings,
+        on_library_changed,
+        open_board=open_board_from_home,
+        end_session=open_lesson_recap,
+    )
 
     def toggle_board() -> None:
         if app_state["active"]:
