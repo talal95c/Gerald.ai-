@@ -1,5 +1,6 @@
 import {useCallback, useEffect, useRef, useState} from "react";
 import type {RefObject} from "react";
+import {isDemoAskMessage, isDemoEventMessage, isDemoFocusMessage} from "./demo-events";
 
 type Exercise = {title: string; lines: string[]};
 
@@ -78,7 +79,16 @@ export function useCompanion({
     };
     const boardOpen = (event: Event) => openBoard((event as CustomEvent<Exercise>).detail ?? null);
     const message = (event: MessageEvent) => {
+      if (event.origin !== location.origin) return;
+      if (demo && event.source === window.parent && (isDemoAskMessage(event) || isDemoFocusMessage(event))) {
+        frame.current?.contentWindow?.postMessage(event.data, location.origin);
+        return;
+      }
       if (event.source !== frame.current?.contentWindow) return;
+      if (demo && isDemoEventMessage(event)) {
+        window.parent.postMessage(event.data, location.origin);
+        return;
+      }
       if (event.data?.type === "gerald-ready") {
         if (held.current) sendHotkey(true);
         return;
@@ -97,7 +107,7 @@ export function useCompanion({
       window.removeEventListener("gerald-open-board", boardOpen);
       window.removeEventListener("message", message);
     };
-  }, [openBoard, openDocument, sendHotkey]);
+  }, [demo, openBoard, openDocument, sendHotkey]);
 
   useEffect(() => {
     if (!handleHotkeys) return;

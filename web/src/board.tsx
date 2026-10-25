@@ -5,6 +5,7 @@ import "katex/dist/katex.min.css";
 import "./board.css";
 import {annotationLeader, annotationSize, arrowEndpointsAroundTarget, arrowEndpointsFromSource, createCursorMotion, cursorRestBeside, intentColor, placeAnnotation, pointsToPath, seedFrom, sketchArrow, sketchEllipsePoints, segmentBoardText, type AnnotationRect, type BoardTextPart, type CursorMotion, type CursorPoint, type CursorVisual} from "./annotations";
 import { mountNotch } from "./notch";
+import {demoMode, postDemoEvent} from "./demo-events";
 
 type Pt = {x: number; y: number; p: number};
 type Stroke = {pts: Pt[]; erase: boolean; color: string; undo?: {indices: number[]; strokes: Stroke[]}};
@@ -1225,6 +1226,12 @@ function Board() {
     }
     redraw();
   };
+  const up = (e: React.PointerEvent<HTMLCanvasElement>) => {
+    if (!e.currentTarget.hasPointerCapture(e.pointerId)) return;
+    const stroke = strokes.current[strokes.current.length - 1];
+    redraw();
+    if (demoMode && stroke && !stroke.erase && stroke.pts.length > 0) postDemoEvent("ink");
+  };
   const act = (id: string) => {
     if (id === "undo") {
       const last = strokes.current.pop();
@@ -1246,7 +1253,7 @@ function Board() {
     <svg viewBox="0 0 20 20"><path d={item.d}/></svg>
   </button>;
   return <main className={embedded ? "board embedded" : "board"}>
-    <canvas ref={canvas} className={tool} onPointerDown={down} onPointerMove={move}/>
+    <canvas ref={canvas} className={tool} onPointerDown={down} onPointerMove={move} onPointerUp={up}/>
     {!liveMode&&<aside className="ex-card" ref={exerciseCard} data-gerald-id="100"><div className="ex-label"><i/>{title.toUpperCase()}</div>{lines.map((line, index) => <p key={index} data-gerald-id={101 + index}>{line}</p>)}</aside>}
     <div className="gerald-text-layer">
       {geraldTexts.map((item,index) => <div key={item.id} className="gerald-write" data-gerald-id={300+index} data-gerald-text-id={item.id} data-gerald-text={item.text} style={{left: item.x, top: item.y, fontSize: item.size, color: item.color}}>

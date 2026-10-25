@@ -5,6 +5,8 @@ import {DesktopAppContent} from "./desktop-apps";
 import {DesktopWindow} from "./desktop-window";
 import {useCompanion} from "./companion";
 import {mountNotch} from "./notch";
+import {demoMode, isDemoEventMessage, postDemoEvent, type DemoStage} from "./demo-events";
+import {GuidePoint, GuidedDemo, type DemoStep} from "./guided-demo";
 import "./desktop.css";
 
 type WindowPhase = "opening" | "minimizing" | "restoring" | "closing" | null;
@@ -18,6 +20,7 @@ const voiceApps = ["Photoshop", "Notes"] as const;
 document.body.classList.add("desktop-page");
 
 function Desktop() {
+  const demo = demoMode;
   const [windows, setWindows] = useState<WindowMap>({});
   const [selected, setSelected] = useState<DesktopApp | null>(null);
   const [hovered, setHovered] = useState<DesktopApp | null>(null);
@@ -34,9 +37,14 @@ function Desktop() {
   const zoomTimers = useRef<Partial<Record<DesktopApp, number>>>({});
   const dockHideTimer = useRef<number | null>(null);
   const [dockRevealed, setDockRevealed] = useState(false);
+  const [demoStep, setDemoStep] = useState<DemoStep>(() => {
+    if (!demo) return null;
+    try { return sessionStorage.getItem("gerald-demo-skipped") === "1" ? null : 1; } catch { return 1; }
+  });
+  const [demoInkReady, setDemoInkReady] = useState(false);
+  const demoInkReadyRef = useRef(false);
   const hotkeyHeld = useRef(false);
   const hotkeyTarget = useRef<"Photoshop" | "Notes" | null>(null);
-  const demo = new URLSearchParams(location.search).get("demo") === "1";
   const dockAutoHide = runningApps.some(app => {
     const item = windows[app];
     return Boolean(item?.open && !item.minimized && item.maximized);
@@ -106,7 +114,8 @@ function Desktop() {
       }};
     });
     setFocused(app);
-  }, [clampToUsable, usableArea]);
+    if (demo && app === "Notes") postDemoEvent("notes-open");
+  }, [clampToUsable, demo, usableArea]);
   const focusWindow = useCallback((app: DesktopApp) => {
     setFocused(app);
     setWindows(previous => previous[app]?.open
@@ -166,6 +175,14 @@ function Desktop() {
   const postHotkey = useCallback((app: "Photoshop" | "Notes", pressed: boolean) => {
     const frame = app === "Notes" ? notesFrame.current : paintFrame.current;
     frame?.contentWindow?.postMessage({type: "gerald-hotkey", pressed}, location.origin);
+  }, []);
+  const sendDemoFocus = useCallback((target: "documents" | "td4" | null, stage: DemoStage) => {
+    const message = {type: "gerald-demo-focus", target, stage};
+    window.postMessage(message, location.origin);
+    notesFrame.current?.contentWindow?.postMessage(message, location.origin);
+  }, []);
+  const sendDemoAsk = useCallback((text: string, stage: DemoStage) => {
+    notesFrame.current?.contentWindow?.postMessage({type: "gerald-demo-ask", text, stage}, location.origin);
   }, []);
   const handleTalk = useCallback((pressed: boolean) => {
     if (pressed) {
@@ -263,6 +280,38 @@ function Desktop() {
     window.addEventListener("message", ready);
     return () => window.removeEventListener("message", ready);
   }, [postHotkey]);
+
+  useEffect(() => {
+    if (!demo) return;
+    const message = (event: MessageEvent<unknown>) => {
+      if (!isDemoEventMessage(event) || (event.source !== notesFrame.current?.contentWindow && event.source !== window)) return;
+      if (event.data.event === "notes-open") {
+        setDemoStep(current => current === 1 ? 2 : current);
+      } else if (event.data.event === "documents-open") {
+        sendDemoFocus("td4", 2);
+      } else if (event.data.event === "td-open") {
+        setDemoStep(current => current === 2 ? 3 : current);
+      } else if (event.data.event === "board-open") {
+        setDemoStep(current => current === 4 ? 5 : current);
+      } else if (event.data.event === "ink") {
+        demoInkReadyRef.current = true;
+        setDemoInkReady(true);
+      } else if (event.data.event === "turn-done") {
+        setDemoStep(current => {
+          if (current === event.data.stage && current === 3) return 4;
+          if (current === event.data.stage && current === 5 && demoInkReadyRef.current) return "done";
+          return current;
+        });
+      }
+    };
+    window.addEventListener("message", message);
+    return () => window.removeEventListener("message", message);
+  }, [demo, sendDemoFocus]);
+
+  useEffect(() => {
+    if (!demo || typeof demoStep !== "number") return;
+    sendDemoFocus(demoStep === 2 ? "documents" : null, demoStep);
+  }, [companion.src, demo, demoStep, sendDemoFocus]);
 
   useEffect(() => {
     const reclamp = () => {
@@ -392,7 +441,7 @@ function Desktop() {
         onClose={()=>closeWindow(app)} onMinimize={()=>minimizeWindow(app)} onAnimationEnd={phase=>finishAnimation(app,phase)}
       >
         {app==="Notes"
-          ? companion.src && <iframe key={companion.src} ref={notesFrame} title="Notes" src={companion.src} allow="microphone; autoplay" onFocus={()=>focusWindow("Notes")} onLoad={()=>{if(hotkeyHeld.current&&hotkeyTarget.current==="Notes")postHotkey("Notes",true);}}/>
+          ? companion.src && <iframe key={companion.src} ref={notesFrame} title="Notes" src={companion.src} allow="microphone; autoplay" onFocus={()=>focusWindow("Notes")} onLoad={()=>{if(hotkeyHeld.current&&hotkeyTarget.current==="Notes")postHotkey("Notes",true);if(demoStep===2)sendDemoFocus("documents",2);}}/>
           : app==="Photoshop"
             ? <iframe ref={paintFrame} title="Photoshop" src={`./td.html?voice=1&embed=1&app=paint${demo?"&demo=1":""}`} allow="microphone; autoplay" onFocus={()=>focusWindow("Photoshop")} onLoad={()=>{if(hotkeyHeld.current&&hotkeyTarget.current==="Photoshop")postHotkey("Photoshop",true);}}/>
             : <DesktopAppContent app={app}/>}
@@ -411,7 +460,7 @@ function Desktop() {
           style={bouncing===app?{animationDelay:`${bounceKey%2*1}ms`}:undefined}
           onMouseEnter={()=>setHovered(app)} onMouseLeave={()=>setHovered(null)}
           onClick={()=>openApp(app)} aria-label={app}>
-          <span className="dock-label">{app}</span><DesktopIcon app={app}/>
+          <span className="dock-label">{app}</span><DesktopIcon app={app}/>{demo && demoStep === 1 && app === "Notes" && <GuidePoint className="dock-guide-point"/>}
           {windows[app]?.open&&<i className="dock-running" aria-label="Running"/>}
         </button>
       </span>)}
@@ -420,6 +469,11 @@ function Desktop() {
       className="dock-hot-zone" aria-hidden="true"
       onPointerEnter={revealDock} onPointerLeave={scheduleDockHide}
     />}
+    {demo && <GuidedDemo step={demoStep} inkReady={demoInkReady} onAsk={text => {
+      if (typeof demoStep === "number") sendDemoAsk(text, demoStep);
+    }}
+      onSkip={()=>{try{sessionStorage.setItem("gerald-demo-skipped","1");}catch{}setDemoStep(null);}}
+      onFinish={()=>setDemoStep(null)}/>}
   </main>;
 }
 

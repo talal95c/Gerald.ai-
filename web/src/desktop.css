@@ -30,6 +30,24 @@ body.desktop-page{min-width:320px;min-height:100vh;overflow:hidden;background:#2
 .desktop-window.dragging iframe,.desktop-window.resizing iframe{pointer-events:none}
 .desktop-window.minimized{display:none}
 .desktop-dock{position:absolute;left:50%;bottom:24px;transform:translateX(-50%);z-index:20;display:flex;align-items:flex-end;gap:8px;padding:9px;border-radius:20px;background:rgba(247,247,247,.32);backdrop-filter:blur(10px);-webkit-backdrop-filter:blur(10px);box-shadow:0 2px 6px rgba(0,0,0,.25),inset 0 2px 6px rgba(255,255,255,.32);transition:transform 220ms cubic-bezier(.2,.8,.2,1)}
+.demo-guide-point{position:absolute;left:50%;top:50%;z-index:2;width:64px;height:64px;overflow:visible;transform:translate(-50%,-50%);pointer-events:none}
+.dock-guide-point{width:88px;height:88px}
+.demo-guide-point .guide-point{--gp:#7C3AED}
+.demo-guide-point .guide-point circle{stroke:none;transform-box:fill-box;transform-origin:center}
+.demo-guide-point .guide-point .gp-halo{fill:var(--gp);opacity:.24;filter:blur(7px);animation:gp-in .45s cubic-bezier(.2,.8,.2,1) both,gp-breathe 2.4s ease-in-out .45s infinite}
+.demo-guide-point .guide-point .gp-core{fill:var(--gp);opacity:.92;filter:blur(.5px);animation:gp-in .35s cubic-bezier(.2,.8,.2,1) both}
+.demo-guide-point .guide-point .gp-ripple{fill:none;stroke:var(--gp);stroke-width:1.5;opacity:0;animation:gp-ripple 2.4s cubic-bezier(.2,.7,.3,1) .25s infinite}
+.demo-guide-point .guide-point .gp-late{animation-delay:1.45s}
+.guided-demo{position:absolute;right:24px;bottom:106px;z-index:21;width:min(350px,calc(100vw - 48px));box-sizing:border-box;border-radius:20px;background:#fff;color:#262626;box-shadow:0 14px 36px rgba(0,0,0,.24),0 2px 6px rgba(0,0,0,.12);font-family:"Google Sans Flex",sans-serif}
+.guided-demo-content{padding:16px 17px 13px;animation:guided-demo-in 200ms cubic-bezier(.2,.8,.2,1) both}
+.guided-demo-head{display:flex;align-items:center;gap:9px;min-height:30px}.guided-demo-counter{font-size:12px;color:#777}
+.guided-demo p{margin:10px 0 14px;font-size:14px;line-height:1.4;font-weight:500}
+.guided-demo-action{display:block;width:100%;border:0;border-radius:999px;padding:10px 14px;background:#161616;color:#fff;font:500 13px "Google Sans Flex",sans-serif;cursor:pointer;transition:transform 150ms,background 150ms}.guided-demo-action:hover:not(:disabled){background:#3d2bff;transform:translateY(-1px)}.guided-demo-action:disabled{cursor:not-allowed;opacity:.42}
+.guided-demo-skip{display:block;margin:10px auto 0;padding:2px 8px;border:0;background:transparent;color:#777;font:12px "Google Sans Flex",sans-serif;cursor:pointer}.guided-demo-skip:hover{color:#262626}
+@keyframes guided-demo-in{from{opacity:0;transform:translateY(6px)}to{opacity:1;transform:none}}
+@keyframes gp-in{from{opacity:0;transform:scale(.4)}}
+@keyframes gp-breathe{0%,100%{transform:scale(1)}50%{transform:scale(1.14)}}
+@keyframes gp-ripple{0%{opacity:.45;transform:scale(.55)}100%{opacity:0;transform:scale(2.3)}}
 .desktop-dock.dock-autohide{transform:translate(-50%,calc(100% + 32px))}
 .desktop-dock.dock-autohide.dock-revealed{transform:translate(-50%,0);z-index:100000}
 .dock-hot-zone{position:fixed;right:0;bottom:0;left:0;height:6px;z-index:100000;pointer-events:auto}
@@ -57,6 +75,7 @@ body.desktop-page{min-width:320px;min-height:100vh;overflow:hidden;background:#2
 .desktop-page .desktop-notch-host .sheet{width:100%}
 @media(max-width:700px){.desktop-shortcuts{top:44px;right:10px}.desktop-menubar{padding:0 8px}.menu-left{gap:6px}.menu-left nav{gap:7px}.menu-left nav span:nth-child(3){display:none}.menu-right{gap:6px}.desktop-dock{gap:5px;padding:7px;bottom:14px}.dock-item,.dock-item .desktop-icon-svg{width:56px;height:56px}.dock-divider{height:38px;margin-bottom:9px}.dock-item.neighbor{transform:scale(1.03)}}
 @media(prefers-reduced-motion:reduce){.desktop-page .desktop-window.phase-opening,.desktop-page .desktop-window.phase-restoring,.desktop-page .desktop-window.phase-minimizing,.desktop-page .desktop-window.phase-closing,.desktop-page .dock-item.bouncing{animation-duration:.01ms!important}.desktop-page .desktop-window.zoom-transition{transition:none!important}.desktop-page .dock-item,.desktop-page .dock-label{transition:none}}
+@media(prefers-reduced-motion:reduce){.demo-guide-point .guide-point .gp-halo,.guided-demo-content{animation:none}.demo-guide-point .guide-point .gp-ripple{display:none}}
 
 .mail-app,.music-app,.photos-app{height:100%;min-width:0;position:relative;color:#1d1d1f;background:#f5f5f7;font-size:13px}
 .mail-app{display:grid;grid-template-columns:180px 330px minmax(0,1fr)}

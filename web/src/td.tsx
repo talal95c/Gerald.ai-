@@ -12,6 +12,8 @@ import {mountNotch} from "./notch";
 import * as pdfjs from "pdfjs-dist";
 import pdfWorker from "pdfjs-dist/build/pdf.worker.min.mjs?url";
 import {loadWebDocument, type WebDocument} from "./webbridge";
+import {demoMode, isDemoAskMessage, isDemoEventMessage, isDemoFocusMessage, postDemoEvent, type DemoStage} from "./demo-events";
+import {GuidePoint} from "./guided-demo";
 
 const bridge = getBridge();
 pdfjs.GlobalWorkerOptions.workerSrc = pdfWorker;
@@ -208,11 +210,14 @@ function TD(){
     title: params.get("title") ?? "",
     lines: params.get("lines") ?? "[]",
   });
+  if (demoMode) boardParams.set("demo", "1");
   const initialBoardSrc = liveMode
-    ? "/board.html?voice=1&live=1"
+    ? `/board.html?voice=1&live=1${demoMode ? "&demo=1" : ""}`
     : boardMode ? `/board.html?${boardParams}` : "";
   const [question,setQuestion]=useState(""),[status,setStatus]=useState("idle"),[caption,setCaption]=useState(""),[captionFading,setCaptionFading]=useState(false),[connecting,setConnecting]=useState(false),[audioLevel,setAudioLevel]=useState(0),[voiceError,setVoiceError]=useState(""),[micEnabled,setMicEnabled]=useState(false);
   const [boardOpen,setBoardOpen]=useState(liveMode||boardMode),[boardSrc,setBoardSrc]=useState(initialBoardSrc);
+  const [demoFocus,setDemoFocus]=useState<"documents"|"td4"|null>(null);
+  const [demoFocusPoint,setDemoFocusPoint]=useState<{x:number;y:number}|null>(null);
   const [docFile,setDocFile]=useState<WebDocument|null>(null);
   const [activeExercise,setActiveExercise]=useState(exercises[0]);
   const [marks,setMarks]=useState<Array<{id:string;kind:string;rect:Rect;text?:string;to?:Rect;annotationTarget?:Rect;leader?:boolean;color?:string|null;fill?:string|null;progress?:number;head?:number;points?:CursorPoint[];ghostPoints?:CursorPoint[];shaftPoints?:CursorPoint[];headPoints?:[CursorPoint,CursorPoint,CursorPoint]}>>([]);
@@ -236,6 +241,8 @@ function TD(){
   const responseStartPending=useRef(false), pendingResponseTurn=useRef<number|null>(null);
   const responseTurns=useRef(new Map<string,number>()), completedResponses=useRef(new Set<string>());
   const processingTools=useRef(false), dispatchingResponse=useRef(false);
+  const demoPendingTurns=useRef(new Map<number,DemoStage>()), demoTranscriptTurns=useRef(new Set<number>());
+  const demoStage=useRef<DemoStage>(1);
   const queuedTurns=useRef<Array<{turn:number;text:string}>>([]);
   const pendingResponses=useRef<PendingRealtimeResponse[]>([]);
   const responseTurn=useRef(0);
@@ -254,16 +261,47 @@ function TD(){
   const openBoard=(id?:string)=>{
     if(paintMode)return;
     if(docMode){
-      setBoardSrc("/board.html?voice=1&live=1");
+      setBoardSrc(`/board.html?voice=1&live=1${demoMode ? "&demo=1" : ""}`);
       boardOpenRef.current=true;
       setBoardOpen(true);
       return;
     }
     const ex=exercises.find(item=>item.id===id)??exercises[0]; setActiveExercise(ex);
     const query=new URLSearchParams({title:ex.title,lines:JSON.stringify(ex.lines),voice:"1"});
+    if (demoMode) query.set("demo", "1");
     setBoardSrc(`/board.html?${query}`); boardOpenRef.current=true; setBoardOpen(true);
     if(embedded)window.parent.postMessage({type:"gerald-last-exercise",title:ex.title,lines:ex.lines},location.origin);
   };
+  useEffect(() => {
+    if (demoMode && boardOpen && boardSrc) postDemoEvent("board-open");
+  }, [boardOpen, boardSrc]);
+  useEffect(() => {
+    if (demoMode && !boardMode && !liveMode && !paintMode) postDemoEvent("td-open");
+  }, []);
+  useEffect(() => {
+    if (!demoMode || !demoFocus) {
+      setDemoFocusPoint(null);
+      return;
+    }
+    const update = () => {
+      const element = document.querySelector<HTMLElement>(`[data-gerald-demo-focus="${demoFocus}"]`);
+      if (!element) {
+        setDemoFocusPoint(null);
+        return;
+      }
+      const rect = element.getBoundingClientRect();
+      setDemoFocusPoint({x: rect.left + rect.width / 2, y: rect.top + rect.height / 2});
+    };
+    update();
+    window.addEventListener("resize", update);
+    window.addEventListener("scroll", update, true);
+    const timer = window.setInterval(update, 250);
+    return () => {
+      window.removeEventListener("resize", update);
+      window.removeEventListener("scroll", update, true);
+      window.clearInterval(timer);
+    };
+  }, [demoFocus, docFile]);
   const paintElements=():PaintElement[]=>{
     const iframe=paintFrame.current,doc=iframe?.contentDocument;
     if(!iframe||!doc)return [];
@@ -652,12 +690,13 @@ function TD(){
       dispatchingResponse.current=false;
     }
   };
-  const sendQuestion=async(q:string)=>{
+  const sendQuestion=async(q:string,demoTurnStage=demoStage.current)=>{
     const text=q.trim();
     if(!text||channel.current?.readyState!=="open")return;
     const state=voiceState();
     const turn=++state.turn;
     voiceLog().push({type:"user",turn,text});
+    if (demoMode) demoPendingTurns.current.set(turn,demoTurnStage);
     queuedTurns.current.push({turn,text});
     setQuestion("");
     void pumpResponses();
@@ -665,6 +704,8 @@ function TD(){
   const start=async(pushToTalkMode=false)=>{
     window.__geraldLog=[];
     window.__geraldState={turn:0,settledTurn:0,pendingTools:0,settledAt:0,responsesCreated:0,responsesDone:0};
+    demoPendingTurns.current.clear();
+    demoTranscriptTurns.current.clear();
     sessionReady.current=false;
     activeResponse.current=null;activeResponseTurn.current=null;responseStartPending.current=false;pendingResponseTurn.current=null;
     responseTurns.current.clear();completedResponses.current.clear();processingTools.current=false;dispatchingResponse.current=false;
@@ -697,7 +738,7 @@ function TD(){
         }
         else if(event.type==="input_audio_buffer.speech_started"){setStatus("listening");void sendContext();}
         else if(event.type==="input_audio_buffer.speech_stopped")setStatus("thinking");
-        else if(event.type==="conversation.item.input_audio_transcription.completed"){const text=String(event.transcript??"");if(text){setCaption(text);setCaptionFading(false);if(captionTimer.current)clearTimeout(captionTimer.current);captionTimer.current=window.setTimeout(()=>{setCaptionFading(true);captionTimer.current=window.setTimeout(()=>{setCaption("");setCaptionFading(false);},400);},2600);}}
+        else if(event.type==="conversation.item.input_audio_transcription.completed"){const text=String(event.transcript??"");if(text){if(demoMode){const turn=++state.turn;demoPendingTurns.current.set(turn,demoStage.current);}setCaption(text);setCaptionFading(false);if(captionTimer.current)clearTimeout(captionTimer.current);captionTimer.current=window.setTimeout(()=>{setCaptionFading(true);captionTimer.current=window.setTimeout(()=>{setCaption("");setCaptionFading(false);},400);},2600);}}
         else if(event.type==="response.created"){
           const id=event.response?.id??event.response_id;
           if(activeResponse.current&&id&&activeResponse.current!=="__active__"&&activeResponse.current!==String(id)){
@@ -720,7 +761,9 @@ function TD(){
           const responseKey=event.response_id?String(event.response_id):null;
           const turn=(responseKey?responseTurns.current.get(responseKey):undefined)
             ??activeResponseTurn.current??(responseTurn.current||state.turn);
-          voiceLog().push({type:"transcript",turn,response_id:event.response_id??null,text:String(event.transcript??"")});
+          const transcript=String(event.transcript??"");
+          if (demoMode && transcript) demoTranscriptTurns.current.add(turn);
+          voiceLog().push({type:"transcript",turn,response_id:event.response_id??null,text:transcript});
         }
         else if(event.type==="response.output_audio_buffer.stopped")setStatus("idle");
         else if(event.type==="error"){
@@ -742,6 +785,9 @@ function TD(){
           }
           const turn=(responseKey?responseTurns.current.get(responseKey):undefined)
             ??activeResponseTurn.current??(responseTurn.current||state.turn);
+          if (demoMode && (response.output??[]).some((item:any) => (item.content??[]).some((content:any) => typeof content.transcript === "string" || typeof content.text === "string"))) {
+            demoTranscriptTurns.current.add(turn);
+          }
           if(responseKey){completedResponses.current.add(responseKey);responseTurns.current.delete(responseKey);}
           activeResponse.current=null;
           activeResponseTurn.current=null;
@@ -806,6 +852,14 @@ function TD(){
             return;
           }
           if(state.pendingTools===0){state.settledTurn=Math.max(state.settledTurn,turn);state.settledAt=Date.now();}
+          const demoTurnStage = demoPendingTurns.current.get(turn);
+          if (demoMode && response.status === "completed" && (demoTurnStage === 3 || demoTurnStage === 5) && demoTranscriptTurns.current.has(turn)) {
+            postDemoEvent("turn-done", demoTurnStage);
+          }
+          if (demoMode && (response.status === "completed" || response.status === "cancelled")) {
+            demoPendingTurns.current.delete(turn);
+            demoTranscriptTurns.current.delete(turn);
+          }
           setStatus("idle");
           if(captionTimer.current)clearTimeout(captionTimer.current);
           captionTimer.current=window.setTimeout(()=>{setCaptionFading(true);captionTimer.current=window.setTimeout(()=>{setCaption("");setCaptionFading(false);},400);},2800);
@@ -864,12 +918,39 @@ function TD(){
       if(channel.current?.readyState==="open")setStatus(pttPreviousMic.current?"listening":"idle");
     }
   };
+  const submitDemoQuestion=async(text:string,stage:DemoStage)=>{
+    const questionText=text.trim();
+    if(!questionText)return;
+    demoStage.current=stage;
+    const channelIsOpen=()=>channel.current?.readyState==="open";
+    if(!channelIsOpen()){
+      if(!connecting)await start();
+      const deadline=Date.now()+15000;
+      while(!channelIsOpen()&&Date.now()<deadline)await new Promise(resolve=>window.setTimeout(resolve,50));
+    }
+    await sendQuestion(questionText,stage);
+  };
   useEffect(()=>()=>{paintHotkeysCleanup.current?.();stop();if(captionTimer.current)clearTimeout(captionTimer.current);},[]);
   useEffect(()=>{
     const down=(event:KeyboardEvent)=>{if(event.ctrlKey&&event.shiftKey&&!event.repeat){event.preventDefault();beginPushToTalk();}};
     const up=(event:KeyboardEvent)=>{if(event.key==="Control"||event.key==="Shift")endPushToTalk();};
     const blur=()=>endPushToTalk();
     const message=(event:MessageEvent)=>{
+      if (demoMode && event.source === frame.current?.contentWindow && isDemoEventMessage(event)) {
+        if (event.data.event === "ink") postDemoEvent("ink");
+        return;
+      }
+      if (demoMode && event.source === window.parent) {
+        if (isDemoAskMessage(event)) {
+          void submitDemoQuestion(event.data.text,event.data.stage);
+          return;
+        }
+        if (isDemoFocusMessage(event)) {
+          setDemoFocus(event.data.target);
+          demoStage.current=event.data.stage;
+          return;
+        }
+      }
       if(event.origin!==location.origin||event.data?.type!=="gerald-hotkey")return;
       if(event.source!==window.parent&&event.source!==frame.current?.contentWindow)return;
       if(event.data.pressed)beginPushToTalk();else endPushToTalk();
@@ -909,6 +990,7 @@ function TD(){
     frameWindow.addEventListener("pagehide",cleanup,{once:true});
   };
   return <main className={`td-root${docMode?" document-mode":""}${paintMode?" paint-mode":""}`}>
+    {demoFocusPoint && <GuidePoint className="td-demo-guide-point" style={{left: demoFocusPoint.x, top: demoFocusPoint.y}}/>}
     {paintMode&&<iframe ref={paintFrame} className="paint-editor" title="miniPaint" src="/vendor/minipaint/index.html" onLoad={attachPaintHotkeys}/>}
     {!liveMode&&!docMode&&!paintMode&&<article className="paper"><header className="td-head" data-gerald-id="1"><div className="td-meta"><span>Lycée — Mathématiques</span><span>TD 4</span></div><h1 data-gerald-id="2">Polynômes du second degré</h1><div className="td-student"><span>Nom : __________________</span><span>Date : ________________</span></div></header>
     <section className="reminder" data-gerald-id="3"><h2 data-gerald-id="4">Rappel de cours</h2><p data-gerald-id="5">Pour <span dangerouslySetInnerHTML={{__html:katex.renderToString("ax^2+bx+c=0")}} />, le discriminant vaut <span dangerouslySetInnerHTML={{__html:katex.renderToString("\\Delta=b^2-4ac")}} />. Si <span dangerouslySetInnerHTML={{__html:katex.renderToString("\\Delta>0")}} />, l’équation possède deux racines réelles.</p></section>

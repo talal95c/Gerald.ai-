@@ -4,6 +4,8 @@ import { AppState, getBridge } from "./bridge";
 import "./style.css";
 import { Orb } from "./orb";
 import { Reveal } from "./reveal";
+import {demoMode, isDemoFocusMessage, postDemoEvent} from "./demo-events";
+import {GuidePoint} from "./guided-demo";
 
 const bridge = getBridge();
 const tabs = ["Tableau", "Documents", "Historique", "Raccourcis"];
@@ -57,7 +59,7 @@ function NavIcon({name, active}: {name: string; active: boolean}) {
   </svg>;
 }
 
-function NavBar({active, onChange}: {active: string; onChange: (tab: string) => void}) {
+function NavBar({active, onChange, demoFocus}: {active: string; onChange: (tab: string) => void; demoFocus: string | null}) {
   const refs = useRef<Record<string, HTMLButtonElement | null>>({});
   const [thumb, setThumb] = useState({left: 0, width: 0});
   useEffect(() => {
@@ -66,7 +68,7 @@ function NavBar({active, onChange}: {active: string; onChange: (tab: string) => 
   }, [active]);
   return <nav className="navbar" role="tablist">
     <span className="nav-thumb" style={{transform:`translateX(${thumb.left}px)`, width: thumb.width}} />
-    {tabs.map(x=><button key={x} ref={el=>{refs.current[x]=el;}} role="tab" aria-selected={active===x} className={active===x?"active":""} onClick={()=>onChange(x)}><NavIcon name={x} active={active===x}/><span>{x}</span></button>)}
+    {tabs.map(x=><button key={x} ref={el=>{refs.current[x]=el;}} role="tab" aria-selected={active===x} className={active===x?"active":""} data-gerald-demo-focus={x==="Documents"?"documents":undefined} onClick={()=>onChange(x)}><NavIcon name={x} active={active===x}/><span>{x}</span>{demoFocus === "documents" && x === "Documents" && <GuidePoint className="notch-demo-guide-point"/>}</button>)}
   </nav>;
 }
 
@@ -102,9 +104,9 @@ function DocView({doc, folder, hotkey, onBack}: {doc: AppState["documents"][numb
   </div>;
 }
 
-function Folders({docs, recaps, hotkey, uploadError, onDocumentOpen, onBack}: {
+function Folders({docs, recaps, hotkey, uploadError, onDocumentOpen, onBack, demoFocus}: {
   docs: AppState["documents"]; recaps: Recap[]; hotkey: string;
-  uploadError?: string; onDocumentOpen: (id: number) => void; onBack: () => void;
+  uploadError?: string; onDocumentOpen: (id: number) => void; onBack: () => void; demoFocus: string | null;
 }) {
   const [doc, setDoc] = useState<AppState["documents"][number] | null>(null);
   const onOpen = (d: AppState["documents"][number]) => {
@@ -122,7 +124,8 @@ function Folders({docs, recaps, hotkey, uploadError, onDocumentOpen, onBack}: {
   </div>;
   if (open && groups[open]) return <div className="folder-open">
     <button className="add" onClick={()=>setOpen(null)}>← Dossiers</button><span className="folder-title">{open}</span>
-    <div className="fan">{groups[open].map((doc,i)=><article className="sheet-card" key={doc.id} onClick={()=>onOpen(doc)} style={{animationDelay:`${i*45}ms`}}>
+    <div className="fan">{groups[open].map((doc,i)=><article className="sheet-card" data-gerald-demo-focus={doc.id === -4 ? "td4" : undefined} key={doc.id} onClick={()=>onOpen(doc)} style={{animationDelay:`${i*45}ms`}}>
+      {demoFocus === "td4" && doc.id === -4 && <GuidePoint className="notch-demo-guide-point"/>}
       <i className={`dot ${doc.status}`} /><b>{doc.filename}</b><small>{doc.status === "ready" ? "Prêt" : doc.error || "Indexation…"}</small>
       {doc.id >= 0 && <button aria-label={`Supprimer ${doc.filename}`} onClick={e=>{e.stopPropagation();bridge.deleteDocument(doc.id);}}>×</button>}</article>)}</div>
   </div>;
@@ -140,7 +143,21 @@ function Folders({docs, recaps, hotkey, uploadError, onDocumentOpen, onBack}: {
 function App({onTalk, hintController}: {onTalk?: (pressed: boolean) => void; hintController: NotchHintController}) {
   const [mode, setMode] = useState(window.qt || !/(td|board|fiche)\.html$/.test(location.pathname) ? "greeting" : "collapsed");
   const [state, setState] = useState<NotchState>(emptyState);
+  const [demoFocus, setDemoFocus] = useState<string | null>(null);
   const [status, setStatus] = useState("idle");
+  useEffect(() => {
+    if (!demoMode) return;
+    const message = (event: MessageEvent<unknown>) => {
+      if (event.source !== window.parent || !isDemoFocusMessage(event)) return;
+      setDemoFocus(event.data.target);
+      if (event.data.target === "documents") {
+        clear();
+        go("panel");
+      }
+    };
+    window.addEventListener("message", message);
+    return () => window.removeEventListener("message", message);
+  }, []);
   const [tab, setTab] = useState("Documents");
   const [recap, setRecap] = useState("");
   const [historyMessages, setHistoryMessages] = useState<HistoryMessage[] | null>(null);
@@ -187,6 +204,7 @@ function App({onTalk, hintController}: {onTalk?: (pressed: boolean) => void; hin
     hintController.current = () => undefined;
   }, [hintController]);
   const pick = (name: string) => {
+    if (name === "Documents") postDemoEvent("documents-open");
     if (name === "Tableau") {
       bridge.openBoard(
         state.last_exercise?.title ?? "",
@@ -228,7 +246,7 @@ function App({onTalk, hintController}: {onTalk?: (pressed: boolean) => void; hin
           <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 15a3 3 0 0 0 3-3V6a3 3 0 1 0-6 0v6a3 3 0 0 0 3 3Zm6-3a6 6 0 0 1-12 0M12 18v3m-4 0h8" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round"/></svg>
         </button>}
       </span>
-      <NavBar active={mode === "settings" ? tab : mode === "document" ? "Documents" : ""} onChange={pick}/>
+      <NavBar active={mode === "settings" ? tab : mode === "document" ? "Documents" : ""} onChange={pick} demoFocus={demoFocus}/>
       {state.session_open ? <button className="end" title={state.recap_error || undefined} onClick={()=>bridge.endSession()}>{state.recap_pending ? "Fiche…" : state.recap_error ? "Réessayer la fiche" : "Fin de session"}</button>
         : recap ? <button className="end" onClick={()=>bridge.openRecap(recap)}>Fiche →</button>
         : <button className="quit" onClick={()=>bridge.quit()} aria-label="Quitter">⏻</button>}
@@ -240,7 +258,7 @@ function App({onTalk, hintController}: {onTalk?: (pressed: boolean) => void; hin
         onDocumentOpen={id=>{
           if (bridge.openDocument) { bridge.openDocument(id); go("collapsed"); }
           else go("document");
-        }} onBack={()=>go("settings")}
+        }} onBack={()=>go("settings")} demoFocus={demoFocus}
       />}
       {mode === "settings" && tab === "Historique" && (historyMessages
         ? <><button className="add" onClick={()=>setHistoryMessages(null)}>← Retour</button>{historyMessages.map((m,i)=><p className={`msg ${m.role}`} key={i}><span>{m.text}</span>{m.created_at && <time>{localTime(m.created_at)}</time>}</p>)}</>
