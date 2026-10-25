@@ -942,7 +942,7 @@ function Board() {
       <div key={mark.id} className="gerald-tip" data-gerald-tip={mark.id}
         data-gerald-mark-kind="tip"
         style={{left: mark.x, top: mark.y, width: mark.w, height: mark.h, color: mark.color ?? undefined, border: mark.color ? `1px solid ${mark.color}` : undefined}}>{mark.text}</div>)}
-    <div className="gerald-pointer" aria-hidden="true" style={{left:cursor.x,top:cursor.y,opacity:cursor.visible?1:0}}><i/>Gerald</div>
+    <div className="gerald-pointer" aria-hidden="true" style={{left:Math.round(cursor.x),top:Math.round(cursor.y),opacity:cursor.visible?1:0}}><i/>Gerald</div>
     {plotVisible && plotData && <PlotWindow key={plotRevision} data={plotData} initialBox={plotBox}
       onClose={() => setPlotVisible(false)} onBoxChange={setPlotBox}/>}
     <nav className="board-tools">
