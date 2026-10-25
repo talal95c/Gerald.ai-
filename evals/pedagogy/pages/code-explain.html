@@ -1,0 +1,14 @@
+<html><head><link rel=stylesheet href=_base.css><style>
+body{background:#1e1e1e;color:#d4d4d4}.title{height:32px;background:#3c3c3c;color:#ccc;font-size:13px;padding:8px 14px}
+.ed{white-space:pre;position:absolute;top:32px;left:0;right:0;bottom:0;padding:24px 0;font-size:18px;line-height:30px}
+.ln{display:inline-block;width:70px;text-align:right;color:#858585;margin-right:20px}.k{color:#569cd6}.f{color:#dcdcaa}.n{color:#b5cea8}.s{color:#ce9178}
+</style></head><body><div class=title>tri.js — Visual Studio Code</div><div class="ed mono">
+<div><span class=ln>1</span><span class=k>const</span> eleves = [</div>
+<div><span class=ln>2</span>  { nom: <span class=s>"Lina"</span>, note: <span class=n>14</span> },</div>
+<div><span class=ln>3</span>  { nom: <span class=s>"Yanis"</span>, note: <span class=n>9</span> },</div>
+<div><span class=ln>4</span>  { nom: <span class=s>"Sarah"</span>, note: <span class=n>17</span> },</div>
+<div><span class=ln>5</span>];</div>
+<div><span class=ln>6</span></div>
+<div id=filter><span class=ln>7</span><span class=k>const</span> admis = eleves.<span class=f>filter</span>(e =&gt; e.note &gt;= <span class=n>10</span>)</div>
+<div id=map><span class=ln>8</span>                    .<span class=f>map</span>(e =&gt; e.nom);</div>
+<div><span class=ln>9</span>console.<span class=f>log</span>(admis);</div></div></body></html>

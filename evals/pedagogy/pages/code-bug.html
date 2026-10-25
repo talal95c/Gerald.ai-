@@ -1,0 +1,24 @@
+<html><head><link rel=stylesheet href=_base.css><style>
+body{background:#1e1e1e;color:#d4d4d4}.title{height:32px;background:#3c3c3c;color:#ccc;font-size:13px;padding:8px 14px}
+.side{position:absolute;top:32px;left:0;width:220px;bottom:0;background:#252526;font-size:13px;padding:10px}
+.side div{padding:3px 6px}.sel{background:#37373d}
+.tab{position:absolute;top:32px;left:220px;right:0;height:36px;background:#2d2d2d;font-size:13px;padding:9px 16px}
+.ed{white-space:pre;position:absolute;top:68px;left:220px;right:0;bottom:200px;padding:14px 0;font-size:17px;line-height:28px}
+.ln{display:inline-block;width:56px;text-align:right;color:#858585;margin-right:18px}
+.k{color:#569cd6}.f{color:#dcdcaa}.s{color:#ce9178}.n{color:#b5cea8}.c{color:#6a9955}
+.term{position:absolute;left:220px;right:0;bottom:0;height:200px;background:#181818;border-top:1px solid #333;font-size:15px;padding:12px 18px;line-height:24px}
+</style></head><body><div class=title>notes.py — Visual Studio Code</div>
+<div class=side><div>EXPLORATEUR</div><div class=sel>notes.py</div><div>README.md</div></div>
+<div class=tab>notes.py</div>
+<div class="ed mono">
+<div><span class=ln>1</span><span class=k>def</span> <span class=f>moyenne</span>(notes):</div>
+<div><span class=ln>2</span>    total = <span class=n>0</span></div>
+<div><span class=ln>3</span>    <span class=k>for</span> note <span class=k>in</span> notes:</div>
+<div><span class=ln>4</span>        total = total + note</div>
+<div id=bug><span class=ln>5</span>    <span class=k>return</span> total / (len(notes) - <span class=n>1</span>)</div>
+<div><span class=ln>6</span></div>
+<div><span class=ln>7</span>notes_maths = [<span class=n>12</span>, <span class=n>15</span>, <span class=n>9</span>]</div>
+<div><span class=ln>8</span><span class=f>print</span>(<span class=s>"Moyenne :"</span>, moyenne(notes_maths))</div>
+</div>
+<div class="term mono">PS C:\cours&gt; python notes.py<br>Moyenne : 18.0<br>PS C:\cours&gt; <span id=out></span></div>
+</body></html>

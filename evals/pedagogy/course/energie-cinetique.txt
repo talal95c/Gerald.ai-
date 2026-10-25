@@ -1,0 +1,17 @@
+Physique — Chapitre 5 : Énergie cinétique
+
+1. Définition
+L'énergie cinétique est l'énergie que possède un corps du fait de son mouvement. Plus un objet est lourd et rapide, plus son énergie cinétique est grande.
+
+2. Formule
+Pour un objet de masse m (en kilogrammes) se déplaçant à la vitesse v (en mètres par seconde), l'énergie cinétique vaut :
+Ec = 1/2 × m × v²
+Ec s'exprime en joules (J).
+
+3. Méthode
+- Convertir la masse en kg et la vitesse en m/s.
+- Élever la vitesse au carré avant de multiplier.
+- Attention : si la vitesse double, l'énergie cinétique est multipliée par 4.
+
+4. Exemple
+Un ballon de 0,5 kg lancé à 4 m/s : Ec = 1/2 × 0,5 × 4² = 4 J.

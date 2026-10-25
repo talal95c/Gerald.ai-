@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import math
 from dataclasses import dataclass
 from typing import Any
 
@@ -9,6 +10,7 @@ import numpy as np
 from gerald.capture.screen import Capture
 from gerald.perception.elements import Element
 from gerald.perception.grounding import GroundingResolution, ScreenRect, resolve_target
+from gerald.tools.diagram import DiagramCommand, layout_diagram
 
 TARGET_SCHEMA = {
     "type": "object",
@@ -112,12 +114,106 @@ TOOL_SCHEMAS = [
         },
     ),
     _schema("save_recap", "Save the lesson recap as a Markdown file and open it.", {"markdown": {"type": "string"}}, ["markdown"]),
+    _schema(
+        "tip",
+        "Show a short tip or advice (max ~120 characters) in a bubble above Gerald's cursor. Use for a key takeaway, shortcut, or a warning the learner should read.",
+        {"text": {"type": "string"}},
+        ["text"],
+    ),
+    _schema(
+        "diagram",
+        "Draw a clean diagram or flowchart that Gerald lays out automatically. Use it to explain a process, a structure, a cause→effect chain, or a cycle.",
+        {
+            "title": {"type": "string"},
+            "layout": {"type": "string", "enum": ["flow", "tree", "cycle"]},
+            "nodes": {
+                "type": "array",
+                "minItems": 2,
+                "maxItems": 12,
+                "items": {
+                    "type": "object",
+                    "properties": {"id": {"type": "string"}, "text": {"type": "string"}},
+                    "required": ["id", "text"],
+                    "additionalProperties": False,
+                },
+            },
+            "edges": {
+                "type": "array",
+                "maxItems": 20,
+                "items": {
+                    "type": "object",
+                    "properties": {
+                        "from": {"type": "string"},
+                        "to": {"type": "string"},
+                        "label": {"type": "string"},
+                    },
+                    "required": ["from", "to"],
+                    "additionalProperties": False,
+                },
+            },
+            "x": {"type": "number"},
+            "y": {"type": "number"},
+        },
+        ["layout", "nodes"],
+    ),
+    _schema(
+        "search_courses",
+        "Search the learner's course documents for relevant passages.",
+        {
+            "query": {"type": "string"},
+            "course": {"type": "string", "description": "Course title to search, if known"},
+        },
+        ["query"],
+    ),
     _schema("write", "Write text on the open teaching board.", {"text": {"type": "string"}, "x": {"type": "number"}, "y": {"type": "number"}, "size": {"type": "number"}}, ["text", "x", "y"]),
     _schema("write_math", "Write a math expression on the open teaching board.", {"latex": {"type": "string"}, "x": {"type": "number"}, "y": {"type": "number"}, "size": {"type": "number"}}, ["latex", "x", "y"]),
     _schema("draw_path", "Draw a path on the open teaching board.", {"points": {"type": "array", "items": {"type": "array", "items": {"type": "number"}, "minItems": 2, "maxItems": 2}}, "closed": {"type": "boolean"}}, ["points"]),
+    _schema(
+        "plot",
+        "Plot exact graphs of one or more functions of x on the board, with axes, ticks and labelled points (roots, vertex, intersections).",
+        {
+            "functions": {
+                "type": "array",
+                "minItems": 1,
+                "maxItems": 3,
+                "items": {
+                    "type": "object",
+                    "properties": {
+                        "expr": {"type": "string"},
+                        "label": {"type": "string", "maxLength": 24},
+                    },
+                    "required": ["expr"],
+                    "additionalProperties": False,
+                },
+            },
+            "x_min": {"type": "number"},
+            "x_max": {"type": "number"},
+            "y_min": {"type": "number"},
+            "y_max": {"type": "number"},
+            "points": {
+                "type": "array",
+                "maxItems": 8,
+                "items": {
+                    "type": "object",
+                    "properties": {
+                        "x": {"type": "number"},
+                        "y": {"type": "number"},
+                        "label": {"type": "string", "maxLength": 24},
+                    },
+                    "required": ["x", "y"],
+                    "additionalProperties": False,
+                },
+            },
+            "x": {"type": "number"},
+            "y": {"type": "number"},
+            "w": {"type": "number"},
+            "h": {"type": "number"},
+        },
+        ["functions", "x_min", "x_max"],
+    ),
     _schema("clear_gerald", "Clear Gerald's board layer without changing user ink.", {}, []),
 ]
-BOARD_TOOL_NAMES = frozenset({"write", "write_math", "draw_path", "clear_gerald"})
+BOARD_TOOL_NAMES = frozenset({"write", "write_math", "draw_path", "plot", "clear_gerald"})
 
 
 @dataclass(frozen=True)
@@ -168,6 +264,11 @@ class NoteCommand(DrawCommand):
 @dataclass(frozen=True)
 class ClearCommand(DrawCommand):
     pass
+
+
+@dataclass(frozen=True)
+class TipCommand(DrawCommand):
+    text: str
 
 
 def _target(
@@ -235,6 +336,32 @@ def execute_tool(
             if args:
                 raise ValueError("clear accepts no arguments")
             command = ClearCommand()
+        elif name == "tip":
+            if set(args) != {"text"}:
+                raise ValueError("tip requires only text")
+            text = args.get("text")
+            if not isinstance(text, str) or not text.strip():
+                raise ValueError("text must be a non-empty string")
+            command = TipCommand(text.strip()[:160])
+        elif name == "diagram":
+            allowed = {"title", "layout", "nodes", "edges", "x", "y"}
+            if set(args) - allowed or not {"layout", "nodes"} <= args.keys():
+                raise ValueError("diagram requires layout and nodes, with optional title, edges, x, and y")
+            x, y = args.get("x"), args.get("y")
+            if (x is None) != (y is None):
+                raise ValueError("x and y must be provided together")
+            if x is not None and any(
+                not isinstance(value, (int, float)) or isinstance(value, bool) or not math.isfinite(value)
+                for value in (x, y)
+            ):
+                raise ValueError("x and y must be finite numbers")
+            diagram_layout = layout_diagram(
+                title=args.get("title"),
+                layout=args["layout"],
+                nodes=args["nodes"],
+                edges=args.get("edges", []),
+            )
+            command = DiagramCommand(diagram_layout, x, y)
         elif name in {"point", "circle", "underline", "highlight", "note"}:
             optional = {
                 "point": {"label"},

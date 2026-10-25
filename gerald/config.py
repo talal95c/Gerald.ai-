@@ -20,6 +20,12 @@ class Settings:
     max_image_width: int
     ocr_budget: float
     require_confirmation: bool
+    cursor_enabled: bool
+    proactive_enabled: bool
+
+
+def _enabled(name: str, default: str = "1") -> bool:
+    return os.getenv(name, default).strip().casefold() not in {"0", "false", "no", "off"}
 
 
 def load_settings() -> Settings:
@@ -31,12 +37,7 @@ def load_settings() -> Settings:
             ocr_budget = 2.5
     except ValueError:
         ocr_budget = 2.5
-    require_confirmation = os.getenv("GERALD_REQUIRE_CONFIRMATION", "1").strip().casefold() not in {
-        "0",
-        "false",
-        "no",
-        "off",
-    }
+    require_confirmation = _enabled("GERALD_REQUIRE_CONFIRMATION")
     return Settings(
         api_key=os.getenv("OPENAI_API_KEY", "").strip(),
         model=os.getenv("GERALD_MODEL", "gpt-realtime-2").strip(),
@@ -45,6 +46,8 @@ def load_settings() -> Settings:
         max_image_width=max(320, int(os.getenv("GERALD_MAX_IMAGE_W", "1280"))),
         ocr_budget=ocr_budget,
         require_confirmation=require_confirmation,
+        cursor_enabled=_enabled("GERALD_CURSOR"),
+        proactive_enabled=_enabled("GERALD_PROACTIVE"),
     )
 
 

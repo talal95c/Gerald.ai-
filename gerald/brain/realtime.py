@@ -4,6 +4,7 @@ import asyncio
 import base64
 import json
 import logging
+import threading
 import time
 from collections.abc import Callable
 from functools import partial
@@ -16,6 +17,7 @@ import numpy as np
 from gerald.actions.input import ACTION_TOOL_NAMES, InputActions
 from gerald.audio.player import AudioPlayer
 from gerald.capture.screen import Capture
+from gerald.library.store import Store
 from gerald.perception.elements import Element
 from gerald.tools.recap import save_recap
 from gerald.tools.registry import BOARD_TOOL_NAMES, TOOL_SCHEMAS, execute_tool
@@ -44,6 +46,8 @@ class RealtimeClient:
         ]
         | None = None,
         on_board_tool: Callable[[str, dict[str, Any]], str] | None = None,
+        on_course_search: Callable[[str, str | None], str | dict[str, Any]] | None = None,
+        store: Store | None = None,
     ) -> None:
         self.api_key = api_key
         self.model = model
@@ -56,6 +60,10 @@ class RealtimeClient:
         self.on_board_tool = on_board_tool or (
             lambda name, _args: json.dumps({"ok": False, "error": f"board is unavailable for {name}"})
         )
+        self.on_course_search = on_course_search
+        self.store = store
+        self._agent_conversation_id: int | None = None
+        self._agent_history_lock = threading.Lock()
         self.input_actions = input_actions or InputActions(
             require_confirmation=require_confirmation,
             request_confirmation=request_action_confirmation,
@@ -72,6 +80,7 @@ class RealtimeClient:
         self._tool_outputs: dict[str, str] = {}
         self._turn_started_at: float | None = None
         self._closed = False
+        self._connected = False
         self._response_active = False
         self.last_board_image = None
 
@@ -116,6 +125,7 @@ class RealtimeClient:
         while True:
             event = await self._receive()
             if event.get("type") == "session.updated":
+                self._connected = True
                 self.on_event(event)
                 break
             if event.get("type") == "error":
@@ -131,6 +141,34 @@ class RealtimeClient:
             raise RuntimeError("Realtime connection is not open")
         data = await self.websocket.recv()
         return json.loads(data)
+
+    async def update_instructions(self, text: str) -> bool:
+        self.instructions = text
+        if not self._connected or self.websocket is None:
+            return False
+        await self._send(self.session_update_event())
+        return True
+
+    def record_user_message(self, text: str) -> None:
+        self._record_agent_message("user", text)
+
+    def _record_agent_message(self, role: str, text: str) -> None:
+        if self.store is None or not isinstance(text, str) or not text.strip():
+            return
+        with self._agent_history_lock:
+            if role == "assistant" and self._agent_conversation_id is None:
+                return
+            try:
+                if self._agent_conversation_id is None:
+                    conversation = self.store.create_conversation(
+                        None,
+                        "agent",
+                        text.strip()[:60],
+                    )
+                    self._agent_conversation_id = conversation.id
+                self.store.add_message(self._agent_conversation_id, role, text.strip())
+            except Exception:
+                logger.warning("Could not save Realtime conversation history", exc_info=True)
 
     async def start_turn(self) -> None:
         self.player.stop()
@@ -226,6 +264,7 @@ class RealtimeClient:
 
     async def close(self) -> None:
         self._closed = True
+        self._connected = False
         self.input_actions.abort(self._action_session)
         self.player.close()
         websocket, self.websocket = self.websocket, None
@@ -244,6 +283,7 @@ class RealtimeClient:
                 raise
             except Exception:
                 logger.warning("Realtime connection dropped; reconnecting", exc_info=True)
+                self._connected = False
                 self.on_event({"type": "connection.lost"})
                 websocket, self.websocket = self.websocket, None
                 if websocket is not None:
@@ -274,6 +314,14 @@ class RealtimeClient:
             "response.audio_transcript.delta",
             "conversation.item.input_audio_transcription.completed",
         }:
+            if event_type == "conversation.item.input_audio_transcription.completed":
+                self.record_user_message(event.get("transcript", ""))
+            self.on_event(event)
+        elif event_type in {
+            "response.output_audio_transcript.done",
+            "response.audio_transcript.done",
+        }:
+            self._record_agent_message("assistant", event.get("transcript", ""))
             self.on_event(event)
         elif event_type == "response.function_call_arguments.done":
             await self._execute_function_call(
@@ -324,6 +372,27 @@ class RealtimeClient:
                     ),
                 )
                 output = json.dumps({"ok": True, "path": str(path)})
+            elif name == "search_courses":
+                query = args.get("query")
+                course = args.get("course")
+                if not isinstance(query, str) or not query.strip():
+                    raise ValueError("query must be a non-empty string")
+                if course is not None and not isinstance(course, str):
+                    raise ValueError("course must be a string")
+                if self.on_course_search is None:
+                    output = json.dumps(
+                        {"ok": False, "error": "course search is unavailable"},
+                        ensure_ascii=False,
+                    )
+                else:
+                    result = await asyncio.get_running_loop().run_in_executor(
+                        None,
+                        partial(self.on_course_search, query, course),
+                    )
+                    output = result if isinstance(result, str) else json.dumps(
+                        result,
+                        ensure_ascii=False,
+                    )
             elif name in BOARD_TOOL_NAMES:
                 output = await asyncio.get_running_loop().run_in_executor(
                     None,
