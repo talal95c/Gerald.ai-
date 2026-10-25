@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import argparse
+from collections import deque
 from copy import deepcopy
 import json
 import logging
@@ -8,6 +9,8 @@ import os
 from pathlib import Path
 import socket
 from http.server import SimpleHTTPRequestHandler, ThreadingHTTPServer
+import threading
+import time
 from urllib.error import HTTPError, URLError
 from urllib.parse import parse_qs, urlencode, urlsplit
 from urllib.request import Request, urlopen
@@ -364,6 +367,52 @@ def _parse_exercise(query: str) -> tuple[str, list[str]]:
     return title, lines
 
 
+def _env_int(name: str) -> int:
+    try:
+        return max(0, int(os.getenv(name, "0")))
+    except ValueError:
+        return 0
+
+
+class SessionLimiter:
+    """Caps Realtime sessions per client per hour and in total per day (0 = no cap)."""
+
+    def __init__(self, per_client_hour: int = 0, per_day: int = 0, clock=time.monotonic):
+        self.per_client_hour = per_client_hour
+        self.per_day = per_day
+        self._clock = clock
+        self._lock = threading.Lock()
+        self._clients: dict[str, deque[float]] = {}
+        self._all: deque[float] = deque()
+
+    @classmethod
+    def from_env(cls) -> SessionLimiter:
+        return cls(
+            _env_int("GERALD_MAX_SESSIONS_PER_CLIENT_HOUR"), _env_int("GERALD_MAX_SESSIONS_PER_DAY")
+        )
+
+    def allow(self, client: str) -> bool:
+        now = self._clock()
+        with self._lock:
+            while self._all and now - self._all[0] >= 86_400:
+                self._all.popleft()
+            for key in list(self._clients):
+                times = self._clients[key]
+                while times and now - times[0] >= 3_600:
+                    times.popleft()
+                if not times:
+                    del self._clients[key]
+            times = self._clients.get(client, deque())
+            if self.per_day and len(self._all) >= self.per_day:
+                return False
+            if self.per_client_hour and len(times) >= self.per_client_hour:
+                return False
+            times.append(now)
+            self._clients[client] = times
+            self._all.append(now)
+            return True
+
+
 class WebVoiceHTTPServer(ThreadingHTTPServer):
     allow_reuse_address = True
     daemon_threads = True
@@ -376,9 +425,11 @@ class WebVoiceHTTPServer(ThreadingHTTPServer):
         host: str,
         web_root: Path = WEB_ROOT,
         public_hosts: tuple[str, ...] = (),
+        limiter: SessionLimiter | None = None,
     ):
         self.host = host
         self.web_root = web_root
+        self.limiter = limiter or SessionLimiter.from_env()
         self.public_hosts = tuple(item.strip().casefold() for item in public_hosts if item.strip())
         super().__init__(address, handler)
 
@@ -459,6 +510,13 @@ class WebVoiceHandler(SimpleHTTPRequestHandler):
             raise ValueError("incomplete request body")
         return body
 
+    def _client_id(self) -> str:
+        for header in ("CF-Connecting-IP", "True-Client-IP", "X-Forwarded-For"):
+            value = self.headers.get(header, "").split(",")[0].strip()
+            if value:
+                return value
+        return self.client_address[0]
+
     def _valid_origin(self) -> bool:
         allowed = self.server.allowed_hosts
         hosts = {
@@ -478,6 +536,9 @@ class WebVoiceHandler(SimpleHTTPRequestHandler):
         return False
 
     def do_GET(self) -> None:
+        if urlsplit(self.path).path == "/healthz":
+            self._send_json(200, {"ok": True})
+            return
         if not self._valid_origin():
             self._send_json(403, {"ok": False, "error": "origin or host not allowed"})
             return
@@ -543,6 +604,10 @@ class WebVoiceHandler(SimpleHTTPRequestHandler):
             self._send_json(400, {"ok": False, "error": str(error)})
             return
 
+        if not self.server.limiter.allow(self._client_id()):
+            logger.warning("session limit reached for %s", self._client_id())
+            self._send_json(429, {"ok": False, "error": "session limit reached, try again later"})
+            return
         model = os.getenv("GERALD_MODEL", "gpt-realtime-2").strip() or "gpt-realtime-2"
         session = build_session_config(model, title, lines, live_mode, doc_mode, paint_mode)
         body, content_type = build_multipart(sdp, session)
@@ -633,12 +698,19 @@ def make_server(
 
 def main() -> int:
     parser = argparse.ArgumentParser(description="Serve the voice-enabled Gerald teaching board")
-    parser.add_argument("--port", type=int, default=8765)
+    parser.add_argument("--port", type=int, default=int(os.getenv("PORT", "8765")))
     parser.add_argument("--host", default="127.0.0.1")
     parser.add_argument(
         "--public-host",
         action="append",
-        default=[h for h in os.getenv("GERALD_WEB_PUBLIC_HOSTS", "").split(",") if h],
+        default=[
+            h
+            for h in [
+                *os.getenv("GERALD_WEB_PUBLIC_HOSTS", "").split(","),
+                os.getenv("RENDER_EXTERNAL_HOSTNAME", ""),
+            ]
+            if h
+        ],
         help="extra Host/Origin allowed, e.g. the HTTPS tunnel hostname (repeatable)",
     )
     args = parser.parse_args()
