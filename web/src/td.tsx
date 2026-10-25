@@ -343,6 +343,13 @@ function TD(){
       ||Number(b.item.active||b.item.selected)-Number(a.item.active||a.item.selected)
       ||a.order-b.order).slice(0,150).map(entry=>entry.item);
   };
+  const paintShown=(args:Record<string,any>)=>{
+    if(!paintMode)return {};
+    const elements=paintElements();
+    const label=(elements.find(item=>item.id===Number(args.element_id))
+      ??(typeof args.target_text==="string"?elements.find(item=>textPattern(args.target_text).test(item.text)):undefined))?.text.slice(0,80);
+    return label?{shown:label,say:`Ta phrase doit nommer uniquement « ${label} », la commande que tu viens de montrer (ex. « Clique sur ${label} »). Ne parle d'aucune autre commande ni de l'étape suivante.`}:{};
+  };
   const paintTargetRect=(args:Record<string,any>,scroll=true):Rect|null=>{
     const elements=paintElements();
     const element=elements.find(item=>item.id===Number(args.element_id))
@@ -473,7 +480,7 @@ function TD(){
         await animateHeadProgress(progress=>updateMarkHead(id,progress));
         await moveToRest(queue,restBeside(bounds));
       });
-      return {ok:true,target:{x:x2,y:y2},from:{x:x1,y:y1},to:{x:x2,y:y2}};
+      return {ok:true,target:{x:x2,y:y2},from:{x:x1,y:y1},to:{x:x2,y:y2},...paintShown(args.to??{})};
     }
     const id=crypto.randomUUID();
     const mark={id,kind:name,rect,text,color,fill:name==="highlight"?highlightFill:null};
@@ -507,7 +514,7 @@ function TD(){
         await moveToRest(queue,restBeside(bounds));
       });
     }
-    return {ok:true,target:{x:rect.x,y:rect.y}};
+    return {ok:true,target:{x:rect.x,y:rect.y},...paintShown(args)};
   };
   useEffect(()=>{window.geraldTD={elements,exec,close:()=>{boardOpenRef.current=false;setBoardOpen(false);},waitForAnimations:()=>cursorMotion.current!.waitForAnimations()};return()=>{delete window.geraldTD;};});
   const getBoardApi=async()=>{for(let i=0;i<100;i++){const api=frame.current?.contentWindow?.geraldBoard;if(api)return api;await new Promise(resolve=>setTimeout(resolve,20));}return null;};

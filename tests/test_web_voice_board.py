@@ -530,3 +530,4 @@ def test_paint_guidance_names_the_shown_control_and_the_drawing_canvas():
     guidance = web_voice_board.PAINT_MODE_GUIDANCE.read_text(encoding="utf-8")
     assert "must name the exact control you show" in guidance
     assert "Zone de dessin (canvas principal)" in guidance
+    assert "Make the showing call first" in guidance
