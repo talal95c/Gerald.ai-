@@ -23,7 +23,8 @@ const exercises = [
 ];
 type Rect = {x:number;y:number;w:number;h:number};
 type ViewElement = {id:number;text:string;rect:Rect};
-type PaintElement = ViewElement & {active:boolean;selected:boolean;isColor:boolean;isLayer:boolean;tag:string;value:string;in_dialog:boolean;dialog?:string};
+type PaintElement = ViewElement & {active:boolean;selected:boolean;checked?:boolean;isColor:boolean;isLayer:boolean;tag:string;value:string;in_dialog:boolean;dialog?:string};
+type PendingRealtimeResponse = {turn:number;response?:Record<string,unknown>};
 type ViewApi = {elements:()=>ViewElement[];exec:(name:string,args:Record<string,any>)=>Promise<Record<string,any>>;close?:()=>void;waitForAnimations:()=>Promise<void>};
 type BoardApi = ViewApi & {snapshot:()=>string};
 type GeraldVoiceState = {turn:number;settledTurn:number;pendingTools:number;settledAt:number;responsesCreated:number;responsesDone:number};
@@ -216,10 +217,13 @@ function TD(){
   const audioContext=useRef<AudioContext|null>(null), micAnalyser=useRef<AnalyserNode|null>(null), remoteAnalyser=useRef<AnalyserNode|null>(null);
   const pushToTalk=useRef(false), toggleMic=useRef(false), pttPreviousMic=useRef(false);
   const captionTimer=useRef<number|null>(null), handled=useRef(new Set<string>());
-  const activeResponse=useRef<string|null>(null), responseStartPending=useRef(false);
+  const sessionReady=useRef(false);
+  const activeResponse=useRef<string|null>(null), activeResponseTurn=useRef<number|null>(null);
+  const responseStartPending=useRef(false), pendingResponseTurn=useRef<number|null>(null);
+  const responseTurns=useRef(new Map<string,number>()), completedResponses=useRef(new Set<string>());
   const processingTools=useRef(false), dispatchingResponse=useRef(false);
   const queuedTurns=useRef<Array<{turn:number;text:string}>>([]);
-  const pendingResponses=useRef<Array<Record<string,unknown>|null>>([]);
+  const pendingResponses=useRef<PendingRealtimeResponse[]>([]);
   const responseTurn=useRef(0);
   useEffect(()=>{
     if(!docMode||docId===null)return;
@@ -293,17 +297,25 @@ function TD(){
       const select=element.tagName==="SELECT"?element as HTMLSelectElement:null;
       const image=element.tagName==="IMG"?element as HTMLImageElement:element.querySelector<HTMLImageElement>("img");
       const inputValue=input?.value.trim()??select?.value.trim()??"";
-      const inputLabel=input?.id==="color_hex"?"Hex":input?.type==="color"?"Colour":
-        input?.getAttribute("aria-label")||input?.title||input?.placeholder||input?.id.replaceAll("_"," ")||"";
+      const inputContainer=input?.closest<HTMLElement>(".item,.row");
+      const inputLabelRaw=[...(input?.labels??[])].map(label=>label.innerText.trim()).find(Boolean)
+        ||inputContainer?.querySelector<HTMLElement>("label,.label")?.innerText.trim()
+        ||(input?.id==="color_hex"?"Hex":input?.getAttribute("aria-label")||input?.title||input?.placeholder||input?.id.replaceAll("_"," ")||"");
+      const inputLabel=inputLabelRaw.replace(/[:：]\s*$/,"");
       const inputText=input?(inputValue?`${inputLabel?`${inputLabel} `:""}${inputValue}`:inputLabel):inputValue;
-      const text=(element.innerText?.trim()
+      const checkbox=Boolean(input?.type==="checkbox"||element.getAttribute("role")==="checkbox"
+        ||element.hasAttribute("aria-checked")||element.hasAttribute("aria-pressed"));
+      const checked=input?.type==="checkbox"?input.checked
+        :element.getAttribute("aria-checked")==="true"||element.getAttribute("aria-pressed")==="true";
+      const baseText=(element.innerText?.trim()
         ||image?.alt.trim()||image?.title.trim()
         ||element.getAttribute("title")?.trim()||element.getAttribute("aria-label")?.trim()
         ||inputText
         ||element.parentElement?.innerText?.trim()||"").trim();
+      const text=`${baseText}${checkbox?(checked?" ✓":" ✗"):""}`.trim();
       const containingDialog=dialogs.filter(dialog=>dialog.contains(element)).pop();
       return {order:index,item:{
-        id,text,active,selected,isColor:input?.type==="color"||input?.id==="color_hex",
+        id,text,active,selected,checked:checkbox?checked:undefined,isColor:input?.type==="color"||input?.id==="color_hex",
         isLayer:/layers_list|layer-row|layer_row/i.test(className)||element.hasAttribute("data-layer-id"),
         tag:element.tagName.toLowerCase(),value:inputValue,
         in_dialog:Boolean(containingDialog),dialog:containingDialog?dialogTitle(containingDialog):undefined,
@@ -513,13 +525,16 @@ function TD(){
     else {const text=elements().map(e=>`[${e.id}] "${e.text}" (${Math.round(e.rect.x)},${Math.round(e.rect.y)},${Math.round(e.rect.w)},${Math.round(e.rect.h)})`).join("\n");sendEvent({type:"conversation.item.create",item:{type:"message",role:"user",content:[{type:"input_text",text:`TD visible elements in CSS pixels:\n${text}`} ]}});}
   };
   const pumpResponses=async()=>{
-    if(activeResponse.current||responseStartPending.current||processingTools.current||dispatchingResponse.current||channel.current?.readyState!=="open")return;
+    if(!sessionReady.current||activeResponse.current||responseStartPending.current||processingTools.current||dispatchingResponse.current||channel.current?.readyState!=="open")return;
     if(pendingResponses.current.length){
-      const response=pendingResponses.current.shift()!;
+      const pending=pendingResponses.current.shift()!;
+      responseTurn.current=pending.turn;
       responseStartPending.current=true;
-      if(!sendEvent({type:"response.create",...(response?{response}:{})})){
+      pendingResponseTurn.current=pending.turn;
+      if(!sendEvent({type:"response.create",...(pending.response?{response:pending.response}:{})})){
         responseStartPending.current=false;
-        pendingResponses.current.unshift(response);
+        pendingResponseTurn.current=null;
+        pendingResponses.current.unshift(pending);
       }
       return;
     }
@@ -538,9 +553,11 @@ function TD(){
         return;
       }
       responseStartPending.current=true;
+      pendingResponseTurn.current=next.turn;
       if(!sendEvent({type:"response.create"})){
         responseStartPending.current=false;
-        pendingResponses.current.unshift(null);
+        pendingResponseTurn.current=null;
+        pendingResponses.current.unshift({turn:next.turn});
       }
     }finally{
       dispatchingResponse.current=false;
@@ -559,7 +576,9 @@ function TD(){
   const start=async(pushToTalkMode=false)=>{
     window.__geraldLog=[];
     window.__geraldState={turn:0,settledTurn:0,pendingTools:0,settledAt:0,responsesCreated:0,responsesDone:0};
-    activeResponse.current=null;responseStartPending.current=false;processingTools.current=false;dispatchingResponse.current=false;
+    sessionReady.current=false;
+    activeResponse.current=null;activeResponseTurn.current=null;responseStartPending.current=false;pendingResponseTurn.current=null;
+    responseTurns.current.clear();completedResponses.current.clear();processingTools.current=false;dispatchingResponse.current=false;
     queuedTurns.current=[];pendingResponses.current=[];responseTurn.current=0;handled.current.clear();
     pushToTalk.current=pushToTalkMode;
     toggleMic.current=!pushToTalkMode;
@@ -582,7 +601,12 @@ function TD(){
         try{event=JSON.parse(message.data);}catch(error){console.error("Invalid Realtime event",error);setVoiceError("Message vocal illisible.");setStatus("idle");return;}
         console.info("[gerald voice event]",event.type);
         const state=voiceState();
-        if(event.type==="input_audio_buffer.speech_started"){setStatus("listening");void sendContext();}
+        if(event.type==="session.updated"){
+          sessionReady.current=true;
+          voiceLog().push({type:"session_updated",turn:state.turn});
+          void pumpResponses();
+        }
+        else if(event.type==="input_audio_buffer.speech_started"){setStatus("listening");void sendContext();}
         else if(event.type==="input_audio_buffer.speech_stopped")setStatus("thinking");
         else if(event.type==="conversation.item.input_audio_transcription.completed"){const text=String(event.transcript??"");if(text){setCaption(text);setCaptionFading(false);if(captionTimer.current)clearTimeout(captionTimer.current);captionTimer.current=window.setTimeout(()=>{setCaptionFading(true);captionTimer.current=window.setTimeout(()=>{setCaption("");setCaptionFading(false);},400);},2600);}}
         else if(event.type==="response.created"){
@@ -591,34 +615,56 @@ function TD(){
             const error={message:"Realtime created a response before the active response finished",active_response:activeResponse.current,new_response:String(id)};
             console.error("[gerald realtime error]",error);
             voiceLog().push({type:"error",turn:responseTurn.current||state.turn,error});
+            return;
           }
+          const turn=pendingResponseTurn.current??activeResponseTurn.current??(responseTurn.current||state.turn);
           activeResponse.current=String(id??"__active__");
+          activeResponseTurn.current=turn;
+          if(id)responseTurns.current.set(String(id),turn);
           responseStartPending.current=false;
+          pendingResponseTurn.current=null;
+          voiceLog().push({type:"response_created",turn,response_id:id??null});
           state.responsesCreated+=1;setStatus("thinking");setCaption("");setCaptionFading(false);if(captionTimer.current)clearTimeout(captionTimer.current);
         }
         else if(event.type==="response.output_audio_buffer.started"||event.type==="response.output_audio_transcript.delta"||event.type==="response.audio_transcript.delta"){setStatus("speaking");if(event.delta){setCaption(v=>v+event.delta);setCaptionFading(false);if(event.delta.toLowerCase().includes("au tableau"))setSuggestion(true);}}
-        else if(event.type==="response.output_audio_transcript.done"||event.type==="response.audio_transcript.done"){if(event.transcript)voiceLog().push({type:"transcript",turn:responseTurn.current||state.turn,response_id:event.response_id,text:event.transcript});}
+        else if(event.type==="response.output_audio_transcript.done"||event.type==="response.audio_transcript.done"){
+          const responseKey=event.response_id?String(event.response_id):null;
+          const turn=(responseKey?responseTurns.current.get(responseKey):undefined)
+            ??activeResponseTurn.current??(responseTurn.current||state.turn);
+          voiceLog().push({type:"transcript",turn,response_id:event.response_id??null,text:String(event.transcript??"")});
+        }
         else if(event.type==="response.output_audio_buffer.stopped")setStatus("idle");
         else if(event.type==="error"){
           console.error("[gerald realtime error]",event);
           voiceLog().push({type:"error",turn:responseTurn.current||state.turn,error:event.error??event});
-          if(responseStartPending.current&&!activeResponse.current)responseStartPending.current=false;
+          if(responseStartPending.current&&!activeResponse.current){responseStartPending.current=false;pendingResponseTurn.current=null;}
         }
         else if(event.type==="response.done"){
           const response=event.response??{},calls=(response.output??[]).filter((item:any)=>item.type==="function_call");
           const responseId=response.id??event.response_id;
+          const responseKey=responseId?String(responseId):null;
+          if(responseKey&&completedResponses.current.has(responseKey))return;
           if(calls.length&&response.id&&handled.current.has(response.id))return;
-          if(responseId&&activeResponse.current&&activeResponse.current!=="__active__"&&activeResponse.current!==String(responseId)){
-            const error={message:"Realtime completed a response other than the active response",active_response:activeResponse.current,completed_response:String(responseId)};
+          if(responseKey&&activeResponse.current&&activeResponse.current!=="__active__"&&activeResponse.current!==responseKey){
+            const error={message:"Realtime completed a response other than the active response",active_response:activeResponse.current,completed_response:responseKey};
             console.error("[gerald realtime error]",error);
             voiceLog().push({type:"error",turn:responseTurn.current||state.turn,error});
             return;
           }
+          const turn=(responseKey?responseTurns.current.get(responseKey):undefined)
+            ??activeResponseTurn.current??(responseTurn.current||state.turn);
+          if(responseKey){completedResponses.current.add(responseKey);responseTurns.current.delete(responseKey);}
           activeResponse.current=null;
+          activeResponseTurn.current=null;
           responseStartPending.current=false;
+          pendingResponseTurn.current=null;
           state.responsesDone+=1;
-          const turn=responseTurn.current||state.turn;
-          voiceLog().push({type:"response_done",turn,response_id:response.id,tool_names:calls.map((call:any)=>call.name)});
+          voiceLog().push({type:"response_done",turn,response_id:responseId??null,status:response.status??null,status_details:response.status_details??null,output_types:(response.output??[]).map((item:any)=>item.type),tool_names:calls.map((call:any)=>call.name)});
+          if(response.status==="failed"){
+            const error=response.status_details??response.error??{message:"Realtime response failed"};
+            console.error("[gerald realtime error]",error);
+            voiceLog().push({type:"error",turn,response_id:responseId??null,error});
+          }
           if(calls.length){
             if(response.id)handled.current.add(response.id);
             state.pendingTools+=calls.length;
@@ -658,11 +704,11 @@ function TD(){
                   sendEvent({type:"conversation.item.create",item:{type:"function_call_output",call_id:call.call_id,output:JSON.stringify(output)}});
                 }
                 await sendContext();
-                pendingResponses.current.push(paintMode&&showingCalls>0?{tool_choice:"none"}:null);
+                pendingResponses.current.push({turn,response:paintMode&&showingCalls>0?{tool_choice:"none"}:undefined});
               }catch(error){
                 console.error("Voice tool response handling failed",error);
                 voiceLog().push({type:"error",turn,error:String(error)});
-                pendingResponses.current.push(paintMode&&showingCalls>0?{tool_choice:"none"}:null);
+                pendingResponses.current.push({turn,response:paintMode&&showingCalls>0?{tool_choice:"none"}:undefined});
               }finally{
                 processingTools.current=false;
                 void pumpResponses();
@@ -670,7 +716,7 @@ function TD(){
             })();
             return;
           }
-          if(state.pendingTools===0){state.settledTurn=turn;state.settledAt=Date.now();}
+          if(state.pendingTools===0){state.settledTurn=Math.max(state.settledTurn,turn);state.settledAt=Date.now();}
           setStatus("idle");
           if(captionTimer.current)clearTimeout(captionTimer.current);
           captionTimer.current=window.setTimeout(()=>{setCaptionFading(true);captionTimer.current=window.setTimeout(()=>{setCaption("");setCaptionFading(false);},400);},2800);
@@ -690,7 +736,7 @@ function TD(){
       await pc.setRemoteDescription({type:"answer",sdp});
     }catch(error){console.error("Voice session failed",error);setVoiceError("Impossible de démarrer la voix.");setConnecting(false);setStatus("idle");stop();}
       };
-  const stop=()=>{pushToTalk.current=false;toggleMic.current=false;activeResponse.current=null;responseStartPending.current=false;processingTools.current=false;dispatchingResponse.current=false;queuedTurns.current=[];pendingResponses.current=[];responseTurn.current=0;channel.current?.close();peer.current?.close();stream.current?.getTracks().forEach(t=>t.stop());channel.current=null;peer.current=null;stream.current=null;micAnalyser.current=null;remoteAnalyser.current=null;if(audioContext.current){void audioContext.current.close();audioContext.current=null;}setAudioLevel(0);setMicEnabled(false);setConnecting(false);setStatus("idle");};
+  const stop=()=>{pushToTalk.current=false;toggleMic.current=false;sessionReady.current=false;activeResponse.current=null;activeResponseTurn.current=null;responseStartPending.current=false;pendingResponseTurn.current=null;responseTurns.current.clear();completedResponses.current.clear();processingTools.current=false;dispatchingResponse.current=false;queuedTurns.current=[];pendingResponses.current=[];responseTurn.current=0;channel.current?.close();peer.current?.close();stream.current?.getTracks().forEach(t=>t.stop());channel.current=null;peer.current=null;stream.current=null;micAnalyser.current=null;remoteAnalyser.current=null;if(audioContext.current){void audioContext.current.close();audioContext.current=null;}setAudioLevel(0);setMicEnabled(false);setConnecting(false);setStatus("idle");};
   const toggleMicrophone=()=>{
     if(channel.current?.readyState==="open"){
       const track=stream.current?.getAudioTracks()[0];
