@@ -318,6 +318,39 @@ function Faq() {
   </section>;
 }
 
+const RIVALS = ["Gerald", "HeyClicky", "ChatGPT", "Claude", "Gemini"];
+type Mark = 1 | 0 | string;
+const COMPARE: Array<[string, Mark[]]> = [
+  ["Talk out loud from any app", [1, 1, "Desktop app, paid plans", "Mac only", "Inside Chrome"]],
+  ["Sees your screen when you ask", [1, 1, "One window at a time", "Mac only", "Chrome tabs only"]],
+  ["Draws on your screen while it explains", [1, 1, 0, 0, 0]],
+  ["A board where you write and it corrects you", [1, 0, 0, 0, 0]],
+  ["Tutor by default: method and hints first", [1, 0, "Study mode, opt-in", "Learning mode, opt-in", "Guided Learning, opt-in"]],
+  ["Revision sheet after every session", [1, 0, 0, 0, 0]],
+  ["No account needed", [1, 0, 0, 0, 0]],
+];
+const SOURCES = [
+  ["HeyClicky", "https://www.heyclicky.com/changelog"],
+  ["ChatGPT", "https://learn.chatgpt.com/docs/whats-new"],
+  ["Claude", "https://academy.claude.com/tutorials/navigating-the-claude-desktop-app"],
+  ["Gemini", "https://support.google.com/chrome/answer/16283624"],
+];
+function Cell({m}: {m: Mark}) {
+  if (m === 1) return <span className="cmp-y" aria-label="Yes"><Check/></span>;
+  if (m === 0) return <span className="cmp-n" aria-label="No">—</span>;
+  return <span className="cmp-p"><i aria-hidden="true"/>{m}</span>;
+}
+function Compare() {
+  return <section className="sec" id="compare">
+    <Head badge="Compare" icon="≡" title={<>Other assistants answer.<br/>Gerald teaches.</>} sub="How Gerald compares with the assistants students already use."/>
+    <div className="cmp rv"><table>
+      <thead><tr><th scope="col"><span className="sr">Feature</span></th>{RIVALS.map((r, i) => <th key={r} scope="col" className={i ? undefined : "cmp-g"}>{i ? r : <span className="cmp-gh"><span className="brand-mark"><GeraldMark size={10}/></span>{r}</span>}</th>)}</tr></thead>
+      <tbody>{COMPARE.map(([f, ms]) => <tr key={f}><th scope="row">{f}</th>{ms.map((m, i) => <td key={i} className={i ? undefined : "cmp-g"}><Cell m={m}/></td>)}</tr>)}</tbody>
+    </table></div>
+    <p className="cmp-src rv">Based on each product’s public documentation, checked 25 October 2026: {SOURCES.map(([n, u], i) => <React.Fragment key={n}>{i ? ", " : ""}<a href={u} target="_blank" rel="noreferrer">{n}</a></React.Fragment>)}.</p>
+  </section>;
+}
+
 function Final() {
   return <section className="final">
     <div className="final-in tex">
@@ -331,7 +364,7 @@ function Final() {
 function Footer() {
   return <footer className="foot">
     <div><a className="brand" href="#top"><span className="brand-mark"><GeraldMark size={12}/></span>Gerald</a><p>The tutor that explains it at your board.</p></div>
-    <div className="foot-l"><b>Product</b><a href="#how">How it works</a><a href="#features">Features</a><a href="#capabilities">Capabilities</a><a href="#faq">FAQ</a></div>
+    <div className="foot-l"><b>Product</b><a href="#how">How it works</a><a href="#features">Features</a><a href="#capabilities">Capabilities</a><a href="#faq">FAQ</a><a href="#compare">Compare</a></div>
     <small>© 2026 Gerald. All rights reserved.</small>
   </footer>;
 }
@@ -341,7 +374,7 @@ function Landing() {
   return <>
     <Nav/>
     <main>
-      <Hero/><Subjects/><How/><Features/><Capabilities/><Facts/><Subjectsdark/><Privacy/><Faq/><Final/>
+      <Hero/><Subjects/><How/><Features/><Capabilities/><Facts/><Subjectsdark/><Privacy/><Faq/><Compare/><Final/>
     </main>
     <Footer/>
   </>;
