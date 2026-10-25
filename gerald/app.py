@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 from concurrent.futures import ThreadPoolExecutor
+import json
 import logging
 import os
 import sys
@@ -247,6 +248,12 @@ def main() -> int:
         set_runtime_grounder_backend,
     )
     from gerald.perception.elements import collect_elements_detailed, serialize_context
+    from gerald.library import Indexer, OpenAIEmbedder, Store
+    from gerald.library.context import course_search_results, profile_block
+    try:
+        from gerald.home import open_home
+    except ImportError:
+        open_home = None
 
     settings = load_settings()
     app = QApplication(sys.argv)
@@ -254,6 +261,9 @@ def main() -> int:
     if not settings.api_key:
         QMessageBox.critical(None, "Gerald", "Clé API manquante : définissez OPENAI_API_KEY dans .env.")
         return 1
+    store = Store()
+    embedder = OpenAIEmbedder(settings.api_key)
+    indexer = Indexer(store, embedder)
 
     class Bridge(QObject):
         key_down = pyqtSignal(str, float)
@@ -344,16 +354,28 @@ def main() -> int:
         return bool(result["approved"]) and not result["expired"]
 
     prompt = (Path(__file__).parent / "prompts" / "system_prompt.md").read_text(encoding="utf-8")
+
+    def current_agent_instructions() -> str:
+        return f"{prompt.rstrip()}\n\n{profile_block(store)}"
+
+    def search_course_documents(query: str, course: str | None = None) -> str:
+        return json.dumps(
+            course_search_results(store, embedder, query, course),
+            ensure_ascii=False,
+        )
+
     client = RealtimeClient(
         settings.api_key,
         settings.model,
         settings.voice,
-        prompt,
+        current_agent_instructions(),
         require_confirmation=settings.require_confirmation,
         request_action_confirmation=request_action_confirmation,
         on_board_tool=execute_board_tool,
+        on_course_search=search_course_documents,
         capture_after_action=capture_after_action,
         on_marks_visible=set_action_marks_visible,
+        store=store,
     )
     client.on_event = bridge.realtime_event.emit
     client.on_commands = bridge.commands.emit
@@ -380,6 +402,25 @@ def main() -> int:
                 bridge.capture_failed.emit(str(error))
 
         future.add_done_callback(report)
+
+    def on_library_changed() -> None:
+        schedule(client.update_instructions(current_agent_instructions()))
+
+    home_window = {"widget": None}
+
+    def open_home_window() -> None:
+        if open_home is None:
+            return
+        if home_window["widget"] is None:
+            home_window["widget"] = open_home(
+                store,
+                indexer,
+                settings,
+                on_library_changed,
+            )
+        home_window["widget"].show()
+        home_window["widget"].raise_()
+        home_window["widget"].activateWindow()
 
     app_state = {
         "pressed": set(),
@@ -702,6 +743,7 @@ def main() -> int:
         if not question.strip() or not app_state["active"] or not app_state["typed"]:
             return
         app_state["question"] = question.strip()
+        client.record_user_message(question.strip())
         app_state["released"] = True
         overlay.close_text_input()
         await_capture_after_release()
@@ -956,6 +998,9 @@ def main() -> int:
     bridge.realtime_event.connect(on_realtime_event)
     tray = QSystemTrayIcon(QIcon(app.style().standardIcon(QStyle.StandardPixmap.SP_ComputerIcon)), app)
     menu = QMenu()
+    if open_home is not None:
+        home_action = menu.addAction("Ouvrir Gerald")
+        home_action.triggered.connect(open_home_window)
     text_action = menu.addAction("Poser une question…")
     text_action.triggered.connect(open_typed_question)
     recap_action = menu.addAction("Récap de la leçon")
@@ -969,7 +1014,15 @@ def main() -> int:
     quit_action.triggered.connect(app.quit)
     tray.setContextMenu(menu)
     tray.setToolTip("Gerald — maintenez Ctrl+Maj pour parler")
+    if open_home is not None:
+        tray.activated.connect(
+            lambda reason: open_home_window()
+            if reason == QSystemTrayIcon.ActivationReason.DoubleClick
+            else None
+        )
     tray.show()
+    if open_home is not None and os.getenv("GERALD_START_HIDDEN") != "1":
+        open_home_window()
 
     def on_press(key) -> None:
         bridge.key_down.emit(_key_name(key), time.monotonic())
@@ -989,6 +1042,7 @@ def main() -> int:
         listener.stop()
         mic.stop()
         capture_executor.shutdown(wait=False, cancel_futures=True)
+        indexer.close()
         board.close()
         overlay.close()
         try:

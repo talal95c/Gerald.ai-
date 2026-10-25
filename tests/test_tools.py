@@ -41,6 +41,14 @@ def test_tool_schemas_use_plain_objects_without_conditional_keywords():
                 assert tool["parameters"]["properties"][key]["properties"]["text"]["type"] == "string"
 
 
+def test_search_courses_schema_requires_query_and_allows_course_title():
+    schema = next(tool for tool in TOOL_SCHEMAS if tool["name"] == "search_courses")
+
+    assert schema["parameters"]["required"] == ["query"]
+    assert schema["parameters"]["properties"]["query"]["type"] == "string"
+    assert schema["parameters"]["properties"]["course"]["type"] == "string"
+
+
 def test_tool_handlers_validate_and_map_image_sized_arguments():
     capture = capture_from_image(Image.new("RGB", (200, 100)), MonitorRect(20, 10, 200, 100), 100)
     elements = [Element(7, "Button", "Run", (10, 8, 20, 10), "uia")]

@@ -112,6 +112,15 @@ TOOL_SCHEMAS = [
         },
     ),
     _schema("save_recap", "Save the lesson recap as a Markdown file and open it.", {"markdown": {"type": "string"}}, ["markdown"]),
+    _schema(
+        "search_courses",
+        "Search the learner's course documents for relevant passages.",
+        {
+            "query": {"type": "string"},
+            "course": {"type": "string", "description": "Course title to search, if known"},
+        },
+        ["query"],
+    ),
     _schema("write", "Write text on the open teaching board.", {"text": {"type": "string"}, "x": {"type": "number"}, "y": {"type": "number"}, "size": {"type": "number"}}, ["text", "x", "y"]),
     _schema("write_math", "Write a math expression on the open teaching board.", {"latex": {"type": "string"}, "x": {"type": "number"}, "y": {"type": "number"}, "size": {"type": "number"}}, ["latex", "x", "y"]),
     _schema("draw_path", "Draw a path on the open teaching board.", {"points": {"type": "array", "items": {"type": "array", "items": {"type": "number"}, "minItems": 2, "maxItems": 2}}, "closed": {"type": "boolean"}}, ["points"]),
