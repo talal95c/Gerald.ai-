@@ -297,6 +297,7 @@ function TD(){
       return title?.innerText.trim()||element.getAttribute("aria-label")?.trim()||"Dialog";
     };
     const candidates=nodes.filter(element=>{
+      if(element.id==="canvas_minipaint")return true;
       const semantic=element.matches("button,a,input,select,[role='button'],[role='menuitem'],[title],[class*='layer']");
       return (semantic||clickable.has(element))&&!hasClickableAncestor(element);
     });
@@ -326,7 +327,9 @@ function TD(){
         ||element.getAttribute("title")?.trim()||element.getAttribute("aria-label")?.trim()
         ||inputText
         ||element.parentElement?.innerText?.trim()||"").trim();
-      const text=`${baseText}${checkbox?(checked?" ✓":" ✗"):""}`.trim();
+      const canvasLabel=element.id==="canvas_minipaint"?"Zone de dessin (canvas principal, glisser ici pour tracer)"
+        :element.id==="canvas_preview"?"Aperçu (miniature, pas la zone de dessin)":"";
+      const text=canvasLabel||`${baseText}${checkbox?(checked?" ✓":" ✗"):""}`.trim();
       const containingDialog=dialogs.filter(dialog=>dialog.contains(element)).pop();
       return {order:index,item:{
         id,text,active,selected,checked:checkbox?checked:undefined,isColor:input?.type==="color"||input?.id==="color_hex",
@@ -339,11 +342,17 @@ function TD(){
       ||Number(b.item.active||b.item.selected)-Number(a.item.active||a.item.selected)
       ||a.order-b.order).slice(0,150).map(entry=>entry.item);
   };
-  const paintTargetRect=(args:Record<string,any>):Rect|null=>{
+  const paintTargetRect=(args:Record<string,any>,scroll=true):Rect|null=>{
     const elements=paintElements();
     const element=elements.find(item=>item.id===Number(args.element_id))
       ??(typeof args.target_text==="string"?elements.find(item=>textPattern(args.target_text).test(item.text)):undefined);
-    return element?.rect??null;
+    if(!element)return null;
+    const iframe=paintFrame.current,node=iframe?.contentDocument?.querySelector<HTMLElement>(`[data-gerald-id="${element.id}"]`);
+    if(!iframe||!node)return element.rect;
+    if(scroll)node.scrollIntoView({block:"nearest",inline:"nearest"});
+    const frameRect=iframe.getBoundingClientRect(),rect=node.getBoundingClientRect();
+    const scaleX=frameRect.width/Math.max(1,iframe.clientWidth),scaleY=frameRect.height/Math.max(1,iframe.clientHeight);
+    return {x:frameRect.x+rect.x*scaleX,y:frameRect.y+rect.y*scaleY,w:rect.width*scaleX,h:rect.height*scaleY};
   };
   const elements=():ViewElement[]=>paintMode?paintElements():[...document.querySelectorAll<HTMLElement>("[data-gerald-id]")].filter(e=>e.getClientRects().length).map(e=>{const r=e.getBoundingClientRect();return {id:Number(e.dataset.geraldId),text:(e instanceof HTMLInputElement?e.value||e.placeholder:e.innerText||"").trim(),rect:{x:r.x,y:r.y,w:r.width,h:r.height}};});
   const annotationOccupants=(target?:AnnotationRect,extra:AnnotationRect[]=[]):AnnotationRect[]=>[
@@ -376,11 +385,12 @@ function TD(){
     const fromIsPoint=name==="arrow"&&typeof fromArgs.x==="number"&&typeof fromArgs.y==="number"
       &&typeof fromArgs.w!=="number"&&typeof fromArgs.h!=="number"
       &&typeof fromArgs.target_text!=="string"&&typeof fromArgs.element_id!=="number";
-    const from=name==="arrow"&&fromIsPoint
+    let from=name==="arrow"&&fromIsPoint
       ?{x:fromArgs.x,y:fromArgs.y,w:0,h:0}
       :name==="arrow"?resolveTarget(fromArgs):resolveTarget(args);
     const to=name==="arrow"?resolveTarget(args.to??{}):null;
     const boardClosedHint=boardOpenRef.current?"":" Le tableau est fermé : ce texte n’existe peut-être que sur le tableau. Si l’élève parle de ce qu’il y a écrit, appelle toi-même open_board dans ce même tour, puis refais l’annotation sur le tableau ; ne lui demande pas de le rouvrir. Sinon, vise un élément visible du TD ci-dessus.";
+    if(paintMode&&name==="arrow"&&from&&!fromIsPoint)from=paintTargetRect(args.from??{},false);
     if(name==="arrow"&&!to){
       const visible=elements().slice(0,40).map(e=>`[${e.id}] ${e.text.slice(0,100)}`).join("; ");
       return {ok:false,error:`arrow target was not found. Visible targets: ${visible}${boardClosedHint}`};
