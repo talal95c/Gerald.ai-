@@ -201,6 +201,45 @@ def annotate(image: Image.Image, marks: list[dict[str, Any]], board_ops: list[di
     return Image.alpha_composite(canvas, layer).convert("RGB")
 
 
+def render_rich(image: Image.Image, commands: list[object]) -> Image.Image:
+    """Render diagrams and tips the way Gerald's overlay shows them (Qt offscreen)."""
+    rich = [c for c in commands if type(c).__name__ in {"DiagramCommand", "TipCommand"}]
+    if not rich:
+        return image
+    from PyQt6.QtGui import QColor, QFont, QImage, QPainter
+    from PyQt6.QtCore import QRectF, Qt
+    from PyQt6.QtWidgets import QApplication
+
+    _app = QApplication.instance() or QApplication([])
+    rgba = image.convert("RGBA")
+    qimage = QImage(rgba.tobytes(), rgba.width, rgba.height, QImage.Format.Format_RGBA8888).copy()
+    painter = QPainter(qimage)
+    painter.setRenderHint(QPainter.RenderHint.Antialiasing)
+    tip_y = 24
+    for command in rich:
+        if type(command).__name__ == "DiagramCommand":
+            from gerald.tools.diagram_render import draw_diagram
+            layout = command.layout
+            scale = max(0.85, min(1.0, rgba.width * 0.46 / max(1, layout.width), rgba.height * 0.6 / max(1, layout.height)))
+            x = rgba.width - layout.width * scale - 24
+            y = rgba.height - layout.height * scale - 24
+            draw_diagram(painter, layout, x, y, scale, 10.0)
+        else:
+            font = QFont("DejaVu Sans")
+            font.setPixelSize(15)
+            painter.setFont(font)
+            rect = QRectF(rgba.width - 380, tip_y, 340, 64)
+            painter.setPen(QColor("#0A84FF"))
+            painter.setBrush(QColor(255, 255, 255, 250))
+            painter.drawRoundedRect(rect, 14, 14)
+            painter.setPen(QColor("#1D1D1F"))
+            painter.drawText(rect.adjusted(14, 8, -14, -8), Qt.TextFlag.TextWordWrap | Qt.AlignmentFlag.AlignVCenter, f"[tip] {command.text}")
+            tip_y += 76
+    painter.end()
+    buffer = qimage.bits().asstring(qimage.sizeInBytes())
+    return Image.frombuffer("RGBA", (qimage.width(), qimage.height()), buffer, "raw", "RGBA", qimage.bytesPerLine(), 1).convert("RGB")
+
+
 def setup_store(home: Path, profile: dict[str, Any], course_docs: bool, api_key: str) -> tuple[Store, OpenAIEmbedder]:
     store = Store(home)
     store.save_profile(profile["name"], profile.get("level"), profile.get("subjects", []))
@@ -223,7 +262,7 @@ async def run_scenario(scenario: dict[str, Any], defaults: dict[str, Any], setti
     state: dict[str, Any] = {}
 
     def reset_turn() -> None:
-        state.update(transcript=[], tool_calls=[], marks=[], board_ops=[], done=asyncio.Event(), t0=time.monotonic(), t_audio=None, t_done=None)
+        state.update(transcript=[], tool_calls=[], marks=[], raw=[], board_ops=[], done=asyncio.Event(), t0=time.monotonic(), t_audio=None, t_done=None)
 
     reset_turn()
     loop = asyncio.get_running_loop()
@@ -250,6 +289,7 @@ async def run_scenario(scenario: dict[str, Any], defaults: dict[str, Any], setti
 
     def on_commands(commands: list[object]) -> None:
         state["marks"].extend(command_json(command) for command in commands)
+        state["raw"].extend(commands)
 
     def on_board_tool(name: str, args: dict[str, Any]) -> str:
         state["board_ops"].append({"name": name, "args": args})
@@ -293,6 +333,7 @@ async def run_scenario(scenario: dict[str, Any], defaults: dict[str, Any], setti
             target_ids = turn.get("targets", scenario.get("targets", []))
             targets = [targets_by_page[page][t] for t in target_ids if t in targets_by_page.get(page, {})]
             annotated = annotate(image, [m for m in state["marks"] if m["type"] != "ClearCommand"], [b for b in state["board_ops"] if b["name"] != "clear_gerald"], capture.scale)
+            annotated = render_rich(annotated, state["raw"])
             image_path = out / f"{scenario['id']}-t{index}.png"
             annotated.save(image_path)
             turns_out.append({
@@ -438,6 +479,7 @@ async def main() -> int:
     parser.add_argument("--only", default="")
     parser.add_argument("--judge-model", default="gpt-5.5")
     parser.add_argument("--no-judge", action="store_true")
+    parser.add_argument("--prompt", default=str(ROOT / "gerald" / "prompts" / "system_prompt.md"))
     args = parser.parse_args()
     settings = load_settings()
     if not settings.api_key:
@@ -447,13 +489,17 @@ async def main() -> int:
     scenarios = [s for s in spec["scenarios"] if not only or s["id"] in only]
     out = HERE / "results" / f"{datetime.now():%Y%m%d-%H%M%S}-{args.label}"
     out.mkdir(parents=True)
-    prompt = (ROOT / "gerald" / "prompts" / "system_prompt.md").read_text(encoding="utf-8")
+    prompt = Path(args.prompt).read_text(encoding="utf-8")
     rubric = (HERE / "rubric.md").read_text(encoding="utf-8")
     results = []
     for scenario in scenarios:
         print(f"== {scenario['id']}", flush=True)
         try:
             result = await run_scenario(scenario, spec["default_profile"], settings, out, prompt)
+            if any(not turn["transcript"] and not turn["tool_calls"] and turn["t_done"] is None for turn in result["turns"]):
+                print("   empty turn (transport drop?) — retrying once", flush=True)
+                result = await run_scenario(scenario, spec["default_profile"], settings, out, prompt)
+                result["retried"] = True
         except Exception as error:  # keep going; a crashed scenario is a finding
             results.append({"id": scenario["id"], "category": scenario["category"], "checks": {"ran": False}, "error": repr(error)[:300]})
             print(f"   error: {error!r}", flush=True)
