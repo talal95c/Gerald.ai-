@@ -42,6 +42,8 @@ function App() {
       if (event.source !== frame.current?.contentWindow) return;
       if (event.data?.type === "gerald-last-exercise") {
         lastExercise.current = {title: String(event.data.title), lines: Array.isArray(event.data.lines) ? event.data.lines.map(String) : []};
+      } else if (event.data?.type === "gerald-ready" && held.current) {
+        frame.current?.contentWindow?.postMessage({type: "gerald-hotkey", pressed: true}, location.origin);
       }
     };
     window.addEventListener("gerald-open-document", openDocument);

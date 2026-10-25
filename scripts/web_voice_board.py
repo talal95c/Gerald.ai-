@@ -20,6 +20,7 @@ from gerald.tools.registry import TOOL_SCHEMAS
 ROOT = Path(__file__).resolve().parents[1]
 WEB_ROOT = ROOT / "gerald" / "home" / "webui"
 SYSTEM_PROMPT = ROOT / "gerald" / "prompts" / "system_prompt.md"
+PAINT_MODE_GUIDANCE = ROOT / "scripts" / "paint_mode_guidance.txt"
 DEFAULT_TITLE = "Exercice 1"
 DEFAULT_LINES = ["Résous dans ℝ : x² − 5x + 6 = 0"]
 WEB_TOOL_NAMES = {
@@ -48,6 +49,7 @@ INTENT_TOOL_NAMES = {
     "tip",
 }
 INTENT_VALUES = ["correction", "valide", "remarque"]
+PAINT_TOOL_ORDER = ("point", "circle", "arrow", "highlight", "note", "tip", "clear_gerald")
 COLOR_GUIDANCE = (
     "Code couleur : rouge (intent=correction) pour signaler une erreur ou la correction, "
     "vert (intent=valide) pour ce qui est juste, bleu (intent=remarque) pour une remarque "
@@ -65,7 +67,11 @@ MAX_BODY_BYTES = 1_000_000
 logger = logging.getLogger("web_voice_board")
 
 
-def _web_tools(live_mode: bool = False, doc_mode: bool = False) -> list[dict]:
+def _web_tools(
+    live_mode: bool = False,
+    doc_mode: bool = False,
+    paint_mode: bool = False,
+) -> list[dict]:
     def preserve_targets(schema: dict) -> None:
         properties = schema.get("properties")
         if isinstance(properties, dict):
@@ -84,6 +90,8 @@ def _web_tools(live_mode: bool = False, doc_mode: bool = False) -> list[dict]:
     tools = []
     for tool in TOOL_SCHEMAS:
         if tool["name"] not in WEB_TOOL_NAMES or tool["name"] == "tip":
+            continue
+        if paint_mode and tool["name"] not in PAINT_TOOL_ORDER:
             continue
         schema = deepcopy(tool["parameters"])
         preserve_targets(schema)
@@ -154,7 +162,9 @@ def _web_tools(live_mode: bool = False, doc_mode: bool = False) -> list[dict]:
             },
         }
     )
-    if doc_mode:
+    if paint_mode:
+        tools.sort(key=lambda tool: PAINT_TOOL_ORDER.index(tool["name"]))
+    elif doc_mode:
         tools.append(
             {
                 "type": "function",
@@ -203,8 +213,12 @@ def session_instructions(
     lines: list[str] | None = None,
     live_mode: bool = False,
     doc_mode: bool = False,
+    paint_mode: bool = False,
 ) -> str:
     prompt = SYSTEM_PROMPT.read_text(encoding="utf-8")
+    if paint_mode:
+        paint_guidance = PAINT_MODE_GUIDANCE.read_text(encoding="utf-8")
+        return f"{paint_guidance}{COLOR_GUIDANCE}"
     board_guidance = (
         "Pour cibler une écriture manuscrite, choisis l'element_id de sa boîte « encre élève #n » "
         "plutôt que des coordonnées devinées. Sur le tableau, utilise write_math avec du LaTeX "
@@ -277,12 +291,19 @@ def build_session_config(
     lines: list[str] | None = None,
     live_mode: bool = False,
     doc_mode: bool = False,
+    paint_mode: bool = False,
 ) -> dict:
-    tools = _web_tools(live_mode, doc_mode) if live_mode or doc_mode else deepcopy(WEB_TOOLS)
+    tools = (
+        _web_tools(paint_mode=True)
+        if paint_mode
+        else _web_tools(live_mode, doc_mode)
+        if live_mode or doc_mode
+        else deepcopy(WEB_TOOLS)
+    )
     return {
         "type": "realtime",
         "model": model,
-        "instructions": session_instructions(title, lines, live_mode, doc_mode),
+        "instructions": session_instructions(title, lines, live_mode, doc_mode, paint_mode),
         "audio": {
             "output": {"voice": os.getenv("GERALD_VOICE", "marin")},
             "input": {
@@ -495,7 +516,10 @@ class WebVoiceHandler(SimpleHTTPRequestHandler):
             query_values = parse_qs(query)
             live_mode = query_values.get("live", ["0"])[-1] == "1"
             doc_mode = query_values.get("mode", [""])[-1] == "doc"
-            if doc_mode:
+            paint_mode = query_values.get("mode", [""])[-1] == "paint"
+            if paint_mode:
+                title, lines = "", []
+            elif doc_mode:
                 title, lines = sanitize_document_title(query_values.get("title", [""])[-1]), []
             else:
                 title, lines = ("", []) if live_mode else _parse_exercise(query)
@@ -507,7 +531,7 @@ class WebVoiceHandler(SimpleHTTPRequestHandler):
             return
 
         model = os.getenv("GERALD_MODEL", "gpt-realtime-2").strip() or "gpt-realtime-2"
-        session = build_session_config(model, title, lines, live_mode, doc_mode)
+        session = build_session_config(model, title, lines, live_mode, doc_mode, paint_mode)
         body, content_type = build_multipart(sdp, session)
         request = Request(
             OPENAI_REALTIME_CALLS,

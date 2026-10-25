@@ -265,6 +265,30 @@ def test_document_title_sanitization_strips_controls_and_limits_length():
     assert len(sanitized) == 120
 
 
+def test_paint_mode_uses_guidance_and_exact_tool_list():
+    config = web_voice_board.build_session_config("gpt-realtime-2", paint_mode=True)
+    guidance = web_voice_board.PAINT_MODE_GUIDANCE.read_text(encoding="utf-8")
+    assert config["instructions"].startswith(guidance)
+    assert config["instructions"].endswith(web_voice_board.COLOR_GUIDANCE)
+    assert [tool["name"] for tool in config["tools"]] == [
+        "point",
+        "circle",
+        "arrow",
+        "highlight",
+        "note",
+        "tip",
+        "clear_gerald",
+    ]
+    assert "write" not in {tool["name"] for tool in config["tools"]}
+    assert "plot" not in {tool["name"] for tool in config["tools"]}
+    assert "open_board" not in {tool["name"] for tool in config["tools"]}
+
+
+def test_minipaint_index_is_served(server):
+    status, _body, _headers = _request(server, "GET", "/vendor/minipaint/index.html")
+    assert status == 200
+
+
 def test_plot_endpoint_returns_root_and_vertex_points(server):
     payload = {
         "functions": [{"expr": "x**2-5*x+6", "label": "f(x)"}],
