@@ -8,7 +8,7 @@ import { Reveal } from "./reveal";
 const bridge = getBridge();
 const tabs = ["Tableau", "Documents", "Historique", "Raccourcis"];
 type Recap = {path: string; title: string; created_at: string};
-type NotchState = AppState & {recaps?: Recap[]};
+type NotchState = AppState & {recaps?: Recap[]; recap_error?: string | null};
 type HistoryMessage = {role: string; text: string; created_at?: string};
 const emptyState: NotchState = {
   greeting: "Bonjour.", hotkey_label: "CTRL + SHIFT", documents: [],
@@ -188,10 +188,11 @@ function App() {
     <div className="bar">
       <span className="status"><Orb status={status} size={28}/><span>{active ? statusText[status] ?? status : state.hotkey_label}</span></span>
       <NavBar active={mode === "settings" ? tab : mode === "document" ? "Documents" : ""} onChange={pick}/>
-      {state.session_open ? <button className="end" onClick={()=>bridge.endSession()}>{state.recap_pending ? "Fiche…" : "Fin de session"}</button>
+      {state.session_open ? <button className="end" title={state.recap_error || undefined} onClick={()=>bridge.endSession()}>{state.recap_pending ? "Fiche…" : state.recap_error ? "Réessayer la fiche" : "Fin de session"}</button>
         : recap ? <button className="end" onClick={()=>bridge.openRecap(recap)}>Fiche →</button>
         : <button className="quit" onClick={()=>bridge.quit()} aria-label="Quitter">⏻</button>}
     </div>
+    {state.session_open && state.recap_error && !state.recap_pending && <p className="recap-error" role="status">{state.recap_error}</p>}
     {(mode === "settings" || mode === "document") && <div className={`content ${mode === "document" ? "document-content" : ""}`} key={tab}>
       {(mode === "document" || tab === "Documents") && <Folders
         docs={state.documents} recaps={state.recaps ?? []} hotkey={state.hotkey_label}
