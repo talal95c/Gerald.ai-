@@ -223,6 +223,8 @@ class Bridge(QObject):
         if candidates:
             self._recap_timer.stop()
             self._recap_requested_at = None
+            self._session_open = False
+            self.sessionOpenChanged.emit(False)
             self.recapReady.emit(str(max(candidates, key=lambda path: path.stat().st_mtime)))
             self.stateChanged.emit(self.state())
 

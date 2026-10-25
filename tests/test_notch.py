@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import threading
 import time
 from types import SimpleNamespace
 
@@ -8,6 +9,9 @@ from PyQt6.QtTest import QTest
 from PyQt6.QtWidgets import QWidget
 
 from gerald.home.bridge import Bridge, greeting_for_hour
+from gerald.home.demo import seed_demo
+from gerald.home.events import events
+from fakes_library import FakeIndexer, FakeStore
 
 
 class EmptyStore:
@@ -60,6 +64,49 @@ def test_bridge_open_board_passes_exercise_and_tracks_session():
 
     assert opened == [("Exercice 2", ["Résous x² − 1 = 0"])]
     assert bridge._session_open
+
+
+def test_seed_demo_is_idempotent():
+    store = FakeStore()
+    indexer = FakeIndexer(store)
+
+    seed_demo(store, indexer)
+    seed_demo(store, indexer)
+
+    assert store.get_profile().name == ""
+    assert [course.title for course in store.list_courses()] == ["Maths — Second degré"]
+    documents = store.list_documents(store.list_courses()[0].id)
+    assert len(documents) == 3
+    assert len(store.calls["add_document"]) == 3
+
+
+def test_end_session_discovers_recap_and_closes_session(tmp_path):
+    bridge = Bridge(EmptyStore(), object(), object())
+    bridge._recap_dir = tmp_path
+    bridge._session_open = True
+    bridge._recap_requested_at = time.time() - 1
+    recap = tmp_path / "fiche.md"
+    recap.write_text("# Révision", encoding="utf-8")
+    received = []
+    bridge.recapReady.connect(received.append)
+
+    bridge._find_recap()
+
+    assert received == [str(recap)]
+    assert not bridge._session_open
+
+
+def test_document_completion_from_worker_thread_updates_state(qapplication):
+    bridge = Bridge(EmptyStore(), object(), object())
+    updates = []
+    bridge.stateChanged.connect(updates.append)
+
+    worker = threading.Thread(target=lambda: events.on_done(object()))
+    worker.start()
+    worker.join()
+    QTest.qWait(20)
+
+    assert updates
 
 
 def test_open_home_returns_a_stable_cached_widget(qapplication, monkeypatch):

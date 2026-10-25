@@ -56,17 +56,11 @@ servent de repli si une valeur n'est pas enregistrée.
 
 ## App
 
-L’app compagnon guide ton onboarding, puis organise ton profil, tes cours et leurs documents.
-Choisis l’un des cinq profs illustrés ; tu peux le changer à tout moment dans Réglages.
-Ajoute des fichiers par glisser-déposer ou via le sélecteur, suis l’indexation et prends des notes.
-Pose des questions sur un cours ou toute ta bibliothèque, puis retrouve l’historique des discussions
-et les sources des réponses. Les conversations de l’agent sont consultables en lecture seule.
-L’interface s’ouvre via `open_home(store, indexer, settings, on_library_changed)` une fois le branchement effectué.
-![Accueil de l’app](docs/app-home.png) ![Page d’un cours](docs/app-course.png)
-Captures : [prénom](docs/app-onboarding-1-name.png), [choix du prof](docs/app-onboarding-2-prof.png),
-[niveau](docs/app-onboarding-3-level.png), [matières](docs/app-onboarding-4-subjects.png),
-[documents](docs/app-onboarding-5-documents.png), [chat](docs/app-chat.png) et
-[discussions](docs/app-discussions.png).
+L’encoche de Gerald ouvre rapidement le chat, les réglages et les documents de démonstration.
+Le TD local « Polynômes du second degré » s’ouvre à côté; choisis un exercice pour le travailler
+sur le tableau blanc, puis termine la session pour retrouver la fiche de révision.
+Les pages et les polices de l’interface sont compilées dans `gerald/home/webui/`; aucun accès
+réseau n’est requis pour afficher le TD ou les formules KaTeX.
 
 ## Free GPU fallback (Colab)
 
