@@ -1,0 +1,50 @@
+{
+ "cover": {
+  "text": "Gerald. The private tutor that lives on your screen. It sees, it talks, it draws. It doesn't give you the answer: it helps you find it.",
+  "dur": 10.76
+ },
+ "problem": {
+  "text": "Learning alone in front of a screen means learning with nobody next to you. Chatbots solve the exercise for you, so you copy it and you don't understand it. They can't see your screen. And a real tutor who points, draws and makes you think is rare, and expensive. In France, maths scores just dropped twenty-one points, a historic low.",
+  "dur": 21.97
+ },
+ "solution": {
+  "text": "Our answer: hold a key, speak, and Gerald looks at your screen and explains, like a tutor sitting right next to you. It sees, one screenshot, only while you hold the shortcut. It talks, natural real-time voice. It draws: circles, points, exact curves on your board. And it guides, one step at a time, then your turn.",
+  "dur": 24.27
+ },
+ "demo": {
+  "text": "Let's see it live. Two features: maths at the board, and a real app, Photoshop.",
+  "dur": 7.73
+ },
+ "demoMath": {
+  "text": "The student opens the worksheet, exercise one: x squared minus five x plus six equals zero. They ask Gerald for help. Gerald doesn't solve it. It opens the board and plots the exact parabola, so the student can see where the curve crosses the axis. Then it hands the pen back: compute delta, and find the two roots yourself.",
+  "dur": 22.13
+ },
+ "demoPs": {
+  "text": "Same engine, any app. Here, Photoshop. The student says: I need a red square. Gerald sees the screen, points at the shapes panel, then the rectangle. It guides them to the fill colour, hex f f zero zero zero zero. And the student drags the square. Gerald never clicks for you. It points, you do.",
+  "dur": 21.81
+ },
+ "hood": {
+  "text": "Under the hood, one voice turn goes from keypress to ink in five steps: push-to-talk capture, perception with accessibility tree, OCR and Moondream grounding, the brain, gpt realtime two over a single websocket, validated tool calls, and a transparent overlay that renders the ink.",
+  "dur": 20.56
+ },
+ "harness": {
+  "text": "We don't guess whether Gerald teaches well. We measure it: seventeen rendered scenarios, real model turns, and a judge with eight pedagogical criteria. Our tutor-first prompt went from seventy-seven to over ninety percent.",
+  "dur": 16.27
+ },
+ "pointing": {
+  "text": "Models see well but aim badly: about ninety pixels of error. So we anchor every gesture: accessibility element first, then OCR word, then a visual grounder. Eight out of ten targets, in under a second, for a fraction of a cent.",
+  "dur": 18.89
+ },
+ "trust": {
+  "text": "A tutor on your screen, not a spy. Vision on demand, real consent before any action, hard guardrails, and your courses indexed locally.",
+  "dur": 11.65
+ },
+ "next": {
+  "text": "Today: Windows, the board, a maths worksheet and the harness. Next: student memory and revision sheets. Then macOS and iPad, pen first. Our vision: teachers load their worksheets, and Gerald supports every student.",
+  "dur": 16.35
+ },
+ "thanks": {
+  "text": "Gerald. Doesn't give you the answer. Helps you find it. Thank you.",
+  "dur": 5.46
+ }
+}
