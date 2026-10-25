@@ -15,6 +15,7 @@ import threading
 import time
 from typing import Callable, Literal, Protocol
 
+import numpy as np
 from PIL import Image, ImageOps, ImageStat
 
 from gerald.capture.screen import Capture, MonitorRect, capture_from_image
@@ -229,12 +230,57 @@ def _windows_inverted_strips(
             strip = source.crop((0, strip_top, source.width, strip_bottom))
             luminance = ImageStat.Stat(strip.convert("L")).mean[0]
             saturation = ImageStat.Stat(strip.convert("HSV")).mean[1]
-            if luminance < 140 or saturation > 48:
+            if luminance < 140 or saturation > 16:
                 candidates.append(
                     (max(255 - luminance, saturation), band_index, strip_top, strip_bottom)
                 )
     selected = sorted(candidates, reverse=True)[:limit]
     return [(band_index, top, bottom) for _score, band_index, top, bottom in selected]
+
+
+def _tesseract_inverted_regions(
+    source: Image.Image,
+    bands: list[tuple[int, int]],
+    *,
+    limit: int = 6,
+) -> list[tuple[int, int, int, int]]:
+    regions = []
+    narrow_bands = []
+    for band_top, band_bottom in bands:
+        top = band_top
+        while top < band_bottom:
+            narrow_bands.append((top, min(band_bottom, top + 48)))
+            top += 32
+    for _band_index, top, bottom in _windows_inverted_strips(
+        source, narrow_bands, limit=limit
+    ):
+        strip = source.crop((0, top, source.width, bottom))
+        saturation = np.asarray(strip.convert("HSV"))[:, :, 1]
+        active = np.count_nonzero(saturation > 96, axis=0) >= max(4, strip.height // 10)
+        runs = []
+        start = None
+        for x, selected in enumerate(active):
+            if selected and start is None:
+                start = x
+            elif not selected and start is not None:
+                if x - start >= 30:
+                    runs.append((start, x))
+                start = None
+        if start is not None and source.width - start >= 30:
+            runs.append((start, source.width))
+        if runs:
+            regions.extend(
+                (
+                    max(0, left - 24),
+                    max(0, top - 20),
+                    min(source.width, right + 24),
+                    min(source.height, bottom + 20),
+                )
+                for left, right in runs
+            )
+        elif ImageStat.Stat(strip.convert("L")).mean[0] < 140:
+            regions.append((0, top, source.width, bottom))
+    return list(dict.fromkeys(regions))
 
 
 async def _run_windows_ocr_passes(
@@ -383,19 +429,29 @@ class OCRProvider:
             if deadline is not None and deadline <= time.monotonic():
                 return [], False, time.monotonic() - started
 
-            def recognize(tile_index: int, top: int, bottom: int) -> list[OCRWord]:
+            def recognize(
+                tile_index: int,
+                top: int,
+                bottom: int,
+                inverted: bool = False,
+                left: int = 0,
+                right: int | None = None,
+            ) -> list[OCRWord]:
                 remaining = None if deadline is None else deadline - time.monotonic()
                 if remaining is not None and remaining <= 0:
                     return []
-                tile = image.crop((0, top, image.width, bottom))
-                if image_scale != 1:
+                tile = image.crop((left, top, right or image.width, bottom))
+                if inverted:
+                    tile = ImageOps.invert(tile.convert("RGB"))
+                recognition_scale = 1 if inverted else image_scale
+                if recognition_scale != 1:
                     tile = tile.resize(
-                        (tile.width * image_scale, tile.height * image_scale),
+                        (tile.width * recognition_scale, tile.height * recognition_scale),
                         Image.Resampling.LANCZOS,
                     )
                 kwargs = {
                     "output_type": pytesseract.Output.DICT,
-                    "config": f"--psm {self.psm} -c omp_thread_limit=1",
+                    "config": f"--psm {6 if inverted else self.psm} -c omp_thread_limit=1",
                     "lang": language,
                 }
                 if remaining is not None:
@@ -410,10 +466,10 @@ class OCRProvider:
                         continue
                     if not text or confidence < 50 or not any(character.isalnum() for character in text):
                         continue
-                    left = round(int(data["left"][index]) / image_scale)
-                    local_top = round(int(data["top"][index]) / image_scale)
-                    width = max(1, round(int(data["width"][index]) / image_scale))
-                    height = max(1, round(int(data["height"][index]) / image_scale))
+                    word_left = left + round(int(data["left"][index]) / recognition_scale)
+                    local_top = round(int(data["top"][index]) / recognition_scale)
+                    width = max(1, round(int(data["width"][index]) / recognition_scale))
+                    height = max(1, round(int(data["height"][index]) / recognition_scale))
                     line = (
                         tile_index,
                         int(data["block_num"][index]),
@@ -421,7 +477,7 @@ class OCRProvider:
                         int(data["line_num"][index]),
                     )
                     found.append(
-                        (text, (left, top + local_top, width, height), confidence, line)
+                        (text, (word_left, top + local_top, width, height), confidence, line)
                     )
                 return found
 
@@ -470,6 +526,27 @@ class OCRProvider:
                 for future in pending:
                     future.cancel()
                 executor.shutdown(wait=False, cancel_futures=True)
+            result = _elements_from_ocr_words(_dedupe_ocr_words(words), capture)
+            for strip_index, (left, top, right, bottom) in enumerate(
+                _tesseract_inverted_regions(image, tile_specs, limit=6)
+            ):
+                if deadline is not None and deadline <= time.monotonic():
+                    break
+                try:
+                    words.extend(
+                        recognize(
+                            len(tile_specs) + 2 + strip_index,
+                            top,
+                            bottom,
+                            inverted=True,
+                            left=left,
+                            right=right,
+                        )
+                    )
+                except Exception:
+                    logger.debug("Tesseract inverted strip failed", exc_info=True)
+                if on_partial is not None:
+                    on_partial(_elements_from_ocr_words(_dedupe_ocr_words(words), capture))
             result = _elements_from_ocr_words(_dedupe_ocr_words(words), capture)
             return result, complete, time.monotonic() - started
         except Exception:

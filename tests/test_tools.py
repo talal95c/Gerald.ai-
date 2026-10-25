@@ -10,12 +10,14 @@ from gerald.tools.registry import (
     ClearCommand,
     PointCommand,
     TOOL_SCHEMAS,
+    TipCommand,
     execute_tool,
 )
+from gerald.tools.diagram import DiagramCommand
 
 
 def test_tool_schemas_use_plain_objects_without_conditional_keywords():
-    forbidden = {"oneOf", "anyOf", "allOf", "enum", "const", "not"}
+    forbidden = {"oneOf", "anyOf", "allOf", "const", "not"}
 
     def contains_forbidden(value):
         if isinstance(value, dict):
@@ -39,6 +41,8 @@ def test_tool_schemas_use_plain_objects_without_conditional_keywords():
             target_keys = {"from", "to"} if tool["name"] == "arrow" else {"a", "b"}
             for key in target_keys:
                 assert tool["parameters"]["properties"][key]["properties"]["text"]["type"] == "string"
+    diagram_schema = next(tool for tool in TOOL_SCHEMAS if tool["name"] == "diagram")
+    assert diagram_schema["parameters"]["properties"]["layout"]["enum"] == ["flow", "tree", "cycle"]
 
 
 def test_search_courses_schema_requires_query_and_allows_course_title():
@@ -88,3 +92,29 @@ def test_text_target_errors_are_returned_to_the_model():
         "ok": False,
         "error": "text not found on screen: Missing",
     }
+
+
+def test_tip_tool_validates_text_and_truncates_to_160_characters():
+    capture = capture_from_image(Image.new("RGB", (20, 20)), MonitorRect(0, 0, 20, 20))
+    commands, result = execute_tool("tip", {"text": "  " + "a" * 200 + " "}, capture, [])
+    assert commands == [TipCommand("a" * 160)]
+    assert json.loads(result) == {"ok": True}
+    commands, result = execute_tool("tip", {"text": "  "}, capture, [])
+    assert commands == []
+    assert json.loads(result) == {"ok": False, "error": "text must be a non-empty string"}
+
+
+def test_diagram_tool_returns_command_and_model_facing_validation_error():
+    capture = capture_from_image(Image.new("RGB", (20, 20)), MonitorRect(0, 0, 20, 20))
+    args = {
+        "layout": "flow",
+        "nodes": [{"id": "a", "text": "Start"}, {"id": "b", "text": "Finish"}],
+        "edges": [{"from": "a", "to": "b"}],
+    }
+    commands, result = execute_tool("diagram", args, capture, [])
+    assert len(commands) == 1
+    assert isinstance(commands[0], DiagramCommand)
+    assert json.loads(result) == {"ok": True}
+    commands, result = execute_tool("diagram", {**args, "edges": [{"from": "x", "to": "b"}]}, capture, [])
+    assert commands == []
+    assert json.loads(result) == {"ok": False, "error": "edge references an unknown node id"}

@@ -1,5 +1,6 @@
 import asyncio
 import json
+from pathlib import Path
 import sys
 import threading
 from types import ModuleType, SimpleNamespace
@@ -32,6 +33,34 @@ def make_capture():
         Image.new("RGB", (400, 200), "white"),
         MonitorRect(-1000, 40, 400, 200),
         max_width=100,
+    )
+
+
+def _grounding_asset_capture(name):
+    image = Image.open(Path(__file__).parent / "fixtures" / name).convert("RGB")
+    return capture_from_image(
+        image,
+        MonitorRect(0, 0, image.width, image.height),
+        max_width=image.width,
+    )
+
+
+def _tesseract_asset_elements(capture):
+    pytesseract = pytest.importorskip("pytesseract")
+    try:
+        pytesseract.get_tesseract_version()
+    except Exception:
+        pytest.skip("Tesseract is unavailable")
+    return OCRProvider(backend="tesseract", psm=6).get_elements(capture)
+
+
+def _intersects_target(rect, target):
+    x, y, width, height = target
+    return (
+        rect.x < x + width
+        and rect.x + rect.w > x
+        and rect.y < y + height
+        and rect.y + rect.h > y
     )
 
 
@@ -329,6 +358,102 @@ def test_visual_snap_selects_a_small_icon_component():
     assert result.rect.x < 132 and result.rect.y < 82
     assert result.rect.x + result.rect.w > 147
     assert result.rect.y + result.rect.h > 102
+
+
+def test_line_match_joins_consecutive_ocr_elements_and_returns_span_only():
+    capture = capture_from_image(
+        Image.new("RGB", (400, 200), "white"),
+        MonitorRect(0, 0, 400, 200),
+        max_width=400,
+    )
+    elements = [
+        Element(1, "Text", "return", (10, 10, 42, 12), "ocr"),
+        Element(2, "Text", "total", (58, 10, 38, 12), "ocr"),
+        Element(3, "Text", "/", (100, 10, 6, 12), "ocr"),
+        Element(4, "Text", "(len(notes)", (110, 10, 76, 12), "ocr"),
+        Element(5, "Text", "-", (190, 10, 6, 12), "ocr"),
+        Element(6, "Text", "1)", (202, 10, 12, 12), "ocr"),
+    ]
+
+    result = resolve_target({"text": "total / (len(notes)"}, capture, elements)
+
+    assert result == ScreenRect(58, 10, 128, 12)
+
+
+def test_french_elision_matches_token_with_curly_apostrophe():
+    capture = capture_from_image(
+        Image.new("RGB", (400, 200), "white"),
+        MonitorRect(0, 0, 400, 200),
+        max_width=400,
+    )
+    element = Element(1, "Text", "l’évaporation,", (20, 30, 80, 14), "ocr")
+
+    assert resolve_target({"text": "évaporation"}, capture, [element]) == ScreenRect(
+        20, 30, 80, 14
+    )
+
+
+def test_real_code_bug_line_matches_the_grounding_target():
+    capture = _grounding_asset_capture("code-bug.png")
+    elements = _tesseract_asset_elements(capture)
+    target = json.loads((Path(__file__).parent / "fixtures" / "targets.json").read_text())[
+        "code-bug"
+    ]["bug"]
+
+    result = resolve_target(
+        {"text": "return total / (len(notes) - 1)"},
+        capture,
+        elements,
+    )
+
+    assert _intersects_target(result, target)
+
+
+def test_real_water_asset_matches_french_elision():
+    pytesseract = pytest.importorskip("pytesseract")
+    try:
+        pytesseract.get_tesseract_version()
+    except Exception:
+        pytest.skip("Tesseract is unavailable")
+    image = Image.open(Path(__file__).parent / "fixtures" / "water.png").convert("RGB")
+    crop_left, crop_top = 100, 145
+    data = pytesseract.image_to_data(
+        image.crop((crop_left, crop_top, 1010, 230)),
+        lang="fra+eng",
+        config="--psm 6",
+        output_type=pytesseract.Output.DICT,
+    )
+    token_index = next(
+        index for index, token in enumerate(data["text"]) if token.casefold() == "l'évaporation"
+    )
+    token_rect = (
+        crop_left + int(data["left"][token_index]),
+        crop_top + int(data["top"][token_index]),
+        int(data["width"][token_index]),
+        int(data["height"][token_index]),
+    )
+    capture = capture_from_image(
+        image,
+        MonitorRect(0, 0, image.width, image.height),
+        max_width=image.width,
+    )
+    element = Element(1, "Text", data["text"][token_index], token_rect, "ocr")
+
+    result = resolve_target({"text": "évaporation"}, capture, [element])
+
+    assert _intersects_target(result, token_rect)
+
+
+def test_real_form_button_is_found_by_tesseract_inverted_pass():
+    capture = _grounding_asset_capture("form.png")
+    elements = _tesseract_asset_elements(capture)
+    target = json.loads((Path(__file__).parent / "fixtures" / "targets.json").read_text())[
+        "form"
+    ]["send"]
+
+    result = resolve_target({"text": "Envoyer"}, capture, elements)
+
+    assert _intersects_target(result, target)
 
 
 def test_visual_snap_uses_raw_box_when_the_crop_is_flat():

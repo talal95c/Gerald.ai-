@@ -44,6 +44,7 @@ include = ["gerald*"]
 
 [tool.setuptools.package-data]
 "gerald.prompts" = ["*.md"]
+"gerald.home.fonts" = ["*.otf", "OFL.txt"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

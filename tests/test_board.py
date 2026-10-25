@@ -9,6 +9,7 @@ from PyQt6.QtTest import QTest
 from PyQt6.QtWidgets import QApplication, QPushButton
 
 from gerald.board import BoardWindow, group_strokes
+from gerald.tools.diagram import DiagramCommand, layout_diagram
 
 
 def test_nearby_strokes_are_grouped():
@@ -49,6 +50,53 @@ def test_board_write_math_and_path_commands():
     )["ok"]
     assert [item["kind"] for item in board._gerald] == ["text", "image", "path"]
     assert board._reveal_timer.isActive()
+    board.close()
+    app.processEvents()
+
+
+def test_board_diagram_honors_position_and_remains_in_gerald_ink():
+    app = QApplication.instance() or QApplication([])
+    board = BoardWindow()
+    board.resize(800, 600)
+    layout = layout_diagram(
+        title="Cycle de l'eau",
+        layout="tree",
+        nodes=[{"id": "a", "text": "Évaporation"}, {"id": "b", "text": "Condensation"}],
+        edges=[{"from": "a", "to": "b"}],
+    )
+    command = DiagramCommand(layout, x=50, y=60)
+
+    board.add_commands([command])
+    assert board._gerald[0]["kind"] == "diagram"
+    assert (board._gerald[0]["x"], board._gerald[0]["y"]) == (50, 60)
+    assert board._reveal_timer.isActive()
+    board.show()
+    app.processEvents()
+    capture, _rects = board.capture()
+    assert capture.image.size == (800, 600)
+    assert board._gerald[0]["layout"] is layout
+    board.close()
+    app.processEvents()
+
+
+def test_board_diagram_never_scales_below_point_eighty_five():
+    app = QApplication.instance() or QApplication([])
+    board = BoardWindow()
+    board.resize(260, 180)
+    layout = layout_diagram(
+        title="Grand diagram",
+        layout="flow",
+        nodes=[
+            {"id": str(index), "text": "A very wide label"}
+            for index in range(8)
+        ],
+    )
+
+    board.add_commands([DiagramCommand(layout)])
+
+    assert board._gerald[0]["scale"] == 0.85
+    assert board._gerald[0]["x"] >= 0
+    assert board._gerald[0]["y"] >= 0
     board.close()
     app.processEvents()
 
