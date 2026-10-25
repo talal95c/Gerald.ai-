@@ -447,6 +447,10 @@ class OverlayWindow(QWidget):
         self.capture_excluded = False
         self._timer = QTimer(self)
         self._timer.timeout.connect(self._tick)
+        self._timed_error_timer = QTimer(self)
+        self._timed_error_timer.setSingleShot(True)
+        self._timed_error_timer.timeout.connect(self._expire_timed_error)
+        self._timed_error_message: str | None = None
         self._set_capture_exclusion()
 
     def _set_capture_exclusion(self) -> None:
@@ -476,6 +480,11 @@ class OverlayWindow(QWidget):
         output_level: float | None = None,
         message: str | None = None,
     ) -> None:
+        if self._timed_error_timer.isActive() and (
+            status != "error" or message != self._timed_error_message
+        ):
+            self._timed_error_timer.stop()
+            self._timed_error_message = None
         if status != self._status:
             self._status_changed = time.monotonic()
         if status != "idle" or self._status != "idle":
@@ -489,6 +498,20 @@ class OverlayWindow(QWidget):
         if status != "idle":
             self._ensure_timer()
         self.update()
+
+    def show_timed_error(self, message: str, duration_ms: int = 5000) -> None:
+        self._timed_error_message = message
+        self.set_status("error", message=message)
+        self._timed_error_timer.start(duration_ms)
+
+    def _expire_timed_error(self) -> None:
+        if (
+            self._status == "error"
+            and self._timed_error_message is not None
+            and self._status_message == self._timed_error_message
+        ):
+            self._timed_error_message = None
+            self.set_status("idle")
 
     def set_caption(self, caption: str) -> None:
         self._caption = caption

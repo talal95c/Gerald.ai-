@@ -68,6 +68,23 @@ def test_overlay_renders_circle_and_arrow_with_transparent_surroundings():
     app.processEvents()
 
 
+def test_timed_error_status_returns_to_idle():
+    app = QApplication.instance() or QApplication([])
+    overlay = OverlayWindow()
+    overlay.setGeometry(0, 0, 640, 400)
+
+    overlay.show_timed_error("Realtime disconnected", duration_ms=10000)
+
+    assert overlay._status == "error"
+    assert overlay._status_message == "Realtime disconnected"
+    assert overlay._timed_error_timer.isActive()
+    overlay._expire_timed_error()
+    assert overlay._status == "idle"
+    assert not overlay._timed_error_timer.isActive()
+    overlay.close()
+    app.processEvents()
+
+
 def test_mixed_dpi_screen_maps_from_native_physical_origins():
     mappings = _build_screen_mappings(
         [

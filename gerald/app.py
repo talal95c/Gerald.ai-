@@ -14,6 +14,8 @@ from gerald.config import load_settings, set_physical_dpi_awareness
 
 logger = logging.getLogger(__name__)
 AUDIO_BYTES_FOR_100MS = 24000 * 2 // 10
+PTT_KEY_CONFLICT_WINDOW_SECONDS = 0.4
+PTT_REALTIME_START_DELAY_MS = 450
 
 
 def _has_audio_to_commit(audio_sent_bytes: int) -> bool:
@@ -39,6 +41,78 @@ def _reset_failed_capture(app_state: dict, generation: int) -> bool:
         audio_sent_bytes=0,
     )
     return True
+
+
+def _dispatch_key_after_hold_conflict(
+    app_state: dict,
+    name: str,
+    pressed_at: float,
+    cancel_hold,
+    dispatch,
+) -> bool:
+    if app_state.get("active") and not app_state.get("typed") and name not in {
+        "ctrl",
+        "shift",
+        "alt",
+        "altgr",
+    }:
+        if app_state.get("released"):
+            return False
+        if pressed_at - app_state["started"] >= PTT_KEY_CONFLICT_WINDOW_SECONDS:
+            return False
+        cancel_hold()
+    dispatch()
+    return True
+
+
+def _discard_early_hold(app_state: dict, mic, overlay, audio_lock) -> None:
+    with audio_lock:
+        request = app_state.get("capture_request")
+        app_state.update(
+            capture_generation=app_state["capture_generation"] + 1,
+            capture=None,
+            capture_request=None,
+            active=False,
+            released=False,
+            audio_sent_bytes=0,
+            realtime_turn_started=False,
+        )
+        app_state["pending_audio"].clear()
+    if request is not None:
+        request.cancel()
+    mic.stop()
+    overlay.set_status("idle")
+
+
+def _activate_hold_turn(
+    app_state: dict,
+    generation: int,
+    audio_lock,
+    start_turn,
+    send_audio,
+) -> bool:
+    with audio_lock:
+        if (
+            not app_state["active"]
+            or app_state["typed"]
+            or app_state["capture_generation"] != generation
+            or app_state["realtime_turn_started"]
+        ):
+            return False
+        start_turn()
+        pending_audio = app_state["pending_audio"]
+        app_state["pending_audio"] = []
+        app_state["realtime_turn_started"] = True
+        app_state["audio_sent_bytes"] += sum(len(audio) for audio in pending_audio)
+        for audio in pending_audio:
+            send_audio(audio)
+    return True
+
+
+def _show_runtime_error(overlay, message: str) -> None:
+    logger.warning("Runtime capture/audio error: %s", message)
+    overlay.show()
+    overlay.show_timed_error(message)
 
 
 def _key_name(key: object) -> str:
@@ -100,7 +174,7 @@ def _finalize_board_collection(
 
 def main() -> int:
     set_physical_dpi_awareness()
-    from PyQt6.QtCore import QObject, pyqtSignal, pyqtSlot
+    from PyQt6.QtCore import QObject, QTimer, pyqtSignal, pyqtSlot
     from PyQt6.QtGui import QIcon
     from PyQt6.QtWidgets import (
         QApplication,
@@ -137,7 +211,7 @@ def main() -> int:
         return 1
 
     class Bridge(QObject):
-        key_down = pyqtSignal(str)
+        key_down = pyqtSignal(str, float)
         key_up = pyqtSignal(str)
         realtime_event = pyqtSignal(dict)
         commands = pyqtSignal(list)
@@ -273,7 +347,10 @@ def main() -> int:
         "typed": False,
         "response_active": False,
         "recap_pending": False,
+        "pending_audio": [],
+        "realtime_turn_started": False,
     }
+    audio_buffer_lock = threading.Lock()
     required = {part.strip().lower() for part in settings.hotkey.split("+") if part.strip()}
     if "altgr" in required or {"ctrl", "alt"} <= required:
         QMessageBox.critical(None, "Gerald", "Alt et Ctrl+Alt ne sont pas pris en charge comme raccourci.")
@@ -328,10 +405,18 @@ def main() -> int:
 
     def on_microphone_audio(audio: bytes, level: float) -> None:
         bridge.mic_level.emit(level)
-        if not app_state["active"] or not app_state["connected"]:
-            return
-        schedule(client.send_audio(audio))
-        app_state["audio_sent_bytes"] += len(audio)
+        with audio_buffer_lock:
+            if (
+                not app_state["active"]
+                or not app_state["connected"]
+                or app_state["typed"]
+            ):
+                return
+            if not app_state["realtime_turn_started"]:
+                app_state["pending_audio"].append(audio)
+                return
+            schedule(client.send_audio(audio))
+            app_state["audio_sent_bytes"] += len(audio)
 
     audio_capability = {"available": True}
 
@@ -415,21 +500,23 @@ def main() -> int:
 
         asyncio.run_coroutine_threadsafe(wait_for_capture(), loop)
 
-    def start_hold() -> None:
+    def start_hold(pressed_at: float) -> None:
         if app_state["active"]:
             return
         if not app_state["connected"]:
             bridge.capture_failed.emit("Gerald attend la connexion Realtime. Réessayez dans un instant.")
             return
-        app_state.update(
-            active=True,
-            started=time.monotonic(),
-            audio_sent_bytes=0,
-            released=False,
-            typed=False,
-            recap_pending=False,
-        )
-        schedule(client.start_turn())
+        with audio_buffer_lock:
+            app_state.update(
+                active=True,
+                started=pressed_at,
+                audio_sent_bytes=0,
+                released=False,
+                typed=False,
+                recap_pending=False,
+                pending_audio=[],
+                realtime_turn_started=False,
+            )
         overlay.clear()
         overlay.set_status("listening" if audio_capability["available"] else "error")
         try:
@@ -440,6 +527,17 @@ def main() -> int:
             overlay.set_status("idle")
             return
         begin_capture()
+        generation = app_state["capture_generation"]
+        QTimer.singleShot(
+            PTT_REALTIME_START_DELAY_MS,
+            lambda: _activate_hold_turn(
+                app_state,
+                generation,
+                audio_buffer_lock,
+                lambda: schedule(client.start_turn()),
+                lambda audio: schedule(client.send_audio(audio)),
+            ),
+        )
 
     def send_captured_if_ready() -> None:
         captured = app_state["capture"]
@@ -452,7 +550,9 @@ def main() -> int:
         question = app_state.pop("question", "")
         if not has_audio and not question and duration < 0.3:
             question = "explique ce que je regarde"
-        app_state["active"] = False
+        with audio_buffer_lock:
+            app_state.update(active=False, realtime_turn_started=False)
+            app_state["pending_audio"].clear()
         overlay.set_status("thinking" if audio_capability["available"] else "error")
         schedule(client.finish_turn(capture, elements, context, question, has_audio))
 
@@ -460,6 +560,13 @@ def main() -> int:
         if not app_state["active"] or app_state["typed"]:
             return
         mic.stop()
+        _activate_hold_turn(
+            app_state,
+            app_state["capture_generation"],
+            audio_buffer_lock,
+            lambda: schedule(client.start_turn()),
+            lambda audio: schedule(client.send_audio(audio)),
+        )
         app_state["released"] = True
         await_capture_after_release()
 
@@ -472,9 +579,23 @@ def main() -> int:
         already_active = app_state["active"]
         if already_active:
             mic.stop()
-            app_state.update(started=time.monotonic(), audio_sent_bytes=0, released=False, typed=True)
+            with audio_buffer_lock:
+                app_state["pending_audio"].clear()
+                if not app_state["realtime_turn_started"]:
+                    schedule(client.start_turn())
+                    app_state["realtime_turn_started"] = True
+                app_state.update(started=time.monotonic(), audio_sent_bytes=0, released=False, typed=True)
         else:
-            app_state.update(active=True, started=time.monotonic(), audio_sent_bytes=0, released=False, typed=True)
+            with audio_buffer_lock:
+                app_state.update(
+                    active=True,
+                    started=time.monotonic(),
+                    audio_sent_bytes=0,
+                    released=False,
+                    typed=True,
+                    pending_audio=[],
+                    realtime_turn_started=True,
+                )
             schedule(client.start_turn())
         overlay.set_status("thinking" if audio_capability["available"] else "error")
         if not already_active:
@@ -570,11 +691,14 @@ def main() -> int:
         if screen is not None:
             board.open_on_screen(screen)
 
-    def key_press(name: str) -> None:
-        app_state["pressed"].add(name)
-        if name == "z" and "ctrl" in app_state["pressed"] and board.isVisible():
-            board.undo()
-            return
+    def cancel_short_hold() -> None:
+        capture_overlay_hidden = app_state["capture_overlay_hidden"]
+        _discard_early_hold(app_state, mic, overlay, audio_buffer_lock)
+        if capture_overlay_hidden:
+            set_capture_overlay_visibility(True)
+            app_state["capture_overlay_hidden"] = False
+
+    def dispatch_key(name: str, pressed_at: float) -> None:
         if name == "esc":
             if overlay.dismiss_confirmation():
                 client.abort_actions()
@@ -611,8 +735,22 @@ def main() -> int:
             return
         if typed_hotkey <= app_state["pressed"]:
             open_typed_question()
-        elif required <= app_state["pressed"] and "enter" not in app_state["pressed"]:
-            start_hold()
+        elif (
+            name in required
+            and required <= app_state["pressed"]
+            and "enter" not in app_state["pressed"]
+        ):
+            start_hold(pressed_at)
+
+    def key_press(name: str, pressed_at: float) -> None:
+        app_state["pressed"].add(name)
+        _dispatch_key_after_hold_conflict(
+            app_state,
+            name,
+            pressed_at,
+            cancel_short_hold,
+            lambda: dispatch_key(name, pressed_at),
+        )
 
     def key_release(name: str) -> None:
         app_state["pressed"].discard(name)
@@ -635,8 +773,7 @@ def main() -> int:
         schedule(client.cancel())
         overlay.show()
         overlay.set_status("idle" if audio_capability["available"] else "error")
-        logger.warning("Terminal capture failure: %s", message)
-        QMessageBox.warning(None, "Gerald", message)
+        _show_runtime_error(overlay, message)
 
     class UiRequestSlots(QObject):
         @pyqtSlot(object)
@@ -694,14 +831,7 @@ def main() -> int:
     bridge.commands.connect(ui_request_slots.commands)
     bridge.action_marks_visible.connect(ui_request_slots.action_marks_visible)
     bridge.capture_terminal_failed.connect(ui_request_slots.terminal_capture_failed)
-    bridge.capture_failed.connect(
-            lambda message: (
-                overlay.show(),
-                overlay.set_status("idle" if audio_capability["available"] else "error"),
-                logger.warning("Capture/audio error: %s", message),
-            QMessageBox.warning(None, "Gerald", message),
-        )
-    )
+    bridge.capture_failed.connect(lambda message: _show_runtime_error(overlay, message))
     bridge.mic_level.connect(
         lambda level: overlay.set_status(
             "listening" if audio_capability["available"] else "error",
@@ -735,6 +865,7 @@ def main() -> int:
                 app_state["recap_pending"] = False
         elif event_type == "connection.lost":
             app_state["connected"] = False
+            _show_runtime_error(overlay, "Connexion Realtime interrompue.")
         elif event_type in {"response.output_audio_transcript.delta", "response.audio_transcript.delta"}:
             caption["text"] += event.get("delta", "")
             overlay.set_caption(caption["text"])
@@ -761,7 +892,7 @@ def main() -> int:
     tray.show()
 
     def on_press(key) -> None:
-        bridge.key_down.emit(_key_name(key))
+        bridge.key_down.emit(_key_name(key), time.monotonic())
 
     def on_release(key) -> None:
         bridge.key_up.emit(_key_name(key))

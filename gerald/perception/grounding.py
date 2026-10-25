@@ -64,27 +64,51 @@ def _text_score(query: str, candidate: str) -> tuple[int, float] | None:
     return None
 
 
-def _matched_word_rect(element: Element, query: str) -> tuple[int, int, int, int] | None:
+def _matched_word_run(
+    element: Element,
+    query: str,
+) -> tuple[tuple[int, int, int, int], bool] | None:
     if element.source != "ocr" or not element.word_boxes:
         return None
     query_tokens = _normalize_text(query).split()
+    if not query_tokens:
+        return None
     flattened: list[tuple[str, int]] = []
     for index, (word, _rect) in enumerate(element.word_boxes):
         flattened.extend((token, index) for token in _normalize_text(word).split())
-    selected: set[int] = set()
-    for start in range(max(0, len(flattened) - len(query_tokens) + 1)):
-        tokens = [token for token, _index in flattened[start : start + len(query_tokens)]]
-        if tokens == query_tokens:
-            selected.update(index for _token, index in flattened[start : start + len(query_tokens)])
-            break
-    if not selected:
-        return None
-    rectangles = [element.word_boxes[index][1] for index in selected]
-    left = min(rect[0] for rect in rectangles)
-    top = min(rect[1] for rect in rectangles)
-    right = max(rect[0] + rect[2] for rect in rectangles)
-    bottom = max(rect[1] + rect[3] for rect in rectangles)
-    return left, top, right - left, bottom - top
+
+    def rectangle_for(start: int) -> tuple[int, int, int, int]:
+        selected = {
+            index for _token, index in flattened[start : start + len(query_tokens)]
+        }
+        rectangles = [element.word_boxes[index][1] for index in selected]
+        left = min(rect[0] for rect in rectangles)
+        top = min(rect[1] for rect in rectangles)
+        right = max(rect[0] + rect[2] for rect in rectangles)
+        bottom = max(rect[1] + rect[3] for rect in rectangles)
+        return left, top, right - left, bottom - top
+
+    runs = [
+        flattened[start : start + len(query_tokens)]
+        for start in range(max(0, len(flattened) - len(query_tokens) + 1))
+    ]
+    for start, run in enumerate(runs):
+        if [token for token, _index in run] == query_tokens:
+            return rectangle_for(start), True
+    for start, run in enumerate(runs):
+        tokens = [token for token, _index in run]
+        if all(
+            abs(len(query_word) - len(token)) <= 1
+            and SequenceMatcher(None, query_word, token).ratio() >= 0.8
+            for query_word, token in zip(query_tokens, tokens)
+        ):
+            return rectangle_for(start), False
+    return None
+
+
+def _matched_word_rect(element: Element, query: str) -> tuple[int, int, int, int] | None:
+    match = _matched_word_run(element, query)
+    return match[0] if match is not None else None
 
 
 def _screen_rect(capture: Capture, rect: tuple[int, int, int, int]) -> ScreenRect:
@@ -308,15 +332,16 @@ def resolve_target(
         normalized_query = _normalize_text(query)
         for element in elements:
             score = _text_score(query, element.name)
-            word_rect = _matched_word_rect(element, query)
-            if score is None and word_rect is None:
+            word_match = _matched_word_run(element, query)
+            word_rect = word_match[0] if word_match is not None else None
+            if score is None and word_match is None:
                 continue
             score = score or (3, 1.0)
             normalized_name = _normalize_text(element.name)
             if normalized_name == normalized_query:
                 rank = 4
             elif word_rect is not None:
-                rank = 3
+                rank = 3 if word_match[1] else 2
             elif score[0] >= 3:
                 estimated_width = max(1, len(normalized_query) * 8)
                 is_long = len(normalized_name.split()) > 3 or element.rect[2] > 3 * estimated_width

@@ -1,9 +1,10 @@
 import json
 import os
+from types import SimpleNamespace
 
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
-from PyQt6.QtCore import Qt
+from PyQt6.QtCore import QRect, Qt
 from PyQt6.QtTest import QTest
 from PyQt6.QtWidgets import QApplication, QPushButton
 
@@ -98,6 +99,35 @@ def test_toolbar_is_visible_and_centered_at_top():
         "Clear",
         "Close",
     ]
+    board.close()
+    app.processEvents()
+
+
+def test_ctrl_z_event_undoes_exactly_one_stroke():
+    app = QApplication.instance() or QApplication([])
+    board = BoardWindow()
+    first = [(1, 2, 1.0), (3, 4, 1.0)]
+    second = [(5, 6, 1.0), (7, 8, 1.0)]
+    board.user_strokes = [first, second]
+
+    QTest.keyClick(board, Qt.Key.Key_Z, Qt.KeyboardModifier.ControlModifier)
+
+    assert board.user_strokes == [first]
+    board.close()
+    app.processEvents()
+
+
+def test_open_on_screen_raises_activates_and_focuses_board(monkeypatch):
+    app = QApplication.instance() or QApplication([])
+    board = BoardWindow()
+    screen = SimpleNamespace(geometry=lambda: QRect(0, 0, 320, 240))
+    calls = []
+    for method in ("show", "raise_", "activateWindow", "setFocus"):
+        monkeypatch.setattr(board, method, lambda name=method: calls.append(name))
+
+    board.open_on_screen(screen, dark=False)
+
+    assert calls == ["show", "raise_", "activateWindow", "setFocus"]
     board.close()
     app.processEvents()
 

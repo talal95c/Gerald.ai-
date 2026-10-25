@@ -72,6 +72,62 @@ def test_hn_long_navigation_label_uses_ocr_word_rect_before_container():
     assert result == ScreenRect(-1000, 80, 80, 40)
 
 
+def test_ocr_near_word_match_beats_weak_wide_uia_match():
+    capture = capture_from_image(
+        Image.new("RGB", (1920, 1080), "white"),
+        MonitorRect(0, 0, 1920, 1080),
+        max_width=1920,
+    )
+    bar = Element(
+        1,
+        "DataItem",
+        "login submit past comments ask",
+        (100, 100, 1335, 24),
+        "uia",
+    )
+    navigation = Element(
+        2,
+        "Text",
+        "looin O In",
+        (1290, 102, 45, 12),
+        "ocr",
+        (
+            ("looin", (1290, 102, 25, 12)),
+            ("O", (1319, 102, 5, 12)),
+            ("In", (1328, 102, 10, 12)),
+        ),
+    )
+
+    assert resolve_target({"text": "login"}, capture, [bar, navigation]) == ScreenRect(
+        1290,
+        102,
+        25,
+        12,
+    )
+
+
+def test_ocr_exact_word_run_beats_near_word_run():
+    capture = make_capture()
+    navigation = Element(
+        1,
+        "Text",
+        "looin login",
+        (0, 10, 80, 10),
+        "ocr",
+        (
+            ("looin", (0, 10, 25, 10)),
+            ("login", (40, 10, 25, 10)),
+        ),
+    )
+
+    assert resolve_target({"text": "login"}, capture, [navigation]) == ScreenRect(
+        -840,
+        80,
+        100,
+        40,
+    )
+
+
 def test_hn_long_navigation_label_falls_through_to_configured_grounder(monkeypatch):
     capture = make_capture()
     bar = Element(1, "DataItem", "login submit past comments ask", (0, 10, 100, 10), "uia")
