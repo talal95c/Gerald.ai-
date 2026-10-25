@@ -136,7 +136,7 @@ function Folders({docs, recaps, hotkey, uploadError, onDocumentOpen, onBack}: {
   </div>;
 }
 
-function App() {
+function App({onTalk}: {onTalk?: (pressed: boolean) => void}) {
   const [mode, setMode] = useState(window.qt || !/(td|board|fiche)\.html$/.test(location.pathname) ? "greeting" : "collapsed");
   const [state, setState] = useState<NotchState>(emptyState);
   const [status, setStatus] = useState("idle");
@@ -190,7 +190,13 @@ function App() {
   </button>;
   return <section className={`notch sheet m-${mode}`} onMouseEnter={clear} onMouseLeave={()=>{ if (mode !== "document" && document.activeElement?.tagName !== "INPUT") later("collapsed", 700); }} onKeyDown={e=>{if(e.key==="Escape")go("collapsed");}}>
     <div className="bar">
-      <span className="status"><Orb status={status} size={28}/><span>{active ? statusText[status] ?? status : state.hotkey_label}</span></span>
+      <span className="status"><Orb status={status} size={28}/><span>{active ? statusText[status] ?? status : state.hotkey_label}</span>
+        {onTalk && <button className="notch-talk" type="button" aria-label="Maintenir pour parler"
+          onPointerDown={event=>{event.preventDefault();onTalk(true);event.currentTarget.setPointerCapture(event.pointerId);}}
+          onPointerUp={()=>onTalk(false)} onPointerCancel={()=>onTalk(false)} onLostPointerCapture={()=>onTalk(false)}>
+          <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 15a3 3 0 0 0 3-3V6a3 3 0 1 0-6 0v6a3 3 0 0 0 3 3Zm6-3a6 6 0 0 1-12 0M12 18v3m-4 0h8" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round"/></svg>
+        </button>}
+      </span>
       <NavBar active={mode === "settings" ? tab : mode === "document" ? "Documents" : ""} onChange={pick}/>
       {state.session_open ? <button className="end" title={state.recap_error || undefined} onClick={()=>bridge.endSession()}>{state.recap_pending ? "Fiche…" : state.recap_error ? "Réessayer la fiche" : "Fin de session"}</button>
         : recap ? <button className="end" onClick={()=>bridge.openRecap(recap)}>Fiche →</button>
@@ -218,6 +224,6 @@ function App() {
   </section>;
 }
 
-export function mountNotch(el: HTMLElement) {
-  createRoot(el).render(<App />);
+export function mountNotch(el: HTMLElement, onTalk?: (pressed: boolean) => void) {
+  createRoot(el).render(<App onTalk={onTalk}/>);
 }
