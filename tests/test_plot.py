@@ -10,6 +10,7 @@ from PyQt6.QtWidgets import QApplication
 
 from gerald.board import BoardWindow
 from gerald.tools.plot import PLOT_INSETS, build_plot, parse_expression
+from gerald.tools.plot_render import _font_at_local_size
 from gerald.tools.registry import BOARD_TOOL_NAMES, TOOL_SCHEMAS
 
 
@@ -19,6 +20,18 @@ def _base_args(expr="x**2-5*x+6"):
         "x_min": -1,
         "x_max": 6,
     }
+
+
+@pytest.mark.parametrize(
+    ("local_size", "image_to_local_scale", "expected_size"),
+    [(13, 0.5, 26), (14, 0.5, 28), (13, 1.0, 13)],
+)
+def test_plot_fonts_compensate_for_image_to_local_scale(
+    local_size, image_to_local_scale, expected_size
+):
+    font = _font_at_local_size("Google Sans Flex", local_size, image_to_local_scale)
+
+    assert font.pixelSize() == expected_size
 
 
 def test_expression_parser_accepts_allowed_math_forms():
