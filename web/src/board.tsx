@@ -65,8 +65,9 @@ const normalizedMatch = (source: string, wanted: string) => {
   return index < 0 || !query ? null : {index: actual.starts[index], end: actual.ends[index + query.length - 1]};
 };
 const params = new URLSearchParams(location.search);
-const title = params.get("title") || "Exercice 1";
-const lines: string[] = (() => {
+const liveMode = params.get("live") === "1";
+const title = liveMode ? "" : params.get("title") || "Exercice 1";
+const lines: string[] = liveMode ? [] : (() => {
   try {
     const value = JSON.parse(params.get("lines") || "[]");
     return Array.isArray(value) && value.every((line) => typeof line === "string") && value.length
@@ -770,7 +771,7 @@ function Board() {
   </button>;
   return <main className="board">
     <canvas ref={canvas} className={tool} onPointerDown={down} onPointerMove={move}/>
-    <aside className="ex-card" ref={exerciseCard} data-gerald-id="100"><div className="ex-label"><i/>{title.toUpperCase()}</div>{lines.map((line, index) => <p key={index} data-gerald-id={101 + index}>{line}</p>)}</aside>
+    {!liveMode&&<aside className="ex-card" ref={exerciseCard} data-gerald-id="100"><div className="ex-label"><i/>{title.toUpperCase()}</div>{lines.map((line, index) => <p key={index} data-gerald-id={101 + index}>{line}</p>)}</aside>}
     <div className="gerald-text-layer">
       {geraldTexts.map((item,index) => <div key={item.id} className="gerald-write" data-gerald-id={300+index} style={{left: item.x, top: item.y, fontSize: item.size, color: item.color}}>
         {item.html ? <span dangerouslySetInnerHTML={{__html: item.html}}/> : item.parts

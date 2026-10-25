@@ -23,7 +23,9 @@ type ViewApi = {elements:()=>ViewElement[];exec:(name:string,args:Record<string,
 type BoardApi = ViewApi & {snapshot:()=>string};
 type GeraldVoiceState = {turn:number;settledTurn:number;pendingTools:number;settledAt:number;responsesCreated:number;responsesDone:number};
 declare global { interface Window { geraldTD?:ViewApi; geraldBoard?:BoardApi; __geraldLog?:Record<string,unknown>[]; __geraldState?:GeraldVoiceState } }
-const voiceMode = new URLSearchParams(location.search).get("voice") === "1";
+const params = new URLSearchParams(location.search);
+const voiceMode = params.get("voice") === "1";
+const liveMode = params.get("live") === "1";
 const textPattern = (value:string) => new RegExp([...value.trim()].map(char => {
   const escaped=char.replace(/[.*+?^${}()|[\]\\]/g,"\\$&");
   return /\s/.test(char)?"\\s+":/[()[\]{}.,:+−\-\/]/.test(char)?`\\s*${escaped}\\s*`:escaped;
@@ -57,7 +59,7 @@ function targetRect(args:Record<string,any>):Rect|null {
 
 function TD(){
   const [question,setQuestion]=useState(""),[status,setStatus]=useState("idle"),[caption,setCaption]=useState(""),[captionFading,setCaptionFading]=useState(false),[connecting,setConnecting]=useState(false),[audioLevel,setAudioLevel]=useState(0),[voiceError,setVoiceError]=useState(""),[micEnabled,setMicEnabled]=useState(false);
-  const [boardOpen,setBoardOpen]=useState(false),[boardSrc,setBoardSrc]=useState("");
+  const [boardOpen,setBoardOpen]=useState(liveMode),[boardSrc,setBoardSrc]=useState(liveMode?"/board.html?voice=1&live=1":"");
   const [activeExercise,setActiveExercise]=useState(exercises[0]);
   const [marks,setMarks]=useState<Array<{id:string;kind:string;rect:Rect;text?:string;to?:Rect;annotationTarget?:Rect;leader?:boolean;color?:string|null;fill?:string|null;progress?:number}>>([]);
   const cursorRest={x:innerWidth/2,y:innerHeight-90};
@@ -67,7 +69,7 @@ function TD(){
   const pendingAnnotations=useRef(new Map<string,Rect>());
   const [answer,setAnswer]=useState<{q:string;text:string;ex:typeof exercises[number]}|null>(null);
   const [suggestion,setSuggestion]=useState(false);
-  const boardOpenRef=useRef(false);
+  const boardOpenRef=useRef(liveMode);
   const frame=useRef<HTMLIFrameElement>(null), audio=useRef<HTMLAudioElement>(null);
   const peer=useRef<RTCPeerConnection|null>(null), channel=useRef<RTCDataChannel|null>(null), stream=useRef<MediaStream|null>(null);
   const audioContext=useRef<AudioContext|null>(null), micAnalyser=useRef<AnalyserNode|null>(null), remoteAnalyser=useRef<AnalyserNode|null>(null);
@@ -283,7 +285,7 @@ function TD(){
       };
       const offer=await pc.createOffer();await pc.setLocalDescription(offer);
       if(pc.iceGatheringState!=="complete")await new Promise<void>(resolve=>{const timer=setTimeout(resolve,5000);pc.addEventListener("icegatheringstatechange",()=>{if(pc.iceGatheringState==="complete"){clearTimeout(timer);resolve();}},{once:true});});
-      const response=await fetch("/api/session",{method:"POST",headers:{"Content-Type":"application/sdp"},body:pc.localDescription?.sdp??""});
+      const response=await fetch(liveMode?"/api/session?live=1":"/api/session",{method:"POST",headers:{"Content-Type":"application/sdp"},body:pc.localDescription?.sdp??""});
       const sdp=await response.text();if(!response.ok)throw new Error(sdp||`session ${response.status}`);
       await pc.setRemoteDescription({type:"answer",sdp});
     }catch(error){console.error("Voice session failed",error);setVoiceError("Impossible de démarrer la voix.");setConnecting(false);setStatus("idle");stop();}
@@ -352,10 +354,10 @@ function TD(){
   const onSubmit=(event:React.FormEvent)=>{event.preventDefault();if(voiceMode)void sendQuestion(question);else sendMock();};
   const clickExercise=(ex:typeof exercises[number])=>{setActiveExercise(ex);if(voiceMode)openBoard(ex.id);else bridge.openBoard(ex.title,JSON.stringify(ex.lines));};
   const sessionOpen=channel.current?.readyState==="open";
-  return <main className="td-root"><article className="paper"><header className="td-head" data-gerald-id="1"><div className="td-meta"><span>Lycée — Mathématiques</span><span>TD 4</span></div><h1 data-gerald-id="2">Polynômes du second degré</h1><div className="td-student"><span>Nom : __________________</span><span>Date : ________________</span></div></header>
+  return <main className="td-root">{!liveMode&&<article className="paper"><header className="td-head" data-gerald-id="1"><div className="td-meta"><span>Lycée — Mathématiques</span><span>TD 4</span></div><h1 data-gerald-id="2">Polynômes du second degré</h1><div className="td-student"><span>Nom : __________________</span><span>Date : ________________</span></div></header>
     <section className="reminder" data-gerald-id="3"><h2 data-gerald-id="4">Rappel de cours</h2><p data-gerald-id="5">Pour <span dangerouslySetInnerHTML={{__html:katex.renderToString("ax^2+bx+c=0")}} />, le discriminant vaut <span dangerouslySetInnerHTML={{__html:katex.renderToString("\\Delta=b^2-4ac")}} />. Si <span dangerouslySetInnerHTML={{__html:katex.renderToString("\\Delta>0")}} />, l’équation possède deux racines réelles.</p></section>
     {exercises.map((ex,i)=><section className="exercise" data-gerald-id={10+i*3} key={ex.id} onClick={()=>clickExercise(ex)}><p className="exercise-lead" data-gerald-id={11+i*3}><strong>{ex.title}.</strong><span dangerouslySetInnerHTML={{__html:katex.renderToString(ex.math)}}/></p><p data-gerald-id={12+i*3}>{ex.instruction}</p><button className="open-ex">Ouvrir au tableau →</button></section>)}
-  </article>
+  </article>}
     <div className="td-mark-layer" aria-hidden="true">
       <svg width={innerWidth} height={innerHeight}>
         <defs>
@@ -383,19 +385,19 @@ function TD(){
       </svg>
       <div className="gerald-pointer" aria-hidden="true" style={{left:cursor.x,top:cursor.y,opacity:cursor.visible?1:0}}>➤</div>
     </div>
-    <div className="td-assist">
+    <div className={`td-assist${liveMode?" live":""}`}>
       {!voiceMode&&answer&&<div className="td-answer" key={answer.q}><span className="td-q">{answer.q}</span><p>{answer.text||"…"}</p><button className="td-go" onClick={()=>clickExercise(answer.ex)}>Viens, on va au tableau · {answer.ex.title} →</button></div>}
-      {voiceMode&&suggestion&&<button className="td-go" onClick={()=>openBoard(activeExercise.id)}>Viens, on va au tableau · {activeExercise.title} →</button>}
+      {voiceMode&&!liveMode&&suggestion&&<button className="td-go" onClick={()=>openBoard(activeExercise.id)}>Viens, on va au tableau · {activeExercise.title} →</button>}
       {voiceMode&&caption&&<div className={`td-caption${captionFading?" fade":""}`}><Reveal text={caption}/></div>}
       <form className="td-ask" onSubmit={onSubmit}><div className="voice-status"><Orb status={status} size={30} level={audioLevel}/>{voiceError&&<span className="td-voice-error" role="status">{voiceError}</span>}</div>
-        <input data-gerald-id="30" value={question} onChange={e=>setQuestion(e.target.value)} onFocus={()=>bridge.requestFocus(true)} onBlur={()=>bridge.requestFocus(false)} placeholder="Une question sur le TD ? Je t’explique."/>
+        <input data-gerald-id="30" value={question} onChange={e=>setQuestion(e.target.value)} onFocus={()=>bridge.requestFocus(true)} onBlur={()=>bridge.requestFocus(false)} placeholder={liveMode?"Pose une question à Gerald…":"Une question sur le TD ? Je t’explique."}/>
         {voiceMode&&<kbd>CTRL + SHIFT</kbd>}
         {voiceMode&&<button type="button" className="td-mic" aria-label={sessionOpen?(micEnabled?"Couper le micro":"Activer le micro"):"Parler à Gerald"} aria-pressed={sessionOpen?micEnabled:undefined} disabled={connecting&&!sessionOpen} onClick={toggleMicrophone}>{sessionOpen?(micEnabled?"Couper le micro":"Activer le micro"):connecting?"Connexion…":"Parler à Gerald"}</button>}
         {voiceMode&&sessionOpen&&<button type="button" className="td-stop" onClick={stop}>Arrêter</button>}
         {!voiceMode&&<kbd>CTRL + SHIFT</kbd>}
       </form>
     </div>
-    {voiceMode&&<div className={`td-board-overlay ${boardOpen?"open":""}`}><button className="td-board-close" onClick={()=>{boardOpenRef.current=false;setBoardOpen(false);}}>Retour au TD</button>{boardSrc&&<iframe ref={frame} title="Tableau" src={boardSrc} />}</div>}
+    {voiceMode&&<div className={`td-board-overlay ${boardOpen?"open":""}`}>{!liveMode&&<button className="td-board-close" onClick={()=>{boardOpenRef.current=false;setBoardOpen(false);}}>Retour au TD</button>}{boardSrc&&<iframe ref={frame} title="Tableau" src={boardSrc} />}</div>}
     <audio ref={audio} autoPlay/>
   </main>;
 }

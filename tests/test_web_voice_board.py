@@ -191,6 +191,51 @@ def test_session_posts_sdp_and_filtered_realtime_config(monkeypatch, server):
             assert "target_text" in str(tool["parameters"])
 
 
+def test_live_session_omits_default_exercise_context(monkeypatch, server):
+    captured = []
+    monkeypatch.setenv("OPENAI_API_KEY", "test-key-not-logged")
+
+    def fake_urlopen(request, timeout):
+        assert timeout == 60
+        captured.append(request)
+        return _StubResponse(b"v=0\r\nanswer")
+
+    monkeypatch.setattr(web_voice_board, "urlopen", fake_urlopen)
+    status, _body, _headers = _request(
+        server,
+        "POST",
+        "/api/session?live=1",
+        b"v=0\r\noffer",
+        {"Content-Type": "application/sdp"},
+    )
+
+    assert status == 201
+    request = captured[0]
+    content_type = next(
+        value for key, value in request.headers.items() if key.casefold() == "content-type"
+    )
+    message = BytesParser(policy=default).parsebytes(
+        b"Content-Type: "
+        + content_type.encode("ascii")
+        + b"\r\nMIME-Version: 1.0\r\n\r\n"
+        + request.data
+    )
+    session_part = next(
+        part
+        for part in message.iter_parts()
+        if part.get_param("name", header="content-disposition") == "session"
+    )
+    session = json.loads(session_part.get_content())
+    assert "LIVE BOARD MODE" in session["instructions"]
+    assert "do not answer only with speech" in session["instructions"]
+    assert "x² − 5x + 6" not in session["instructions"]
+    assert "x**2-5*x+6" not in session["instructions"]
+    assert "x**2-5*x+6" not in " ".join(
+        tool["description"] for tool in session["tools"]
+    )
+    assert "open_board" not in {tool["name"] for tool in session["tools"]}
+
+
 def test_plot_endpoint_returns_root_and_vertex_points(server):
     payload = {
         "functions": [{"expr": "x**2-5*x+6", "label": "f(x)"}],
@@ -262,15 +307,22 @@ def test_foreign_origin_or_host_is_rejected(monkeypatch, server, headers):
     assert not called
 
 
-def test_root_redirects_to_td_and_board_defaults_to_voice(server):
+def test_root_redirects_to_landing_and_td_board_defaults_to_voice(server):
     status, _body, headers = _request(server, "GET", "/")
     assert status == 302
-    assert headers["Location"] == "/td.html?voice=1"
+    assert headers["Location"] == "/landing.html"
+
+    status, _body, _headers = _request(server, "GET", "/landing.html")
+    assert status == 200
 
     status, _body, headers = _request(server, "GET", "/td.html?voice=0&from=demo")
     assert status == 302
     assert "voice=1" in headers["Location"]
     assert "from=demo" in headers["Location"]
+
+    status, _body, headers = _request(server, "GET", "/td.html?live=1")
+    assert status == 302
+    assert headers["Location"] == "/td.html?live=1&voice=1"
 
     status, _body, headers = _request(server, "GET", "/board.html?title=Exercice%201")
     assert status == 302
@@ -286,7 +338,7 @@ def test_static_route_rejects_foreign_origin(server):
     status, body, _headers = _request(
         server,
         "GET",
-        "/",
+        "/landing.html",
         headers={"Origin": "http://attacker.example"},
     )
     assert status == 403
