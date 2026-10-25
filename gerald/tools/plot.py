@@ -3,6 +3,7 @@ from __future__ import annotations
 import ast
 import math
 import operator
+import re
 from dataclasses import dataclass
 from typing import Callable
 
@@ -138,7 +139,8 @@ def parse_expression(expression: str) -> Callable[[float], float]:
     if not isinstance(expression, str) or not expression.strip():
         raise ValueError("expr must be a non-empty string")
     try:
-        tree = ast.parse(expression.replace("^", "**"), mode="eval")
+        normalized = re.sub(r"(?<=\d)\s*(?=x\b)", "*", expression.replace("^", "**"))
+        tree = ast.parse(normalized, mode="eval")
     except (SyntaxError, ValueError) as error:
         raise ValueError("expr is not a valid mathematical expression") from error
     try:
