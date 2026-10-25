@@ -45,3 +45,7 @@ Le localisateur visuel optionnel est désactivé par défaut
 (`GERALD_GROUNDER=none`). `GERALD_GROUNDER=openrouter` utilise
 `OPENROUTER_API_KEY`; `GERALD_GROUNDER=moondream` nécessite
 `python -m pip install -e ".[grounder-local]"` et charge Moondream sur le CPU.
+`GERALD_GROUNDER=moondream-cloud` utilise `MOONDREAM_API_KEY`; un compte
+Moondream gratuit comprend 5 $ de crédit par mois
+([tarifs Moondream](https://moondream.ai/pricing)). Le modèle cloud par défaut
+est `moondream3.1-9B-A2B`; `GERALD_GROUNDER_MODEL` permet de le remplacer.

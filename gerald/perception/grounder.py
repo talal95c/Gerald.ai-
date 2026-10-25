@@ -18,7 +18,7 @@ logger = logging.getLogger(__name__)
 MOONDREAM_REVISION = "2025-06-21"
 MAX_PIXELS = 16384 * 28 * 28
 _executor = ThreadPoolExecutor(max_workers=1, thread_name_prefix="gerald-grounder")
-_instances: dict[tuple[str, str, str], Grounder] = {}
+_instances: dict[tuple[str, ...], Grounder] = {}
 
 
 class Grounder(Protocol):
@@ -163,13 +163,73 @@ class MoondreamLocalGrounder:
         return float(x) * image.width, float(y) * image.height
 
 
+@dataclass
+class MoondreamCloudGrounder:
+    api_key: str
+    model: str = "moondream3.1-9B-A2B"
+    timeout: float = 4.0
+    endpoint: str = "https://api.moondream.ai/v1/point"
+
+    def locate(self, image: Image.Image, description: str) -> tuple[float, float] | None:
+        try:
+            original = image.convert("RGB")
+            resized = original
+            if original.width > 1568:
+                height = max(1, round(original.height * 1568 / original.width))
+                resized = original.resize((1568, height), Image.Resampling.LANCZOS)
+            output = io.BytesIO()
+            resized.save(output, format="JPEG", quality=90)
+            data_url = "data:image/jpeg;base64," + base64.b64encode(output.getvalue()).decode("ascii")
+            payload = {
+                "model": self.model,
+                "image_url": data_url,
+                "object": description,
+            }
+            request = urllib.request.Request(
+                self.endpoint,
+                data=json.dumps(payload).encode("utf-8"),
+                headers={
+                    "Content-Type": "application/json",
+                    "X-Moondream-Auth": self.api_key,
+                },
+                method="POST",
+            )
+            with urllib.request.urlopen(request, timeout=self.timeout) as response:
+                status = getattr(response, "status", None)
+                if status is None:
+                    status = response.getcode()
+                if status != 200:
+                    return None
+                result = json.loads(response.read())
+            points = result.get("points", [])
+            if not points:
+                return None
+            point = points[0]
+            if not isinstance(point, dict):
+                return None
+            x, y = point.get("x"), point.get("y")
+            if not isinstance(x, (int, float)) or not isinstance(y, (int, float)):
+                return None
+            if not math.isfinite(x) or not math.isfinite(y):
+                return None
+            return float(x) * image.width, float(y) * image.height
+        except Exception:
+            logger.debug("Moondream Cloud grounding failed", exc_info=True)
+            return None
+
+
 def configured_grounder(backend: str | None = None) -> Grounder | None:
     backend = (backend or os.getenv("GERALD_GROUNDER", "none")).casefold()
     if backend in {"", "none"}:
         return None
-    model = os.getenv("GERALD_GROUNDER_MODEL", "bytedance/ui-tars-1.5-7b")
+    default_model = "moondream3.1-9B-A2B" if backend == "moondream-cloud" else "bytedance/ui-tars-1.5-7b"
+    model = os.getenv("GERALD_GROUNDER_MODEL", default_model)
     coord_mode = os.getenv("GERALD_GROUNDER_COORD_MODE", "")
-    key = backend, model, coord_mode
+    api_key = os.getenv("MOONDREAM_API_KEY", "") if backend == "moondream-cloud" else ""
+    if backend == "moondream-cloud" and not api_key:
+        logger.warning("MOONDREAM_API_KEY is not set; Moondream Cloud grounding is disabled")
+        return None
+    key = backend, model, coord_mode, api_key
     if key in _instances:
         return _instances[key]
     if backend == "openrouter":
@@ -178,6 +238,8 @@ def configured_grounder(backend: str | None = None) -> Grounder | None:
         instance: Grounder = OpenRouterGrounder(model, coord_mode)
     elif backend == "moondream":
         instance = MoondreamLocalGrounder()
+    elif backend == "moondream-cloud":
+        instance = MoondreamCloudGrounder(api_key, model)
     else:
         logger.warning("Unknown GERALD_GROUNDER backend: %s", backend)
         return None

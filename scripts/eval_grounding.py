@@ -443,7 +443,11 @@ async def _evaluate(args: argparse.Namespace) -> int:
 def _parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Evaluate visual grounding against browser ground truth.")
     parser.add_argument("--dry-gt", action="store_true", help="resolve target boxes and take screenshots only")
-    parser.add_argument("--grounder-only", choices=("openrouter", "moondream"), help="evaluate a visual grounder without Realtime")
+    parser.add_argument(
+        "--grounder-only",
+        choices=("openrouter", "moondream", "moondream-cloud"),
+        help="evaluate a visual grounder without Realtime",
+    )
     parser.add_argument("--only", help="comma-separated case IDs")
     parser.add_argument("--repeat", type=int, default=1)
     args = parser.parse_args()

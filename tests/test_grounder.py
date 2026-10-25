@@ -1,3 +1,5 @@
+import base64
+import io
 import json
 
 import numpy as np
@@ -93,6 +95,84 @@ def test_moondream_maps_normalized_point_to_image_pixels():
     grounder._model = Model()
 
     assert grounder.locate(Image.new("RGB", (200, 100)), "login") == (50, 50)
+
+
+def test_moondream_cloud_request_and_normalized_point_mapping(monkeypatch):
+    requested = {}
+
+    class Response:
+        status = 200
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *_args):
+            return None
+
+        def read(self):
+            return b'{"points":[{"x":0.25,"y":0.75}]}'
+
+    def fake_urlopen(request, timeout):
+        requested["request"] = request
+        requested["timeout"] = timeout
+        return Response()
+
+    monkeypatch.setattr(grounder_module.urllib.request, "urlopen", fake_urlopen)
+    image = Image.new("RGB", (1800, 800), "white")
+    grounder = grounder_module.MoondreamCloudGrounder("secret-key")
+
+    assert grounder.locate(image, "search field") == (450, 600)
+    request = requested["request"]
+    assert request.full_url == "https://api.moondream.ai/v1/point"
+    assert request.get_method() == "POST"
+    assert requested["timeout"] == 4.0
+    headers = {name.casefold(): value for name, value in request.header_items()}
+    assert headers["content-type"] == "application/json"
+    assert headers["x-moondream-auth"] == "secret-key"
+    payload = json.loads(request.data)
+    assert payload["model"] == "moondream3.1-9B-A2B"
+    assert payload["object"] == "search field"
+    assert payload["image_url"].startswith("data:image/jpeg;base64,")
+    jpeg = base64.b64decode(payload["image_url"].split(",", 1)[1])
+    assert Image.open(io.BytesIO(jpeg)).size == (1568, 697)
+
+
+def test_moondream_cloud_empty_points_and_http_error_return_none(monkeypatch):
+    class Response:
+        def __init__(self, status, body=b'{"points":[]}'):
+            self.status = status
+            self.body = body
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *_args):
+            return None
+
+        def read(self):
+            return self.body
+
+    responses = iter((Response(200), Response(401)))
+    monkeypatch.setattr(grounder_module.urllib.request, "urlopen", lambda *_args, **_kwargs: next(responses))
+    grounder = grounder_module.MoondreamCloudGrounder("secret-key")
+    image = Image.new("RGB", (200, 100))
+
+    assert grounder.locate(image, "login") is None
+    assert grounder.locate(image, "login") is None
+
+
+def test_configured_moondream_cloud_requires_key_and_uses_model_override(monkeypatch):
+    monkeypatch.setattr(grounder_module, "_instances", {})
+    monkeypatch.delenv("MOONDREAM_API_KEY", raising=False)
+    assert grounder_module.configured_grounder("moondream-cloud") is None
+
+    monkeypatch.setenv("MOONDREAM_API_KEY", "secret-key")
+    monkeypatch.setenv("GERALD_GROUNDER_MODEL", "custom-model")
+    grounder = grounder_module.configured_grounder("moondream-cloud")
+
+    assert isinstance(grounder, grounder_module.MoondreamCloudGrounder)
+    assert grounder.model == "custom-model"
+    assert grounder.api_key == "secret-key"
 
 
 def test_resolve_target_uses_grounder_then_visual_snap(monkeypatch):
