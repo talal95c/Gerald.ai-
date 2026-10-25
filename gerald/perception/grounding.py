@@ -3,6 +3,8 @@ from __future__ import annotations
 from dataclasses import dataclass
 from difflib import SequenceMatcher
 from math import hypot, isfinite
+import re
+from statistics import median
 import unicodedata
 from typing import Literal
 
@@ -35,7 +37,8 @@ class GroundingResolution:
 
 
 def _normalize_text(text: str) -> str:
-    decomposed = unicodedata.normalize("NFKD", text.casefold())
+    text = re.sub(r"\b(?:l|d|j|qu|n|s|c|m|t)[’'](?=\w)", "", text.casefold())
+    decomposed = unicodedata.normalize("NFKD", text)
     normalized = "".join(
         character if character.isalnum() else " "
         for character in decomposed
@@ -104,6 +107,115 @@ def _matched_word_run(
         ):
             return rectangle_for(start), False
     return None
+
+
+def _matched_line_runs(
+    elements: list[Element],
+    query: str,
+) -> list[tuple[tuple[int, int, int, int], bool, float]]:
+    query_tokens = _normalize_text(query).split()
+    if not query_tokens:
+        return []
+    tokens: list[tuple[str, tuple[int, int, int, int], int]] = []
+    for element in elements:
+        if element.source not in {"ocr", "uia"}:
+            continue
+        source_words = (
+            element.word_boxes
+            if element.source == "ocr" and element.word_boxes
+            else ((element.name, element.rect),)
+        )
+        for word, rect in source_words:
+            tokens.extend(
+                (token, rect, element.id)
+                for token in _normalize_text(word).split()
+            )
+    tokens.sort(key=lambda item: (item[1][1], item[1][0], item[1][2]))
+    visual_lines: list[list[tuple[str, tuple[int, int, int, int], int]]] = []
+    for token in tokens:
+        _word, rect, _owner = token
+        _left, top, _width, height = rect
+        compatible = []
+        for line in visual_lines:
+            overlap = max(
+                max(
+                    0,
+                    min(top + height, item_rect[1] + item_rect[3])
+                    - max(top, item_rect[1]),
+                )
+                / max(1, min(height, item_rect[3]))
+                for _item_word, item_rect, _item_owner in line
+            )
+            if overlap >= 0.5:
+                compatible.append((overlap, line))
+        if compatible:
+            max(compatible, key=lambda item: item[0])[1].append(token)
+        else:
+            visual_lines.append([token])
+
+    lines: list[list[tuple[str, tuple[int, int, int, int], int]]] = []
+    for visual_line in visual_lines:
+        ordered = sorted(visual_line, key=lambda item: item[1][0])
+        group: list[tuple[str, tuple[int, int, int, int], int]] = []
+        for token in ordered:
+            if group:
+                previous_word, previous_rect, _previous_owner = group[-1]
+                left, _top, width, _height = token[1]
+                char_widths = [
+                    item_rect[2] / max(1, len(item_word))
+                    for item_word, item_rect, _owner in group
+                    if item_rect[2] > 0
+                ]
+                char_width = (
+                    median(char_widths)
+                    if char_widths
+                    else max(1.0, width / max(1, len(token[0])))
+                )
+                gap = left - (previous_rect[0] + previous_rect[2])
+                if not (
+                    gap < 2 * char_width
+                    or re.search(r"[/(),:-]", query) and gap < 4 * char_width
+                ):
+                    lines.append(group)
+                    group = []
+            group.append(token)
+        if group:
+            lines.append(group)
+
+    results = []
+    for line in lines:
+        for start in range(max(0, len(line) - len(query_tokens) + 1)):
+            selected = line[start : start + len(query_tokens)]
+            if len({owner for _word, _rect, owner in selected}) < 2:
+                continue
+            candidate = [word for word, _rect, _owner in selected]
+            exact = candidate == query_tokens
+            if exact:
+                score = 1.0
+            else:
+                ratios = [
+                    SequenceMatcher(None, query_word, candidate_word).ratio()
+                    for query_word, candidate_word in zip(query_tokens, candidate)
+                ]
+                if not ratios or min(ratios) < 0.85:
+                    continue
+                score = sum(ratios) / len(ratios)
+            matched_rects = [rect for _word, rect, _owner in selected]
+            results.append(
+                (
+                    (
+                        min(rect[0] for rect in matched_rects),
+                        min(rect[1] for rect in matched_rects),
+                        max(rect[0] + rect[2] for rect in matched_rects)
+                        - min(rect[0] for rect in matched_rects),
+                        max(rect[1] + rect[3] for rect in matched_rects)
+                        - min(rect[1] for rect in matched_rects),
+                    ),
+                    exact,
+                    score,
+                )
+            )
+    return results
 
 
 def _matched_word_rect(element: Element, query: str) -> tuple[int, int, int, int] | None:
@@ -349,6 +461,16 @@ def resolve_target(
             else:
                 rank = 2
             matches.append((element, score, rank, word_rect or element.rect))
+        best_single_rank = max((match[2] for match in matches), default=0)
+        line_matches = _matched_line_runs(elements, query)
+        exact_line_matches = [match for match in line_matches if match[1]]
+        if exact_line_matches and best_single_rank < 3:
+            chosen = min(exact_line_matches, key=lambda match: match[0][2] * match[0][3])
+            return resolved(_screen_rect(capture, chosen[0]), "text")
+        fuzzy_line_matches = [match for match in line_matches if not match[1]]
+        if fuzzy_line_matches and best_single_rank < 3:
+            chosen = max(fuzzy_line_matches, key=lambda match: (match[2], -match[0][2] * match[0][3]))
+            return resolved(_screen_rect(capture, chosen[0]), "text")
         if matches:
             best_rank = max(match[2] for match in matches)
             matches = [match for match in matches if match[2] == best_rank]
