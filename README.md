@@ -54,6 +54,20 @@ Les valeurs enregistrées avec Grounder… dans `~/.gerald/grounder.json` primen
 sur `MOONDREAM_ENDPOINT` et `MOONDREAM_API_KEY`; les variables d'environnement
 servent de repli si une valeur n'est pas enregistrée.
 
+## App
+
+L’app compagnon guide ton onboarding, puis organise ton profil, tes cours et leurs documents.
+Choisis l’un des cinq profs illustrés ; tu peux le changer à tout moment dans Réglages.
+Ajoute des fichiers par glisser-déposer ou via le sélecteur, suis l’indexation et prends des notes.
+Pose des questions sur un cours ou toute ta bibliothèque, puis retrouve l’historique des discussions
+et les sources des réponses. Les conversations de l’agent sont consultables en lecture seule.
+L’interface s’ouvre via `open_home(store, indexer, settings, on_library_changed)` une fois le branchement effectué.
+![Accueil de l’app](docs/app-home.png) ![Page d’un cours](docs/app-course.png)
+Captures : [prénom](docs/app-onboarding-1-name.png), [choix du prof](docs/app-onboarding-2-prof.png),
+[niveau](docs/app-onboarding-3-level.png), [matières](docs/app-onboarding-4-subjects.png),
+[documents](docs/app-onboarding-5-documents.png), [chat](docs/app-chat.png) et
+[discussions](docs/app-discussions.png).
+
 ## Free GPU fallback (Colab)
 
 1. Ouvrez [`colab/gerald_grounder.ipynb`](colab/gerald_grounder.ipynb) dans Google Colab.
