@@ -1,6 +1,6 @@
 import React from "react";
 import { AbsoluteFill, Easing, interpolate, useCurrentFrame, useVideoConfig } from "remotion";
-import { Badge, Bg, Brand, Btn, H, Keycap, Lead, Orb, Reveal, Words, useP } from "../ui";
+import { Badge, Bg, Brand, Btn, Caption, H, Keycap, Lead, Orb, Reveal, Words, useP } from "../ui";
 import { FONT, T } from "../theme";
 
 /** Scene · Trust & proof — three facts. */
@@ -29,6 +29,7 @@ export const Proof: React.FC = () => {
           ))}
         </div>
       </AbsoluteFill>
+      <Caption at={6.8}>This is not a chatbot. This is a revolution in learning.</Caption>
     </Bg>
   );
 };

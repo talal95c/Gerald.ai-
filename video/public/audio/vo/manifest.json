@@ -1,38 +1,38 @@
 {
  "hook": {
   "text": "Every student knows this moment. Eleven p.m. One exercise. Stuck. Alone. That ends today.",
-  "dur": 7.94
+  "dur": 7.99
  },
  "chat": {
   "text": "Chatbots hand you the answer in three seconds. And you learn... nothing. Education deserves better.",
-  "dur": 8.02
+  "dur": 8.05
  },
  "stat": {
   "text": "Maths scores are at a historic low. Private tutors cost a fortune. Until now.",
-  "dur": 5.71
+  "dur": 5.75
  },
  "meet": {
   "text": "Meet Gerald. The world's first private tutor that lives on your screen.",
-  "dur": 4.18
+  "dur": 4.21
  },
  "board": {
   "text": "You write. Gerald watches every line, spots the mistake, circles it, and explains it out loud. Like the best teacher you ever had, sitting right next to you. And you still find the answer yourself.",
-  "dur": 12.94
+  "dur": 12.98
  },
  "desktop": {
   "text": "One key. Any app. Gerald sees what you see, points at what matters, and guides you step by step. Design, code, maths. Anything.",
-  "dur": 10.8
+  "dur": 10.84
  },
  "td": {
   "text": "Drop your courses. Gerald learns them. When a drawing helps, it opens a board and plots the exact curve, live.",
-  "dur": 7.56
+  "dur": 7.6
  },
  "proof": {
   "text": "Real-time voice and vision. Pedagogy measured at ninety-two percent. Private by design. This is not a chatbot. This is a revolution in learning.",
-  "dur": 10.63
+  "dur": 10.68
  },
  "cta": {
   "text": "Gerald. It doesn't give you the answer. It helps you find it. Never be stuck again. Try it today.",
-  "dur": 6.31
+  "dur": 6.35
  }
 }
