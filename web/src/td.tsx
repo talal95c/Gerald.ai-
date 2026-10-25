@@ -1,4 +1,4 @@
-import React, {useEffect, useRef, useState} from "react";
+import React, {useEffect, useMemo, useRef, useState} from "react";
 import {createRoot} from "react-dom/client";
 import katex from "katex";
 import "katex/dist/katex.min.css";
@@ -7,10 +7,14 @@ import "./board.css";
 import {getBridge} from "./bridge";
 import {Orb} from "./orb";
 import {Reveal} from "./reveal";
-import {annotationLeader, annotationSize, arrowEndpoints, createCursorMotion, ellipseCircumference, intentColor, placeAnnotation, type AnnotationRect, type CursorVisual} from "./annotations";
+import {annotationLeader, annotationSize, arrowEndpoints, createCursorMotion, cursorRestBeside, intentColor, placeAnnotation, pointsToPath, seedFrom, sketchArrow, sketchEllipsePoints, type AnnotationRect, type CursorMotion, type CursorPoint, type CursorVisual} from "./annotations";
 import {mountNotch} from "./notch";
+import * as pdfjs from "pdfjs-dist";
+import pdfWorker from "pdfjs-dist/build/pdf.worker.min.mjs?url";
+import {loadWebDocument, type WebDocument} from "./webbridge";
 
 const bridge = getBridge();
+pdfjs.GlobalWorkerOptions.workerSrc = pdfWorker;
 const exercises = [
   {id:"exercice-1", title:"Exercice 1", lines:["Résous dans ℝ : x² − 5x + 6 = 0"], math:"x^2 - 5x + 6 = 0", instruction:"Résous l’équation et vérifie tes solutions."},
   {id:"exercice-2", title:"Exercice 2", lines:["Résous dans ℝ : 2x² + 3x − 2 = 0"], math:"2x^2 + 3x - 2 = 0", instruction:"Résous l’équation et vérifie tes solutions."},
@@ -26,6 +30,130 @@ declare global { interface Window { geraldTD?:ViewApi; geraldBoard?:BoardApi; __
 const params = new URLSearchParams(location.search);
 const voiceMode = params.get("voice") === "1";
 const liveMode = params.get("live") === "1";
+const docId = params.has("doc") ? Number(params.get("doc")) : null;
+const docMode = docId !== null && Number.isFinite(docId);
+const boardMode = params.get("board") === "1";
+function boundsOfPoints(points:CursorPoint[],padding=0):AnnotationRect {
+  const xs=points.map(({x})=>x),ys=points.map(({y})=>y),left=Math.min(...xs),top=Math.min(...ys);
+  return {x:left-padding,y:top-padding,w:Math.max(...xs)-left+padding*2,h:Math.max(...ys)-top+padding*2};
+}
+function unionBounds(...rects:AnnotationRect[]):AnnotationRect {
+  const left=Math.min(...rects.map(rect=>rect.x)),top=Math.min(...rects.map(rect=>rect.y));
+  const right=Math.max(...rects.map(rect=>rect.x+rect.w)),bottom=Math.max(...rects.map(rect=>rect.y+rect.h));
+  return {x:left,y:top,w:right-left,h:bottom-top};
+}
+function pointsLength(points:CursorPoint[]):number {
+  return points.reduce((length,point,index)=>index?length+Math.hypot(point.x-points[index-1].x,point.y-points[index-1].y):0,0);
+}
+function moveToRest(queue:CursorMotion,to:CursorPoint):Promise<void> {
+  const current=queue.current();
+  return Math.hypot(to.x-current.x,to.y-current.y)<4?Promise.resolve():queue.moveTo(to);
+}
+function animateHeadProgress(onProgress:(progress:number)=>void):Promise<void> {
+  if(window.matchMedia("(prefers-reduced-motion: reduce)").matches){onProgress(1);return Promise.resolve();}
+  const start=performance.now();
+  return new Promise(resolve=>{const frame=(now:number)=>{const progress=Math.min(1,(now-start)/180);onProgress(progress);if(progress<1)requestAnimationFrame(frame);else resolve();};requestAnimationFrame(frame);});
+}
+type PdfLine = {id:number; text:string; x:number; y:number; w:number; h:number; fontSize:number};
+function PdfPage({pdf, pageNumber}: {pdf: pdfjs.PDFDocumentProxy; pageNumber: number}) {
+  const canvas = useRef<HTMLCanvasElement>(null);
+  const [lines, setLines] = useState<PdfLine[]>([]);
+  const [pageSize, setPageSize] = useState({width: 0, height: 0});
+  useEffect(() => {
+    let cancelled = false;
+    void (async () => {
+      const page = await pdf.getPage(pageNumber);
+      const base = page.getViewport({scale: 1});
+      const scale = Math.min(1.5, Math.max(0.5, (window.innerWidth - 48) / base.width));
+      const viewport = page.getViewport({scale});
+      const target = canvas.current;
+      if (!target || cancelled) return;
+      target.width = Math.ceil(viewport.width);
+      target.height = Math.ceil(viewport.height);
+      setPageSize({width: viewport.width, height: viewport.height});
+      const canvasContext = target.getContext("2d");
+      if (!canvasContext) return;
+      await page.render({canvasContext, viewport}).promise;
+      const content = await page.getTextContent();
+      const grouped: Array<{top: number; items: Array<{x: number; width: number; height: number; text: string}>}> = [];
+      for (const item of content.items) {
+        if (!("str" in item) || !item.str.trim()) continue;
+        const transform = pdfjs.Util.transform(viewport.transform, item.transform);
+        const height = Math.max(8, Math.hypot(transform[2], transform[3]));
+        const top = transform[5] - height;
+        let line = grouped.find(candidate => Math.abs(candidate.top - top) < height * 0.45);
+        if (!line) {
+          line = {top, items: []};
+          grouped.push(line);
+        }
+        line.items.push({x: transform[4], width: item.width * scale, height, text: item.str});
+      }
+      if (cancelled) return;
+      setLines(grouped.map((line, index) => {
+        const items = line.items.sort((a, b) => a.x - b.x);
+        const left = Math.min(...items.map(item => item.x));
+        const right = Math.max(...items.map(item => item.x + item.width));
+        const text = items.reduce((value, item, itemIndex) => {
+          if (!itemIndex) return item.text;
+          const previous = items[itemIndex - 1];
+          return value + (item.x - previous.x - previous.width > item.height * 0.16 ? " " : "") + item.text;
+        }, "");
+        const height = Math.max(...items.map(item => item.height));
+        return {id: 1000 + pageNumber * 100 + index, text, x: left, y: line.top, w: right - left, h: height, fontSize: height};
+      }));
+    })();
+    return () => { cancelled = true; };
+  }, [pdf, pageNumber]);
+  return <div className="doc-pdf-page" style={{width: pageSize.width || undefined, height: pageSize.height || undefined}}>
+    <canvas ref={canvas}/>
+    <div className="doc-pdf-text">{lines.map(line=><span
+      key={line.id}
+      data-gerald-id={line.id}
+      style={{left: line.x, top: line.y, width: line.w, height: line.h, fontSize: line.fontSize}}
+    >{line.text}</span>)}</div>
+  </div>;
+}
+
+function PdfDocument({file}: {file: WebDocument}) {
+  const [pdf, setPdf] = useState<pdfjs.PDFDocumentProxy | null>(null);
+  const [error, setError] = useState("");
+  useEffect(() => {
+    let cancelled = false;
+    let loaded: pdfjs.PDFDocumentProxy | null = null;
+    if (!file.blob) return;
+    void file.blob.arrayBuffer().then(data => pdfjs.getDocument({data}).promise).then(document => {
+      loaded = document;
+      if (!cancelled) setPdf(document);
+      else void document.destroy();
+    }).catch(() => { if (!cancelled) setError("Impossible d’ouvrir ce PDF."); });
+    return () => { cancelled = true; if (loaded) void loaded.destroy(); };
+  }, [file]);
+  if (error) return <p role="alert">{error}</p>;
+  if (!pdf) return <p className="doc-loading">Chargement du PDF…</p>;
+  return <div className="doc-pdf-scroll">{Array.from({length: pdf.numPages}, (_, index)=><PdfPage key={index} pdf={pdf} pageNumber={index + 1}/>)}</div>;
+}
+
+function MarkdownDocument({content}: {content: string}) {
+  const paragraphs = content.split(/\n\s*\n/).map(value => value.trim()).filter(Boolean);
+  return <article className="doc-markdown">
+    {paragraphs.map((paragraph, index) => {
+      const text = paragraph.replace(/^#{1,6}\s*/, "").replace(/^[-*]\s*/, "").replace(/`([^`]+)`/g, "$1");
+      const html = text.split(/(\\\([^)]*\\\)|\$[^$]+\$)/g).map(part => {
+        const math = part.startsWith("\\(") ? part.slice(2, -2) : part.startsWith("$") ? part.slice(1, -1) : null;
+        return math === null ? part : katex.renderToString(math, {throwOnError: false, output: "htmlAndMathml"});
+      }).join("");
+      return <p data-gerald-id={2000 + index} key={index} dangerouslySetInnerHTML={{__html: html}}/>;
+    })}
+  </article>;
+}
+
+function DocumentView({file}: {file: WebDocument}) {
+  const imageUrl = useMemo(() => file.blob ? URL.createObjectURL(file.blob) : "", [file]);
+  useEffect(() => () => { if (imageUrl) URL.revokeObjectURL(imageUrl); }, [imageUrl]);
+  if (file.mime === "application/pdf") return <PdfDocument file={file}/>;
+  if (file.mime.startsWith("image/")) return <div className="doc-image-scroll"><img data-gerald-id="3000" src={imageUrl} alt={file.filename}/></div>;
+  return <MarkdownDocument content={file.content ?? ""}/>;
+}
 const textPattern = (value:string) => new RegExp([...value.trim()].map(char => {
   const escaped=char.replace(/[.*+?^${}()|[\]\\]/g,"\\$&");
   return /\s/.test(char)?"\\s+":/[()[\]{}.,:+−\-\/]/.test(char)?`\\s*${escaped}\\s*`:escaped;
@@ -58,10 +186,19 @@ function targetRect(args:Record<string,any>):Rect|null {
 }
 
 function TD(){
+  const boardParams = new URLSearchParams({
+    voice: "1",
+    title: params.get("title") ?? "",
+    lines: params.get("lines") ?? "[]",
+  });
+  const initialBoardSrc = liveMode
+    ? "/board.html?voice=1&live=1"
+    : boardMode ? `/board.html?${boardParams}` : "";
   const [question,setQuestion]=useState(""),[status,setStatus]=useState("idle"),[caption,setCaption]=useState(""),[captionFading,setCaptionFading]=useState(false),[connecting,setConnecting]=useState(false),[audioLevel,setAudioLevel]=useState(0),[voiceError,setVoiceError]=useState(""),[micEnabled,setMicEnabled]=useState(false);
-  const [boardOpen,setBoardOpen]=useState(liveMode),[boardSrc,setBoardSrc]=useState(liveMode?"/board.html?voice=1&live=1":"");
+  const [boardOpen,setBoardOpen]=useState(liveMode||boardMode),[boardSrc,setBoardSrc]=useState(initialBoardSrc);
+  const [docFile,setDocFile]=useState<WebDocument|null>(null);
   const [activeExercise,setActiveExercise]=useState(exercises[0]);
-  const [marks,setMarks]=useState<Array<{id:string;kind:string;rect:Rect;text?:string;to?:Rect;annotationTarget?:Rect;leader?:boolean;color?:string|null;fill?:string|null;progress?:number}>>([]);
+  const [marks,setMarks]=useState<Array<{id:string;kind:string;rect:Rect;text?:string;to?:Rect;annotationTarget?:Rect;leader?:boolean;color?:string|null;fill?:string|null;progress?:number;head?:number;points?:CursorPoint[];ghostPoints?:CursorPoint[];shaftPoints?:CursorPoint[];headPoints?:[CursorPoint,CursorPoint,CursorPoint]}>>([]);
   const cursorRest={x:innerWidth/2,y:innerHeight-90};
   const [cursor,setCursor]=useState<CursorVisual>({...cursorRest,visible:false});
   const cursorMotion=useRef<ReturnType<typeof createCursorMotion>|null>(null);
@@ -69,38 +206,54 @@ function TD(){
   const pendingAnnotations=useRef(new Map<string,Rect>());
   const [answer,setAnswer]=useState<{q:string;text:string;ex:typeof exercises[number]}|null>(null);
   const [suggestion,setSuggestion]=useState(false);
-  const boardOpenRef=useRef(liveMode);
+  const boardOpenRef=useRef(liveMode||boardMode);
   const frame=useRef<HTMLIFrameElement>(null), audio=useRef<HTMLAudioElement>(null);
   const peer=useRef<RTCPeerConnection|null>(null), channel=useRef<RTCDataChannel|null>(null), stream=useRef<MediaStream|null>(null);
   const audioContext=useRef<AudioContext|null>(null), micAnalyser=useRef<AnalyserNode|null>(null), remoteAnalyser=useRef<AnalyserNode|null>(null);
   const pushToTalk=useRef(false), toggleMic=useRef(false), pttPreviousMic=useRef(false);
   const captionTimer=useRef<number|null>(null), handled=useRef(new Set<string>());
+  useEffect(()=>{
+    if(!docMode||docId===null)return;
+    let active=true;
+    void loadWebDocument(docId).then(file=>{if(active)setDocFile(file);}).catch(error=>console.error("Document load failed",error));
+    return()=>{active=false;};
+  },[]);
   const attachAnalyser=(media:MediaStream,kind:"mic"|"remote")=>{
     const context=audioContext.current??new AudioContext();audioContext.current=context;
     const analyser=context.createAnalyser();analyser.fftSize=512;
     context.createMediaStreamSource(media).connect(analyser);
     if(kind==="mic")micAnalyser.current=analyser;else remoteAnalyser.current=analyser;
   };
-  const openBoard=(id:string)=>{
+  const openBoard=(id?:string)=>{
+    if(docMode){
+      setBoardSrc("/board.html?voice=1&live=1");
+      boardOpenRef.current=true;
+      setBoardOpen(true);
+      return;
+    }
     const ex=exercises.find(item=>item.id===id)??exercises[0]; setActiveExercise(ex);
     const query=new URLSearchParams({title:ex.title,lines:JSON.stringify(ex.lines),voice:"1"});
     setBoardSrc(`/board.html?${query}`); boardOpenRef.current=true; setBoardOpen(true);
+    if(embedded)window.parent.postMessage({type:"gerald-last-exercise",title:ex.title,lines:ex.lines},location.origin);
   };
   const elements=():ViewElement[]=>[...document.querySelectorAll<HTMLElement>("[data-gerald-id]")].filter(e=>e.getClientRects().length).map(e=>{const r=e.getBoundingClientRect();return {id:Number(e.dataset.geraldId),text:(e instanceof HTMLInputElement?e.value||e.placeholder:e.innerText||"").trim(),rect:{x:r.x,y:r.y,w:r.width,h:r.height}};});
-  const placeBeside=(target:Rect,text:string,kind:"note"|"tip")=>{
-    const occupied:AnnotationRect[]=[
+  const annotationOccupants=(target?:AnnotationRect,extra:AnnotationRect[]=[]):AnnotationRect[]=>[
       ...elements().map(element=>element.rect),
       ...marks.filter(mark=>mark.kind==="note"||mark.kind==="tip").map(mark=>mark.rect),
       ...pendingAnnotations.current.values(),
-      target,
+      ...(target?[target]:[]),...extra,
     ];
-    return placeAnnotation(target,annotationSize(text,kind),occupied,{w:innerWidth,h:innerHeight});
-  };
+  const viewport=()=>({w:innerWidth,h:innerHeight});
+  const placeBeside=(target:Rect,text:string,kind:"note"|"tip")=>
+    placeAnnotation(target,annotationSize(text,kind),annotationOccupants(target),viewport());
+  const restBeside=(bounds:AnnotationRect,extra:AnnotationRect[]=[])=>
+    cursorRestBeside(bounds,annotationOccupants(bounds,extra),viewport());
   const waitForPaint=()=>new Promise<void>(resolve=>requestAnimationFrame(()=>requestAnimationFrame(()=>resolve())));
   const addMark=(mark:typeof marks[number])=>setMarks(items=>[...items,mark]);
   const updateMarkProgress=(id:string,progress:number)=>setMarks(items=>items.map(mark=>mark.id===id?{...mark,progress}:mark));
+  const updateMarkHead=(id:string,head:number)=>setMarks(items=>items.map(mark=>mark.id===id?{...mark,head}:mark));
   const exec=async(name:string,args:Record<string,any>)=>{
-    if(name==="open_board"){openBoard(String(args.exercise_id));return {ok:true};}
+    if(name==="open_board"){openBoard(docMode?undefined:String(args.exercise_id));return {ok:true};}
     const motion=cursorMotion.current!;
     if(name==="clear_gerald"){
       pendingAnnotations.current.clear();
@@ -125,7 +278,9 @@ function TD(){
       motion.enqueue(async queue=>{
         await queue.moveTo({x:pos.x+pos.w/2,y:pos.y+pos.h/2});
         addMark({id,kind:"tip",rect:placement.rect,text:args.text,color,annotationTarget:r?pos:undefined,leader:r?placement.leader:false});
+        await waitForPaint();
         pendingAnnotations.current.delete(id);
+        await moveToRest(queue,restBeside(unionBounds(pos,placement.rect),[pos,placement.rect]));
       });
       return {ok:true,target:pos,annotation:placement.rect};
     }
@@ -135,6 +290,8 @@ function TD(){
       motion.enqueue(async queue=>{
         await queue.moveTo({x:pos.x,y:pos.y});
         addMark({id,kind:"write",rect:pos,text:String(args.text??args.latex??""),color:color??"#111"});
+        const text=String(args.text??args.latex??""),size=Number(args.size)||32;
+        await moveToRest(queue,restBeside({x:pos.x,y:pos.y-size,w:Math.max(size,text.length*size*.65),h:size*1.25}));
       });
       return {ok:true};
     }
@@ -149,7 +306,9 @@ function TD(){
       motion.enqueue(async queue=>{
         await queue.moveTo({x:r.x+r.w/2,y:r.y+r.h/2});
         addMark({id,kind:"note",rect:placement.rect,text,color,annotationTarget:r,leader:placement.leader});
+        await waitForPaint();
         pendingAnnotations.current.delete(id);
+        await moveToRest(queue,restBeside(unionBounds(r,placement.rect),[r,placement.rect]));
       });
       return {ok:true,target:r,annotation:placement.rect};
     }
@@ -158,11 +317,15 @@ function TD(){
     if(name==="arrow"&&endpoints){
       const {x1,y1,x2,y2}=endpoints;
       const id=crypto.randomUUID();
+      const {shaft,head}=sketchArrow(x1,y1,x2,y2,seedFrom(id));
+      const bounds=boundsOfPoints([...shaft,...head],2);
       motion.enqueue(async queue=>{
-        await queue.moveTo({x:x1,y:y1});
-        addMark({id,kind:"arrow",rect:{x:x1,y:y1,w:x2-x1,h:y2-y1},text,to:{x:x2,y:y2,w:0,h:0},color,progress:0});
+        await queue.moveTo(shaft[0]);
+        addMark({id,kind:"arrow",rect:{x:x1,y:y1,w:x2-x1,h:y2-y1},text,to:{x:x2,y:y2,w:0,h:0},color,progress:0,head:0,shaftPoints:shaft,headPoints:head});
         await waitForPaint();
-        await queue.moveTo({x:x2,y:y2},progress=>updateMarkProgress(id,progress));
+        await queue.moveAlong(shaft,Math.max(380,Math.min(800,pointsLength(shaft)*2.5)),progress=>updateMarkProgress(id,progress));
+        await animateHeadProgress(progress=>updateMarkHead(id,progress));
+        await moveToRest(queue,restBeside(bounds));
       });
       return {ok:true,target:{x:x2,y:y2},from:{x:x1,y:y1},to:{x:x2,y:y2}};
     }
@@ -176,23 +339,26 @@ function TD(){
         addMark({...mark,progress:0});
         await waitForPaint();
         await queue.moveTo(end,progress=>updateMarkProgress(id,progress));
+        const bounds=name==="underline"?{x:rect.x-rect.w/2,y:rect.y+rect.h/2-2,w:rect.w,h:4}:{x:rect.x-rect.w/2,y:rect.y-rect.h/2,w:rect.w,h:rect.h};
+        await moveToRest(queue,restBeside(bounds));
       });
     }else if(name==="circle"){
-      const start={x:rect.x+rect.w/2,y:rect.y};
+      const points=sketchEllipsePoints(rect.x,rect.y,rect.w/2,rect.h/2,seedFrom(id));
+      const ghostPoints=sketchEllipsePoints(rect.x,rect.y,rect.w/2,rect.h/2,seedFrom(id)+.37);
+      const bounds=boundsOfPoints([...points,...ghostPoints],2);
       motion.enqueue(async queue=>{
-        await queue.moveTo(start);
-        addMark({...mark,progress:0});
+        await queue.moveTo(points[0]);
+        addMark({...mark,progress:0,points,ghostPoints});
         await waitForPaint();
-        for(let segment=1;segment<=4;segment+=1){
-          const angle=segment*Math.PI/2;
-          const end={x:rect.x+rect.w/2*Math.cos(angle),y:rect.y+rect.h/2*Math.sin(angle)};
-          await queue.moveTo(end,progress=>updateMarkProgress(id,(segment-1+progress)/4));
-        }
+        await queue.moveAlong(points,Math.max(650,Math.min(1100,pointsLength(points)*2.2)),progress=>updateMarkProgress(id,progress));
+        await moveToRest(queue,restBeside(bounds));
       });
     }else{
+      const bounds=name==="point"?{x:rect.x-5,y:rect.y-5,w:10,h:10}:rect;
       motion.enqueue(async queue=>{
         await queue.moveTo({x:rect.x,y:rect.y});
         addMark({...mark,progress:1});
+        await moveToRest(queue,restBeside(bounds));
       });
     }
     return {ok:true,target:{x:rect.x,y:rect.y}};
@@ -200,6 +366,25 @@ function TD(){
   useEffect(()=>{window.geraldTD={elements,exec,close:()=>{boardOpenRef.current=false;setBoardOpen(false);},waitForAnimations:()=>cursorMotion.current!.waitForAnimations()};return()=>{delete window.geraldTD;};});
   const getBoardApi=async()=>{for(let i=0;i<100;i++){const api=frame.current?.contentWindow?.geraldBoard;if(api)return api;await new Promise(resolve=>setTimeout(resolve,20));}return null;};
   const sendEvent=(event:Record<string,unknown>)=>{if(channel.current?.readyState==="open")channel.current.send(JSON.stringify(event));};
+  const documentImage=async()=>{
+    if(!docMode||!docFile)return undefined;
+    let source:HTMLCanvasElement|HTMLImageElement|null=null;
+    if(docFile.mime==="application/pdf"){
+      source=[...document.querySelectorAll<HTMLCanvasElement>(".doc-pdf-page canvas")].find(canvas=>{
+        const rect=canvas.getBoundingClientRect();return rect.bottom>0&&rect.top<innerHeight;
+      })??document.querySelector<HTMLCanvasElement>(".doc-pdf-page canvas");
+    }else if(docFile.mime.startsWith("image/"))source=document.querySelector<HTMLImageElement>(".doc-image-scroll img");
+    if(!source)return undefined;
+    if(source instanceof HTMLImageElement&&!source.complete)return undefined;
+    const width=source instanceof HTMLCanvasElement?source.width:source.naturalWidth;
+    const height=source instanceof HTMLCanvasElement?source.height:source.naturalHeight;
+    if(!width||!height)return undefined;
+    const scale=Math.min(1,1600/Math.max(width,height));
+    const canvas=document.createElement("canvas");canvas.width=Math.round(width*scale);canvas.height=Math.round(height*scale);
+    const context=canvas.getContext("2d");if(!context)return undefined;
+    context.drawImage(source,0,0,canvas.width,canvas.height);
+    return canvas.toDataURL("image/jpeg",0.8);
+  };
   const sendContext=async()=>{
     if(channel.current?.readyState!=="open")return;
     const board=boardOpenRef.current?await getBoardApi():null;
@@ -207,6 +392,13 @@ function TD(){
       const image=board.snapshot();
       const text=board.elements().map(e=>`[${e.id}] "${e.text}" (${Math.round(e.rect.x)},${Math.round(e.rect.y)},${Math.round(e.rect.w)},${Math.round(e.rect.h)})`).join("\n");
       sendEvent({type:"conversation.item.create",item:{type:"message",role:"user",content:[{type:"input_text",text:`Board visible elements in CSS pixels:\n${text}`},{type:"input_image",image_url:image}]}});
+    }
+    else if(docMode){
+      const text=elements().map(e=>`[${e.id}] "${e.text}" (${Math.round(e.rect.x)},${Math.round(e.rect.y)},${Math.round(e.rect.w)},${Math.round(e.rect.h)})`).join("\n");
+      const content:Array<Record<string,string>>=[{type:"input_text",text:`Document visible elements in CSS pixels:\n${text}`}];
+      const image=await documentImage();
+      if(image)content.push({type:"input_image",image_url:image});
+      sendEvent({type:"conversation.item.create",item:{type:"message",role:"user",content}});
     }
     else {const text=elements().map(e=>`[${e.id}] "${e.text}" (${Math.round(e.rect.x)},${Math.round(e.rect.y)},${Math.round(e.rect.w)},${Math.round(e.rect.h)})`).join("\n");sendEvent({type:"conversation.item.create",item:{type:"message",role:"user",content:[{type:"input_text",text:`TD visible elements in CSS pixels:\n${text}`} ]}});}
   };
@@ -285,7 +477,10 @@ function TD(){
       };
       const offer=await pc.createOffer();await pc.setLocalDescription(offer);
       if(pc.iceGatheringState!=="complete")await new Promise<void>(resolve=>{const timer=setTimeout(resolve,5000);pc.addEventListener("icegatheringstatechange",()=>{if(pc.iceGatheringState==="complete"){clearTimeout(timer);resolve();}},{once:true});});
-      const response=await fetch(liveMode?"/api/session?live=1":"/api/session",{method:"POST",headers:{"Content-Type":"application/sdp"},body:pc.localDescription?.sdp??""});
+      const sessionUrl=docMode
+        ? `/api/session?mode=doc&title=${encodeURIComponent(docFile?.filename??`document-${docId}`)}`
+        : liveMode?"/api/session?live=1":"/api/session";
+      const response=await fetch(sessionUrl,{method:"POST",headers:{"Content-Type":"application/sdp"},body:pc.localDescription?.sdp??""});
       const sdp=await response.text();if(!response.ok)throw new Error(sdp||`session ${response.status}`);
       await pc.setRemoteDescription({type:"answer",sdp});
     }catch(error){console.error("Voice session failed",error);setVoiceError("Impossible de démarrer la voix.");setConnecting(false);setStatus("idle");stop();}
@@ -334,8 +529,10 @@ function TD(){
     const down=(event:KeyboardEvent)=>{if(event.ctrlKey&&event.shiftKey&&!event.repeat){event.preventDefault();beginPushToTalk();}};
     const up=(event:KeyboardEvent)=>{if(event.key==="Control"||event.key==="Shift")endPushToTalk();};
     const blur=()=>endPushToTalk();
+    const message=(event:MessageEvent)=>{if(event.source!==window.parent||event.data?.type!=="gerald-hotkey")return;if(event.data.pressed)beginPushToTalk();else endPushToTalk();};
     window.addEventListener("keydown",down);window.addEventListener("keyup",up);window.addEventListener("blur",blur);
-    return()=>{window.removeEventListener("keydown",down);window.removeEventListener("keyup",up);window.removeEventListener("blur",blur);};
+    window.addEventListener("message",message);
+    return()=>{window.removeEventListener("keydown",down);window.removeEventListener("keyup",up);window.removeEventListener("blur",blur);window.removeEventListener("message",message);};
   },[]);
   useEffect(()=>{
     const data=new Float32Array(512);let frame=0,last=0;
@@ -354,25 +551,30 @@ function TD(){
   const onSubmit=(event:React.FormEvent)=>{event.preventDefault();if(voiceMode)void sendQuestion(question);else sendMock();};
   const clickExercise=(ex:typeof exercises[number])=>{setActiveExercise(ex);if(voiceMode)openBoard(ex.id);else bridge.openBoard(ex.title,JSON.stringify(ex.lines));};
   const sessionOpen=channel.current?.readyState==="open";
-  return <main className="td-root">{!liveMode&&<article className="paper"><header className="td-head" data-gerald-id="1"><div className="td-meta"><span>Lycée — Mathématiques</span><span>TD 4</span></div><h1 data-gerald-id="2">Polynômes du second degré</h1><div className="td-student"><span>Nom : __________________</span><span>Date : ________________</span></div></header>
+  return <main className={`td-root${docMode?" document-mode":""}`}>{!liveMode&&!docMode&&<article className="paper"><header className="td-head" data-gerald-id="1"><div className="td-meta"><span>Lycée — Mathématiques</span><span>TD 4</span></div><h1 data-gerald-id="2">Polynômes du second degré</h1><div className="td-student"><span>Nom : __________________</span><span>Date : ________________</span></div></header>
     <section className="reminder" data-gerald-id="3"><h2 data-gerald-id="4">Rappel de cours</h2><p data-gerald-id="5">Pour <span dangerouslySetInnerHTML={{__html:katex.renderToString("ax^2+bx+c=0")}} />, le discriminant vaut <span dangerouslySetInnerHTML={{__html:katex.renderToString("\\Delta=b^2-4ac")}} />. Si <span dangerouslySetInnerHTML={{__html:katex.renderToString("\\Delta>0")}} />, l’équation possède deux racines réelles.</p></section>
     {exercises.map((ex,i)=><section className="exercise" data-gerald-id={10+i*3} key={ex.id} onClick={()=>clickExercise(ex)}><p className="exercise-lead" data-gerald-id={11+i*3}><strong>{ex.title}.</strong><span dangerouslySetInnerHTML={{__html:katex.renderToString(ex.math)}}/></p><p data-gerald-id={12+i*3}>{ex.instruction}</p><button className="open-ex">Ouvrir au tableau →</button></section>)}
   </article>}
+    {docMode&&<section className="document-view" aria-label={docFile?.filename??"Document"}><h1>{docFile?.filename??"Chargement du document…"}</h1>{docFile&&<DocumentView file={docFile}/>}</section>}
     <div className="td-mark-layer" aria-hidden="true">
       <svg width={innerWidth} height={innerHeight}>
-        <defs>
-          <marker id="td-arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto"><path d="M 0 0 L 10 5 L 0 10 z" fill="#0067D9"/></marker>
-          {marks.filter(m=>m.kind==="arrow"&&m.color).map(m=><marker key={m.id} id={`td-arrow-${m.id}`} viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto"><path d="M 0 0 L 10 5 L 0 10 z" style={{fill:m.color!}}/></marker>)}
-        </defs>
         {marks.filter(m=>m.kind==="circle").map(m=>{
-          const length=ellipseCircumference(m.rect.w/2,m.rect.h/2),progress=m.progress??1;
-          return <ellipse key={m.id} data-gerald-mark-kind="circle" cx={m.rect.x} cy={m.rect.y} rx={m.rect.w/2} ry={m.rect.h/2}
-            strokeDasharray={`${length} ${length}`} strokeDashoffset={length*(1-progress)} style={{stroke:m.color??undefined}}/>;
+          const progress=m.progress??1;
+          return <g key={m.id} data-gerald-mark-kind="circle">
+            <path d={pointsToPath(m.points??[])} pathLength={1} strokeDasharray="1 1" strokeDashoffset={1-progress} style={{stroke:m.color??undefined}}/>
+            <path className="sketch-ghost" d={pointsToPath(m.ghostPoints??[])} pathLength={1} strokeDasharray="1 1" strokeDashoffset={1-progress} style={{stroke:m.color??undefined}}/>
+          </g>;
         })}
         {marks.filter(m=>m.kind==="underline").map(m=><line key={m.id} data-gerald-mark-kind="underline" x1={m.rect.x-m.rect.w/2} x2={m.rect.x-m.rect.w/2+m.rect.w*(m.progress??1)} y1={m.rect.y+m.rect.h/2} y2={m.rect.y+m.rect.h/2} style={{stroke:m.color??undefined}}/>)}
         {marks.filter(m=>m.kind==="point").map(m=><circle key={m.id} data-gerald-mark-kind="point" cx={m.rect.x} cy={m.rect.y} r="5" style={{fill:m.color??undefined}}/> )}
         {marks.filter(m=>m.kind==="highlight").map(m=><rect key={m.id} data-gerald-mark-kind="highlight" x={m.rect.x-m.rect.w/2} y={m.rect.y-m.rect.h/2} width={m.rect.w*(m.progress??1)} height={m.rect.h} style={{fill:m.fill??undefined,stroke:m.color??undefined}}/>)}
-        {marks.filter(m=>m.kind==="arrow"&&m.to).map(m=><line key={m.id} data-gerald-mark-kind="arrow" x1={m.rect.x} y1={m.rect.y} x2={m.rect.x+m.rect.w*(m.progress??1)} y2={m.rect.y+m.rect.h*(m.progress??1)} markerEnd={m.color?`url(#td-arrow-${m.id})`:"url(#td-arrow)"} style={{stroke:m.color??undefined}}/> )}
+        {marks.filter(m=>m.kind==="arrow"&&m.headPoints).map(m=>{
+          const [wingA,tip,wingB]=m.headPoints!;
+          return <g key={m.id} data-gerald-mark-kind="arrow">
+            <path d={pointsToPath(m.shaftPoints??[])} pathLength={1} strokeDasharray="1 1" strokeDashoffset={1-(m.progress??1)} style={{stroke:m.color??undefined}}/>
+            <path d={`M ${wingA.x} ${wingA.y} L ${tip.x} ${tip.y} L ${wingB.x} ${wingB.y}`} pathLength={1} strokeDasharray="1 1" strokeDashoffset={1-(m.head??1)} style={{stroke:m.color??undefined}}/>
+          </g>;
+        })}
         {marks.filter(m=>(m.kind==="note"||m.kind==="tip")&&m.leader&&m.annotationTarget).map(m=>{
           const line=annotationLeader(m.annotationTarget!,m.rect);
           return <line key={`${m.id}-leader`} x1={line.x1} y1={line.y1} x2={line.x2} y2={line.y2} style={{stroke:m.color??undefined}}/>;
@@ -383,21 +585,26 @@ function TD(){
           </foreignObject>)}
         {marks.filter(m=>m.kind==="write"||m.kind==="write_math").map(m=><text key={m.id} data-gerald-mark-kind={m.kind} x={m.rect.x} y={m.rect.y} className="td-note" style={{fill:m.color??"#111"}}>{m.text}</text>)}
       </svg>
-      <div className="gerald-pointer" aria-hidden="true" style={{left:cursor.x,top:cursor.y,opacity:cursor.visible?1:0}}>➤</div>
+      <div className="gerald-pointer" aria-hidden="true" style={{left:cursor.x,top:cursor.y,opacity:cursor.visible?1:0}}><i/>Gerald</div>
     </div>
-    <div className={`td-assist${liveMode?" live":""}`}>
+    <div className={`td-assist${liveMode||docMode?" live":""}${boardOpen?" board-open":""}`}>
       {!voiceMode&&answer&&<div className="td-answer" key={answer.q}><span className="td-q">{answer.q}</span><p>{answer.text||"…"}</p><button className="td-go" onClick={()=>clickExercise(answer.ex)}>Viens, on va au tableau · {answer.ex.title} →</button></div>}
       {voiceMode&&!liveMode&&suggestion&&<button className="td-go" onClick={()=>openBoard(activeExercise.id)}>Viens, on va au tableau · {activeExercise.title} →</button>}
       {voiceMode&&caption&&<div className={`td-caption${captionFading?" fade":""}`}><Reveal text={caption}/></div>}
       <form className="td-ask" onSubmit={onSubmit}><div className="voice-status"><Orb status={status} size={30} level={audioLevel}/>{voiceError&&<span className="td-voice-error" role="status">{voiceError}</span>}</div>
         <input data-gerald-id="30" value={question} onChange={e=>setQuestion(e.target.value)} onFocus={()=>bridge.requestFocus(true)} onBlur={()=>bridge.requestFocus(false)} placeholder={liveMode?"Pose une question à Gerald…":"Une question sur le TD ? Je t’explique."}/>
-        {voiceMode&&<kbd>CTRL + SHIFT</kbd>}
+        {voiceMode
+          ? <><span className="td-hold">Maintiens <kbd>Ctrl</kbd> + <kbd>Shift</kbd></span><span className={`td-wave${status==="speaking"||status==="listening"?" on":""}`} aria-hidden="true">{Array.from({length:12},(_,i)=><i key={i} style={{animationDelay:`${i*70}ms`}}/>)}</span></>
+          : <kbd>CTRL + SHIFT</kbd>}
         {voiceMode&&<button type="button" className="td-mic" aria-label={sessionOpen?(micEnabled?"Couper le micro":"Activer le micro"):"Parler à Gerald"} aria-pressed={sessionOpen?micEnabled:undefined} disabled={connecting&&!sessionOpen} onClick={toggleMicrophone}>{sessionOpen?(micEnabled?"Couper le micro":"Activer le micro"):connecting?"Connexion…":"Parler à Gerald"}</button>}
         {voiceMode&&sessionOpen&&<button type="button" className="td-stop" onClick={stop}>Arrêter</button>}
-        {!voiceMode&&<kbd>CTRL + SHIFT</kbd>}
       </form>
     </div>
-    {voiceMode&&<div className={`td-board-overlay ${boardOpen?"open":""}`}>{!liveMode&&<button className="td-board-close" onClick={()=>{boardOpenRef.current=false;setBoardOpen(false);}}>Retour au TD</button>}{boardSrc&&<iframe ref={frame} title="Tableau" src={boardSrc} />}</div>}
+    {voiceMode&&<div className={`td-board-overlay ${boardOpen?"open":""}`}>{docMode
+      ? <button className="td-board-close" onClick={()=>{boardOpenRef.current=false;setBoardOpen(false);}}>Retour au document</button>
+      : !liveMode&&<button className="td-board-close" onClick={()=>{boardOpenRef.current=false;setBoardOpen(false);}}>Retour au TD</button>}
+      {boardSrc&&<iframe ref={frame} title="Tableau" src={boardSrc} />}
+    </div>}
     <audio ref={audio} autoPlay/>
   </main>;
 }

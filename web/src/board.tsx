@@ -3,7 +3,7 @@ import { createRoot } from "react-dom/client";
 import katex from "katex";
 import "katex/dist/katex.min.css";
 import "./board.css";
-import {annotationLeader, annotationSize, arrowEndpoints, createCursorMotion, ellipseCircumference, intentColor, placeAnnotation, segmentBoardText, type AnnotationRect, type BoardTextPart, type CursorVisual} from "./annotations";
+import {annotationLeader, annotationSize, arrowEndpoints, createCursorMotion, cursorRestBeside, intentColor, placeAnnotation, pointsToPath, seedFrom, sketchArrow, sketchEllipsePoints, segmentBoardText, type AnnotationRect, type BoardTextPart, type CursorMotion, type CursorPoint, type CursorVisual} from "./annotations";
 import { mountNotch } from "./notch";
 
 type Pt = {x: number; y: number; p: number};
@@ -20,7 +20,7 @@ type PlotData = {
   title?: string;
 };
 type GeraldText = {id: string; text: string; x: number; y: number; size: number; color: string; html?: string; parts?: Array<BoardTextPart & {html?: string}>};
-type BoardMark = {id: string; kind: string; x: number; y: number; w: number; h: number; text: string; color?: string | null; fill?: string | null; target?: AnnotationRect; leader?: boolean; progress?: number};
+type BoardMark = {id: string; kind: string; x: number; y: number; w: number; h: number; text: string; color?: string | null; fill?: string | null; target?: AnnotationRect; leader?: boolean; progress?: number; head?: number; points?: CursorPoint[]; ghostPoints?: CursorPoint[]; shaftPoints?: CursorPoint[]; headPoints?: [CursorPoint, CursorPoint, CursorPoint]};
 type BoardSnapshot = {
   plotData: PlotData | null;
   plotBox: Win;
@@ -29,6 +29,66 @@ type BoardSnapshot = {
   plotVisible: boolean;
   exerciseRect: DOMRect | null;
 };
+
+function boundsOfPoints(points: CursorPoint[], padding = 0): AnnotationRect {
+  const xs = points.map(({x}) => x);
+  const ys = points.map(({y}) => y);
+  const left = Math.min(...xs), top = Math.min(...ys);
+  return {x: left - padding, y: top - padding, w: Math.max(...xs) - left + padding * 2, h: Math.max(...ys) - top + padding * 2};
+}
+
+function unionBounds(...rects: AnnotationRect[]): AnnotationRect {
+  const left = Math.min(...rects.map((rect) => rect.x));
+  const top = Math.min(...rects.map((rect) => rect.y));
+  const right = Math.max(...rects.map((rect) => rect.x + rect.w));
+  const bottom = Math.max(...rects.map((rect) => rect.y + rect.h));
+  return {x: left, y: top, w: right - left, h: bottom - top};
+}
+
+function traceSketchPath(ctx: CanvasRenderingContext2D, points: CursorPoint[]) {
+  if (!points.length) return;
+  ctx.beginPath();
+  ctx.moveTo(points[0].x, points[0].y);
+  for (let index = 1; index < points.length; index += 1) {
+    const previous = points[index - 1], current = points[index];
+    ctx.quadraticCurveTo(previous.x, previous.y, (previous.x + current.x) / 2, (previous.y + current.y) / 2);
+  }
+  if (points.length > 1) {
+    const last = points[points.length - 1];
+    ctx.quadraticCurveTo(last.x, last.y, last.x, last.y);
+  }
+}
+
+function sketchLength(points: CursorPoint[]): number {
+  return points.reduce((length, point, index) => index ? length + Math.hypot(point.x - points[index - 1].x, point.y - points[index - 1].y) : 0, 0);
+}
+
+function setCanvasProgress(ctx: CanvasRenderingContext2D, length: number, progress: number) {
+  ctx.setLineDash(progress >= 1 ? [] : [length, length]);
+  ctx.lineDashOffset = length * (1 - progress);
+}
+
+function animateHeadProgress(onProgress: (progress: number) => void): Promise<void> {
+  if (window.matchMedia("(prefers-reduced-motion: reduce)").matches) {
+    onProgress(1);
+    return Promise.resolve();
+  }
+  const start = performance.now();
+  return new Promise((resolve) => {
+    const frame = (now: number) => {
+      const progress = Math.min(1, (now - start) / 180);
+      onProgress(progress);
+      if (progress < 1) requestAnimationFrame(frame);
+      else resolve();
+    };
+    requestAnimationFrame(frame);
+  });
+}
+
+function moveToRest(queue: CursorMotion, to: CursorPoint): Promise<void> {
+  const current = queue.current();
+  return Math.hypot(to.x - current.x, to.y - current.y) < 4 ? Promise.resolve() : queue.moveTo(to);
+}
 
 const isNumber = (value: unknown): value is number => typeof value === "number" && Number.isFinite(value);
 const mathToLatex = (value: string) => value
@@ -437,19 +497,32 @@ function Board() {
     }
     if (canvas.current) ctx.drawImage(canvas.current, 0, 0, width, height);
     for (const text of current.texts) {
-      ctx.fillStyle = "#0067D9";
+      ctx.fillStyle = "#7C3AED";
       ctx.font = `500 ${text.size}px sans-serif`;
       ctx.fillText(text.text, text.x, text.y, Math.max(100, width - text.x));
     }
     for (const mark of current.marks) {
       const progress = mark.progress ?? 1;
-      ctx.strokeStyle = mark.color ?? "#0067D9";
-      ctx.fillStyle = mark.color ?? "#0067D9";
+      ctx.strokeStyle = mark.color ?? "#7C3AED";
+      ctx.fillStyle = mark.color ?? "#7C3AED";
       ctx.lineWidth = 3;
       if (mark.kind === "circle") {
-        ctx.beginPath();
-        ctx.ellipse(mark.x, mark.y, mark.w / 2, mark.h / 2, 0, 0, Math.PI * 2 * progress);
-        ctx.stroke();
+        if (mark.points) {
+          traceSketchPath(ctx, mark.points);
+          setCanvasProgress(ctx, sketchLength(mark.points), progress);
+          ctx.stroke();
+          ctx.setLineDash([]);
+          ctx.lineDashOffset = 0;
+        }
+        if (mark.ghostPoints) {
+          ctx.save();
+          ctx.globalAlpha = 0.35;
+          ctx.lineWidth = 1.4;
+          traceSketchPath(ctx, mark.ghostPoints);
+          setCanvasProgress(ctx, sketchLength(mark.ghostPoints), progress);
+          ctx.stroke();
+          ctx.restore();
+        }
       } else if (mark.kind === "underline") {
         ctx.beginPath();
         ctx.moveTo(mark.x - mark.w / 2, mark.y + mark.h / 2);
@@ -463,22 +536,36 @@ function Board() {
         ctx.font = "12px sans-serif";
         ctx.fillText(mark.text, mark.x + 8, mark.y - 8);
       } else if (mark.kind === "highlight") {
-        ctx.fillStyle = "rgba(10,132,255,.16)";
+        ctx.fillStyle = "rgba(124,58,237,.12)";
         ctx.fillRect(mark.x - mark.w / 2, mark.y - mark.h / 2, mark.w * progress, mark.h);
-        ctx.strokeStyle = "#0067D9";
+        ctx.strokeStyle = "#7C3AED";
         ctx.strokeRect(mark.x - mark.w / 2, mark.y - mark.h / 2, mark.w * progress, mark.h);
       } else if (mark.kind === "arrow") {
-        ctx.beginPath();
-        ctx.moveTo(mark.x, mark.y);
-        ctx.lineTo(mark.x + mark.w * progress, mark.y + mark.h * progress);
-        ctx.stroke();
+        if (mark.shaftPoints) {
+          traceSketchPath(ctx, mark.shaftPoints);
+          setCanvasProgress(ctx, sketchLength(mark.shaftPoints), progress);
+          ctx.stroke();
+          ctx.setLineDash([]);
+          ctx.lineDashOffset = 0;
+        }
+        if (mark.headPoints) {
+          const [wingA, tip, wingB] = mark.headPoints;
+          ctx.beginPath();
+          ctx.moveTo(wingA.x, wingA.y);
+          ctx.lineTo(tip.x, tip.y);
+          ctx.lineTo(wingB.x, wingB.y);
+          setCanvasProgress(ctx, Math.hypot(tip.x - wingA.x, tip.y - wingA.y) + Math.hypot(wingB.x - tip.x, wingB.y - tip.y), mark.head ?? 1);
+          ctx.stroke();
+          ctx.setLineDash([]);
+          ctx.lineDashOffset = 0;
+        }
       } else if (mark.kind === "note") {
         if (mark.leader && mark.target) {
           const line = annotationLeader(mark.target, {x: mark.x, y: mark.y, w: mark.w, h: mark.h});
           ctx.beginPath();
           ctx.moveTo(line.x1, line.y1);
           ctx.lineTo(line.x2, line.y2);
-          ctx.strokeStyle = "#0067D9";
+          ctx.strokeStyle = "#7C3AED";
           ctx.stroke();
         }
         ctx.fillStyle = "#FFFDBD";
@@ -492,7 +579,7 @@ function Board() {
           ctx.beginPath();
           ctx.moveTo(line.x1, line.y1);
           ctx.lineTo(line.x2, line.y2);
-          ctx.strokeStyle = "#0067D9";
+          ctx.strokeStyle = "#7C3AED";
           ctx.stroke();
         }
         ctx.fillStyle = "#161616";
@@ -561,21 +648,28 @@ function Board() {
     });
     return [...domElements, ...inkElements];
   };
-  const placeBeside = (target: AnnotationRect, text: string, kind: "note" | "tip") => {
-    const occupied = [
+  const annotationOccupants = (target?: AnnotationRect, extra: AnnotationRect[] = []) => [
       ...elements().map((element) => element.rect),
       ...marks.filter((mark) => mark.kind === "note" || mark.kind === "tip")
         .map((mark) => ({x: mark.x, y: mark.y, w: mark.w, h: mark.h})),
       ...pendingAnnotations.current.values(),
-      target,
+      ...(target ? [target] : []),
+      ...extra,
     ];
-    if (embedded) occupied.push({x: 0, y: 0, w: minBoardContentX(), h: innerHeight});
-    return placeAnnotation(target, annotationSize(text, kind), occupied, {w: innerWidth, h: innerHeight});
-  };
+  const safeRail = () => embedded ? [{x: 0, y: 0, w: minBoardContentX(), h: innerHeight}] : [];
+  const viewport = () => ({w: innerWidth, h: innerHeight});
+  const occupiedForAnnotations = (target?: AnnotationRect, extra: AnnotationRect[] = []) =>
+    [...annotationOccupants(target, extra), ...safeRail()];
+  const placeBeside = (target: AnnotationRect, text: string, kind: "note" | "tip") =>
+    placeAnnotation(target, annotationSize(text, kind), occupiedForAnnotations(target), viewport());
+  const restBeside = (bounds: AnnotationRect, extra: AnnotationRect[] = []) =>
+    cursorRestBeside(bounds, occupiedForAnnotations(bounds, extra), viewport());
   const waitForPaint = () => new Promise<void>((resolve) => requestAnimationFrame(() => requestAnimationFrame(() => resolve())));
   const addMark = (mark: BoardMark) => setMarks((items) => [...items, mark]);
   const updateMarkProgress = (id: string, progress: number) =>
     setMarks((items) => items.map((mark) => mark.id === id ? {...mark, progress} : mark));
+  const updateMarkHead = (id: string, head: number) =>
+    setMarks((items) => items.map((mark) => mark.id === id ? {...mark, head} : mark));
   const targetRect = (args: Record<string, unknown>) => {
     const wanted = typeof args.target_text === "string" ? args.target_text : "";
     const elementId = Number(args.element_id);
@@ -657,6 +751,8 @@ function Board() {
       motion.enqueue(async (queue) => {
         await queue.moveTo({x, y});
         setGeraldTexts((items) => [...items, {id, text, x, y, size, color: color ?? "#111", html, parts}]);
+        const bounds = {x, y: y - size, w: Math.max(size, text.length * size * 0.65), h: size * 1.25};
+        await moveToRest(queue, restBeside(bounds));
       });
       return {ok: true};
     }
@@ -672,7 +768,9 @@ function Board() {
           id, kind: "tip", x: placement.rect.x, y: placement.rect.y, ...annotationSize(args.text as string, "tip"),
           text: args.text as string, color, target: target ? point : undefined, leader: target ? placement.leader : false,
         });
+        await waitForPaint();
         pendingAnnotations.current.delete(id);
+        await moveToRest(queue, restBeside(unionBounds(point, placement.rect), [point, placement.rect]));
       });
       return {ok: true, target: {x: point.x, y: point.y, w: point.w, h: point.h}, annotation: placement.rect};
     }
@@ -683,11 +781,16 @@ function Board() {
       const endpoints = arrowEndpoints(from, to);
       if (!endpoints) return {ok: false, error: "arrow endpoints could not be calculated"};
       const {x1, y1, x2, y2} = endpoints;
+      const {shaft, head} = sketchArrow(x1, y1, x2, y2, seedFrom(id));
+      const arrowBounds = boundsOfPoints([...shaft, ...head], 2);
       motion.enqueue(async (queue) => {
-        await queue.moveTo({x: x1, y: y1});
-        addMark({id, kind: "arrow", x: x1, y: y1, w: x2 - x1, h: y2 - y1, text: "", color, progress: 0});
+        await queue.moveTo(shaft[0]);
+        addMark({id, kind: "arrow", x: x1, y: y1, w: x2 - x1, h: y2 - y1, text: "", color, progress: 0, head: 0, shaftPoints: shaft, headPoints: head});
         await waitForPaint();
-        await queue.moveTo({x: x2, y: y2}, (progress) => updateMarkProgress(id, progress));
+        await queue.moveAlong(shaft, Math.max(380, Math.min(800, sketchLength(shaft) * 2.5)),
+          (progress) => updateMarkProgress(id, progress));
+        await animateHeadProgress((progress) => updateMarkHead(id, progress));
+        await moveToRest(queue, restBeside(arrowBounds));
       });
       return {ok: true, target: {x: x2, y: y2}, from: {x: x1, y: y1}, to: {x: x2, y: y2}};
     }
@@ -710,7 +813,9 @@ function Board() {
         motion.enqueue(async (queue) => {
           await queue.moveTo({x: target.x + target.w / 2, y: target.y + target.h / 2});
           addMark(mark);
+          await waitForPaint();
           pendingAnnotations.current.delete(id);
+          await moveToRest(queue, restBeside(unionBounds(target, placement.rect), [target, placement.rect]));
         });
         return {ok: true, target, annotation: placement.rect};
       }
@@ -730,21 +835,27 @@ function Board() {
           await queue.moveTo(end, (progress) => updateMarkProgress(id, progress));
         });
       } else if (name === "circle") {
-        const start = {x: x + width / 2, y};
+        const points = sketchEllipsePoints(x, y, width / 2, height / 2, seedFrom(id));
+        const ghostPoints = sketchEllipsePoints(x, y, width / 2, height / 2, seedFrom(id) + 0.37);
+        const bounds = boundsOfPoints([...points, ...ghostPoints], 2);
         motion.enqueue(async (queue) => {
-          await queue.moveTo(start);
-          addMark({...mark, progress: 0});
+          await queue.moveTo(points[0]);
+          addMark({...mark, progress: 0, points, ghostPoints});
           await waitForPaint();
-          for (let segment = 1; segment <= 4; segment += 1) {
-            const angle = segment * Math.PI / 2;
-            const end = {x: x + width / 2 * Math.cos(angle), y: y + height / 2 * Math.sin(angle)};
-            await queue.moveTo(end, (progress) => updateMarkProgress(id, (segment - 1 + progress) / 4));
-          }
+          await queue.moveAlong(points, Math.max(650, Math.min(1100, sketchLength(points) * 2.2)),
+            (progress) => updateMarkProgress(id, progress));
+          await moveToRest(queue, restBeside(bounds));
         });
       } else {
+        const bounds = name === "point"
+          ? {x: x - 5, y: y - 5, w: 10, h: 10}
+          : name === "highlight"
+            ? {x: x - width / 2, y: y - height / 2, w: width, h: height}
+            : {x: x - width / 2, y: y + height / 2 - 2, w: width, h: 4};
         motion.enqueue(async (queue) => {
           await queue.moveTo({x, y});
           addMark({...mark, progress: 1});
+          await moveToRest(queue, restBeside(bounds));
         });
       }
       return {ok: true, target: {x, y}};
@@ -797,18 +908,12 @@ function Board() {
       </div>)}
     </div>
     <svg className="gerald-marks" width={innerWidth} height={innerHeight}>
-      <defs>
-        <marker id="gerald-arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M 0 0 L 10 5 L 0 10 z"/></marker>
-        {marks.filter((mark) => mark.kind === "arrow" && mark.color).map((mark) =>
-          <marker key={mark.id} id={`gerald-arrow-${mark.id}`} viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
-            <path d="M 0 0 L 10 5 L 0 10 z" style={{fill: mark.color!}}/>
-          </marker>)}
-      </defs>
       {marks.filter((mark) => mark.kind === "circle").map((mark) => {
-        const length = ellipseCircumference(mark.w / 2, mark.h / 2);
         const progress = mark.progress ?? 1;
-        return <ellipse key={mark.id} data-gerald-mark-kind="circle" cx={mark.x} cy={mark.y} rx={mark.w / 2} ry={mark.h / 2}
-          strokeDasharray={`${length} ${length}`} strokeDashoffset={length * (1 - progress)} style={{stroke: mark.color ?? undefined}}/>;
+        return <g key={mark.id} data-gerald-mark-kind="circle">
+          <path d={pointsToPath(mark.points ?? [])} pathLength={1} strokeDasharray="1 1" strokeDashoffset={1 - progress} style={{stroke: mark.color ?? undefined}}/>
+          <path className="sketch-ghost" d={pointsToPath(mark.ghostPoints ?? [])} pathLength={1} strokeDasharray="1 1" strokeDashoffset={1 - progress} style={{stroke: mark.color ?? undefined}}/>
+        </g>;
       })}
       {marks.filter((mark) => mark.kind === "underline").map((mark) =>
         <line key={mark.id} data-gerald-mark-kind="underline" x1={mark.x - mark.w / 2} x2={mark.x - mark.w / 2 + mark.w * (mark.progress ?? 1)} y1={mark.y + mark.h / 2} y2={mark.y + mark.h / 2} style={{stroke: mark.color ?? undefined}}/>)}
@@ -816,8 +921,13 @@ function Board() {
         <g key={mark.id} data-gerald-mark-kind="point"><circle cx={mark.x} cy={mark.y} r="5" style={{fill: mark.color ?? undefined}}/><text x={mark.x + 8} y={mark.y - 8} style={{fill: mark.color ?? undefined}}>{mark.text}</text></g>)}
       {marks.filter((mark) => mark.kind === "highlight").map((mark) =>
         <rect key={mark.id} data-gerald-mark-kind="highlight" x={mark.x - mark.w / 2} y={mark.y - mark.h / 2} width={mark.w * (mark.progress ?? 1)} height={mark.h} style={{fill: mark.fill ?? undefined, stroke: mark.color ?? undefined}}/>)}
-      {marks.filter((mark) => mark.kind === "arrow").map((mark) =>
-        <line key={mark.id} data-gerald-mark-kind="arrow" x1={mark.x} y1={mark.y} x2={mark.x + mark.w * (mark.progress ?? 1)} y2={mark.y + mark.h * (mark.progress ?? 1)} markerEnd={mark.color ? `url(#gerald-arrow-${mark.id})` : "url(#gerald-arrow)"} style={{stroke: mark.color ?? undefined}}/>)}
+      {marks.filter((mark) => mark.kind === "arrow").map((mark) => {
+        const [wingA, tip, wingB] = mark.headPoints ?? [{x: mark.x, y: mark.y}, {x: mark.x + mark.w, y: mark.y + mark.h}, {x: mark.x + mark.w, y: mark.y + mark.h}];
+        return <g key={mark.id} data-gerald-mark-kind="arrow">
+          <path d={pointsToPath(mark.shaftPoints ?? [])} pathLength={1} strokeDasharray="1 1" strokeDashoffset={1 - (mark.progress ?? 1)} style={{stroke: mark.color ?? undefined}}/>
+          <path d={`M ${wingA.x} ${wingA.y} L ${tip.x} ${tip.y} L ${wingB.x} ${wingB.y}`} pathLength={1} strokeDasharray="1 1" strokeDashoffset={1 - (mark.head ?? 1)} style={{stroke: mark.color ?? undefined}}/>
+        </g>;
+      })}
       {marks.filter((mark) => (mark.kind === "note" || mark.kind === "tip") && mark.leader && mark.target).map((mark) => {
         const line = annotationLeader(mark.target!, {x: mark.x, y: mark.y, w: mark.w, h: mark.h});
         return <line key={`${mark.id}-leader`} x1={line.x1} y1={line.y1} x2={line.x2} y2={line.y2} style={{stroke: mark.color ?? undefined}}/>;
@@ -832,7 +942,7 @@ function Board() {
       <div key={mark.id} className="gerald-tip" data-gerald-tip={mark.id}
         data-gerald-mark-kind="tip"
         style={{left: mark.x, top: mark.y, width: mark.w, height: mark.h, color: mark.color ?? undefined, border: mark.color ? `1px solid ${mark.color}` : undefined}}>{mark.text}</div>)}
-    <div className="gerald-pointer" aria-hidden="true" style={{left:cursor.x,top:cursor.y,opacity:cursor.visible?1:0}}>➤</div>
+    <div className="gerald-pointer" aria-hidden="true" style={{left:cursor.x,top:cursor.y,opacity:cursor.visible?1:0}}><i/>Gerald</div>
     {plotVisible && plotData && <PlotWindow key={plotRevision} data={plotData} initialBox={plotBox}
       onClose={() => setPlotVisible(false)} onBoxChange={setPlotBox}/>}
     <nav className="board-tools">

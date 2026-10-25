@@ -11,6 +11,7 @@ from urllib.error import HTTPError, URLError
 from urllib.parse import parse_qs, urlencode, urlsplit
 from urllib.request import Request, urlopen
 from uuid import uuid4
+import unicodedata
 
 from gerald.tools.plot import build_plot
 from gerald.tools.registry import TOOL_SCHEMAS
@@ -50,7 +51,8 @@ INTENT_VALUES = ["correction", "valide", "remarque"]
 COLOR_GUIDANCE = (
     "Code couleur : rouge (intent=correction) pour signaler une erreur ou la correction, "
     "vert (intent=valide) pour ce qui est juste, bleu (intent=remarque) pour une remarque "
-    "ou un rappel de méthode ; l'écriture normale reste noire."
+    "ou un rappel de méthode ; l'écriture normale reste noire. Si tu montres une erreur "
+    "avec une flèche, souligne aussi le terme fautif en rouge (intent=correction) dans le même tour."
 )
 TD_EXERCISES = [
     ("exercice-1", "Exercice 1", ["Résous dans ℝ : x² − 5x + 6 = 0"]),
@@ -63,7 +65,7 @@ MAX_BODY_BYTES = 1_000_000
 logger = logging.getLogger("web_voice_board")
 
 
-def _web_tools(live_mode: bool = False) -> list[dict]:
+def _web_tools(live_mode: bool = False, doc_mode: bool = False) -> list[dict]:
     def preserve_targets(schema: dict) -> None:
         properties = schema.get("properties")
         if isinstance(properties, dict):
@@ -152,7 +154,21 @@ def _web_tools(live_mode: bool = False) -> list[dict]:
             },
         }
     )
-    if not live_mode:
+    if doc_mode:
+        tools.append(
+            {
+                "type": "function",
+                "name": "open_board",
+                "description": "Open an empty board over the current document without ending the voice session.",
+                "parameters": {
+                    "type": "object",
+                    "properties": {},
+                    "required": [],
+                    "additionalProperties": False,
+                },
+            }
+        )
+    elif not live_mode:
         tools.append(
             {
                 "type": "function",
@@ -177,10 +193,16 @@ def _web_tools(live_mode: bool = False) -> list[dict]:
 WEB_TOOLS = _web_tools()
 
 
+def sanitize_document_title(title: str) -> str:
+    sanitized = "".join(character for character in title if unicodedata.category(character) != "Cc")
+    return sanitized.strip()[:120] or "document sans titre"
+
+
 def session_instructions(
     title: str = DEFAULT_TITLE,
     lines: list[str] | None = None,
     live_mode: bool = False,
+    doc_mode: bool = False,
 ) -> str:
     prompt = SYSTEM_PROMPT.read_text(encoding="utf-8")
     board_guidance = (
@@ -198,6 +220,19 @@ def session_instructions(
             "Do not call open_board. "
         )
         return f"{prompt.rstrip()}\n{live_guidance}{board_guidance}{COLOR_GUIDANCE}"
+
+    if doc_mode:
+        prompt = prompt.partition("\n## Board mode\n")[0]
+        document_title = sanitize_document_title(title)
+        document_guidance = (
+            f"DOCUMENT MODE — the learner opened « {document_title} ». Work directly on this visible document: "
+            "explain its content, point to relevant passages, and use element_id for underline, circle, highlight, "
+            "arrow, or other marks. The learner's visible document elements are supplied with each turn. "
+            "Never invent document content or provide a full exercise solution; guide the learner one step at a time. "
+            "If the learner asks to use the board, call parameterless open_board to open an empty board overlay; "
+            "the document remains open underneath. Do not include or assume any TD exercise list. "
+        )
+        return f"{prompt.rstrip()}\n{document_guidance}{board_guidance}{COLOR_GUIDANCE}"
 
     exercise_lines = lines if lines is not None else DEFAULT_LINES
     td_context = "\n".join(
@@ -241,12 +276,13 @@ def build_session_config(
     title: str = DEFAULT_TITLE,
     lines: list[str] | None = None,
     live_mode: bool = False,
+    doc_mode: bool = False,
 ) -> dict:
-    tools = _web_tools(live_mode) if live_mode else deepcopy(WEB_TOOLS)
+    tools = _web_tools(live_mode, doc_mode) if live_mode or doc_mode else deepcopy(WEB_TOOLS)
     return {
         "type": "realtime",
         "model": model,
-        "instructions": session_instructions(title, lines, live_mode),
+        "instructions": session_instructions(title, lines, live_mode, doc_mode),
         "audio": {
             "output": {"voice": os.getenv("GERALD_VOICE", "marin")},
             "input": {
@@ -355,6 +391,30 @@ class WebVoiceHandler(SimpleHTTPRequestHandler):
             "application/json; charset=utf-8",
         )
 
+    def _reject_post(self) -> None:
+        self.close_connection = True
+        try:
+            length = int(self.headers.get("Content-Length", ""))
+            if 0 <= length <= MAX_BODY_BYTES:
+                remaining = length
+                while remaining:
+                    chunk = self.rfile.read(min(65536, remaining))
+                    if not chunk:
+                        break
+                    remaining -= len(chunk)
+        except (ValueError, OSError):
+            pass
+        body = json.dumps(
+            {"ok": False, "error": "origin or host not allowed"}
+        ).encode("utf-8")
+        self.send_response(403)
+        self.send_header("Content-Type", "application/json; charset=utf-8")
+        self.send_header("Content-Length", str(len(body)))
+        self.send_header("Connection", "close")
+        self.send_header("Cache-Control", "no-store")
+        self.end_headers()
+        self.wfile.write(body)
+
     def _read_body(self, limit: int = MAX_BODY_BYTES) -> bytes:
         try:
             length = int(self.headers.get("Content-Length", ""))
@@ -415,7 +475,7 @@ class WebVoiceHandler(SimpleHTTPRequestHandler):
 
     def do_POST(self) -> None:
         if not self._valid_origin():
-            self._send_json(403, {"ok": False, "error": "origin or host not allowed"})
+            self._reject_post()
             return
         parsed = urlsplit(self.path)
         if parsed.path == "/api/session":
@@ -434,8 +494,13 @@ class WebVoiceHandler(SimpleHTTPRequestHandler):
             sdp = self._read_body().decode("utf-8")
             if not sdp.strip():
                 raise ValueError("SDP offer is empty")
-            live_mode = parse_qs(query).get("live", ["0"])[-1] == "1"
-            title, lines = ("", []) if live_mode else _parse_exercise(query)
+            query_values = parse_qs(query)
+            live_mode = query_values.get("live", ["0"])[-1] == "1"
+            doc_mode = query_values.get("mode", [""])[-1] == "doc"
+            if doc_mode:
+                title, lines = sanitize_document_title(query_values.get("title", [""])[-1]), []
+            else:
+                title, lines = ("", []) if live_mode else _parse_exercise(query)
         except OverflowError as error:
             self._send_json(413, {"ok": False, "error": str(error)})
             return
@@ -444,7 +509,7 @@ class WebVoiceHandler(SimpleHTTPRequestHandler):
             return
 
         model = os.getenv("GERALD_MODEL", "gpt-realtime-2").strip() or "gpt-realtime-2"
-        session = build_session_config(model, title, lines, live_mode)
+        session = build_session_config(model, title, lines, live_mode, doc_mode)
         body, content_type = build_multipart(sdp, session)
         request = Request(
             OPENAI_REALTIME_CALLS,

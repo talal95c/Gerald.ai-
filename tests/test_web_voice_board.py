@@ -171,6 +171,7 @@ def test_session_posts_sdp_and_filtered_realtime_config(monkeypatch, server):
         "vert (intent=valide)",
         "bleu (intent=remarque)",
         "l'écriture normale reste noire",
+        "souligne aussi le terme fautif en rouge (intent=correction) dans le même tour",
     ):
         assert color_intent in session["instructions"]
     assert "une seule underline ou circle (intent=correction)" in session["instructions"]
@@ -234,6 +235,34 @@ def test_live_session_omits_default_exercise_context(monkeypatch, server):
         tool["description"] for tool in session["tools"]
     )
     assert "open_board" not in {tool["name"] for tool in session["tools"]}
+
+
+def test_document_session_uses_sanitized_title_and_live_tools():
+    config = web_voice_board.build_session_config(
+        "gpt-realtime-2",
+        "Cours\u0000 de Pythagore",
+        [],
+        doc_mode=True,
+    )
+    instructions = config["instructions"]
+    assert "DOCUMENT MODE" in instructions
+    assert "« Cours de Pythagore »" in instructions
+    assert "x² − 5x + 6" not in instructions
+    assert "x**2-5*x+6" not in instructions
+    assert "do not answer only with speech" not in instructions
+    assert "provide a full exercise solution" in instructions
+    tools = {tool["name"]: tool for tool in config["tools"]}
+    assert set(tools) == web_voice_board.WEB_TOOL_NAMES
+    open_board = tools["open_board"]["parameters"]
+    assert open_board["properties"] == {}
+    assert open_board["required"] == []
+
+
+def test_document_title_sanitization_strips_controls_and_limits_length():
+    title = "  A\u0000B\n" + "x" * 130
+    sanitized = web_voice_board.sanitize_document_title(title)
+    assert sanitized == ("AB" + "x" * 118)
+    assert len(sanitized) == 120
 
 
 def test_plot_endpoint_returns_root_and_vertex_points(server):
@@ -313,6 +342,9 @@ def test_root_redirects_to_landing_and_td_board_defaults_to_voice(server):
     assert headers["Location"] == "/landing.html"
 
     status, _body, _headers = _request(server, "GET", "/landing.html")
+    assert status == 200
+
+    status, _body, _headers = _request(server, "GET", "/app.html")
     assert status == 200
 
     status, _body, headers = _request(server, "GET", "/td.html?voice=0&from=demo")

@@ -101,12 +101,15 @@ function DocView({doc, folder, hotkey, onBack}: {doc: AppState["documents"][numb
   </div>;
 }
 
-function Folders({docs, recaps, hotkey, onDocumentOpen, onBack}: {
+function Folders({docs, recaps, hotkey, uploadError, onDocumentOpen, onBack}: {
   docs: AppState["documents"]; recaps: Recap[]; hotkey: string;
-  onDocumentOpen: () => void; onBack: () => void;
+  uploadError?: string; onDocumentOpen: (id: number) => void; onBack: () => void;
 }) {
   const [doc, setDoc] = useState<AppState["documents"][number] | null>(null);
-  const onOpen = (d: AppState["documents"][number]) => { setDoc(d); onDocumentOpen(); };
+  const onOpen = (d: AppState["documents"][number]) => {
+    if (bridge.openDocument) onDocumentOpen(d.id);
+    else { setDoc(d); onDocumentOpen(d.id); }
+  };
   const [open, setOpen] = useState<string | null>(null);
   const groups = docs.reduce<Record<string, AppState["documents"]>>((acc, d) => { (acc[d.folder || "Mes cours"] ??= []).push(d); return acc; }, {});
   if (doc) return <DocView doc={doc} folder={doc.folder || "Mes cours"} hotkey={hotkey} onBack={()=>{setDoc(null);onBack();}}/>;
@@ -120,9 +123,10 @@ function Folders({docs, recaps, hotkey, onDocumentOpen, onBack}: {
     <button className="add" onClick={()=>setOpen(null)}>← Dossiers</button><span className="folder-title">{open}</span>
     <div className="fan">{groups[open].map((doc,i)=><article className="sheet-card" key={doc.id} onClick={()=>onOpen(doc)} style={{animationDelay:`${i*45}ms`}}>
       <i className={`dot ${doc.status}`} /><b>{doc.filename}</b><small>{doc.status === "ready" ? "Prêt" : doc.error || "Indexation…"}</small>
-      <button aria-label={`Supprimer ${doc.filename}`} onClick={e=>{e.stopPropagation();bridge.deleteDocument(doc.id);}}>×</button></article>)}</div>
+      {doc.id >= 0 && <button aria-label={`Supprimer ${doc.filename}`} onClick={e=>{e.stopPropagation();bridge.deleteDocument(doc.id);}}>×</button>}</article>)}</div>
   </div>;
   return <div className="folders">
+    {uploadError && <p className="upload-error" role="alert">{uploadError}</p>}
     {Object.entries(groups).map(([name, items])=><button className="folder" key={name} onClick={()=>setOpen(name)}>
       <span className="papers">{items.slice(0,3).map((d,i)=><i key={d.id} style={{"--i":i} as React.CSSProperties}/>)}</span>
       <span className="pocket"/><span className="folder-name">{name}</span><span className="folder-count">{items.length} fichier{items.length>1?"s":""}</span>
@@ -195,8 +199,11 @@ function App() {
     {state.session_open && state.recap_error && !state.recap_pending && <p className="recap-error" role="status">{state.recap_error}</p>}
     {(mode === "settings" || mode === "document") && <div className={`content ${mode === "document" ? "document-content" : ""}`} key={tab}>
       {(mode === "document" || tab === "Documents") && <Folders
-        docs={state.documents} recaps={state.recaps ?? []} hotkey={state.hotkey_label}
-        onDocumentOpen={()=>go("document")} onBack={()=>go("settings")}
+        docs={state.documents} recaps={state.recaps ?? []} hotkey={state.hotkey_label} uploadError={state.upload_error}
+        onDocumentOpen={id=>{
+          if (bridge.openDocument) { bridge.openDocument(id); go("collapsed"); }
+          else go("document");
+        }} onBack={()=>go("settings")}
       />}
       {mode === "settings" && tab === "Historique" && (historyMessages
         ? <><button className="add" onClick={()=>setHistoryMessages(null)}>← Retour</button>{historyMessages.map((m,i)=><p className={`msg ${m.role}`} key={i}><span>{m.text}</span>{m.created_at && <time>{localTime(m.created_at)}</time>}</p>)}</>

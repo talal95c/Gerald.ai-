@@ -28,33 +28,36 @@ html,body,#root{margin:0;height:100%;overflow:hidden}
 .gerald-write{position:absolute;color:#111;font-family:"KaTeX_Main","Times New Roman",serif;font-weight:400;line-height:1.25;white-space:pre}
 .gerald-write .katex{font-size:1em}
 .gerald-marks{overflow:visible}
-.gerald-marks ellipse,.gerald-marks line{fill:none;stroke:#0067D9;stroke-width:3;stroke-linecap:round}
-.gerald-marks circle{fill:#0067D9;stroke:#fff;stroke-width:2;animation:td-mark-in .32s ease both}
-.gerald-marks rect{fill:rgba(10,132,255,.16);stroke:#0067D9;stroke-width:2;animation:td-mark-in .32s ease both}
-.gerald-marks marker path{fill:#0067D9}
+.gerald-marks ellipse,.gerald-marks line{fill:none;stroke:#7C3AED;stroke-width:3;stroke-linecap:round;stroke-linejoin:round}
+.gerald-marks path,.td-mark-layer path{fill:none;stroke:#7C3AED;stroke-width:3;stroke-linecap:round;stroke-linejoin:round}
+.gerald-marks .sketch-ghost,.td-mark-layer .sketch-ghost{stroke-width:1.4;opacity:.35}
+.gerald-marks circle{fill:#7C3AED;stroke:#fff;stroke-width:2;animation:td-mark-in .32s ease both}
+.gerald-marks rect{fill:rgba(124,58,237,.12);stroke:#7C3AED;stroke-width:2;animation:td-mark-in .32s ease both}
 .gerald-marks text{fill:#262626;font:12px "Google Sans Flex",sans-serif}
-.gerald-note{box-sizing:border-box;width:100%;height:100%;overflow:hidden;padding:8px;border-radius:9px;background:#FFFDBD;color:#262626;font-size:13px;line-height:1.35;overflow-wrap:anywhere;box-shadow:0 4px 12px rgba(0,0,0,.12)}
-.gerald-tip{position:absolute;z-index:5;box-sizing:border-box;max-width:280px;padding:12px 16px;border-radius:14px;background:#161616;color:#F7F6F3;font-size:13px;line-height:1.35;overflow-wrap:anywhere;box-shadow:0 8px 24px rgba(0,0,0,.2);pointer-events:none}
-.gerald-pointer{position:absolute;z-index:6;color:#0A84FF;font-size:24px;line-height:1;text-shadow:-1px -1px #fff,1px -1px #fff,-1px 1px #fff,1px 1px #fff,0 2px 4px rgba(0,0,0,.25);transform:translate(-3px,-4px) rotate(-20deg);transition:opacity .15s ease-out;pointer-events:none}
-.gerald-pointer span{position:absolute;left:18px;top:16px;max-width:240px;padding:8px 12px;border-radius:12px;background:#fff;color:#262626;font-size:12px;line-height:1.35;white-space:nowrap;box-shadow:0 6px 18px rgba(0,0,0,.16);transform:rotate(20deg)}
+.gerald-note{box-sizing:border-box;display:flex;align-items:center;gap:10px;width:100%;height:100%;overflow:hidden;padding:8px 14px 8px 10px;border-radius:12px;background:#fff;border:1px solid rgba(124,58,237,.3);color:#262626;font-size:14.5px;line-height:1.35;overflow-wrap:anywhere;box-shadow:0 10px 30px -12px rgba(76,29,149,.35);animation:gb-in .45s cubic-bezier(.2,.8,.2,1) both}
+.gerald-tip{position:absolute;z-index:5;box-sizing:border-box;display:flex;align-items:center;gap:10px;max-width:340px;padding:10px 16px 10px 12px;border-radius:14px;background:#fff;border:1px solid rgba(124,58,237,.3);color:#262626;font-size:14.5px;line-height:1.35;overflow-wrap:anywhere;box-shadow:0 10px 30px -12px rgba(76,29,149,.35);pointer-events:none;animation:gb-in .45s cubic-bezier(.2,.8,.2,1) both}
+.gerald-note::before,.gerald-tip::before,.td-note-box::before,.td-tip-box::before{content:"";width:22px;height:22px;flex:none;border-radius:50%;background:radial-gradient(circle at 35% 30%,#fff 0,#d9c8ff 18%,#8b5cf6 55%,#4c1d95 100%);box-shadow:0 0 0 3px rgba(139,92,246,.15),0 4px 12px rgba(109,40,217,.35)}
+@keyframes gb-in{from{opacity:0;transform:translateY(6px) scale(.97);filter:blur(4px)}to{opacity:1;transform:none;filter:none}}
+.gerald-pointer{position:absolute;z-index:6;display:flex;align-items:center;gap:8px;padding:5px 14px 5px 5px;border-radius:999px;background:#0a0a0b;color:#fff;font:500 15px/1 "Google Sans Flex",sans-serif;white-space:nowrap;box-shadow:0 6px 16px -6px rgba(0,0,0,.35);transform:translate(12px,16px);transition:opacity .15s ease-out;pointer-events:none}
+.gerald-pointer i{width:22px;height:22px;flex:none;border-radius:50%;background:radial-gradient(circle at 35% 30%,#fff 0,#d9c8ff 18%,#8b5cf6 55%,#4c1d95 100%);box-shadow:0 0 0 3px rgba(139,92,246,.15),0 4px 12px rgba(109,40,217,.35)}
 .td-board-overlay{display:none;position:fixed;inset:0;z-index:10;background:#F7F6F3}
 .td-board-overlay.open{display:block}
 .td-board-overlay iframe{position:absolute;inset:0;width:100%;height:100%;border:0}
 .td-board-close{position:absolute;z-index:12;top:16px;left:16px;min-height:44px;padding:0 16px;border:1px solid rgba(38,38,38,.12);border-radius:999px;background:rgba(255,255,255,.94);color:#262626;font:500 13px "Google Sans Flex",sans-serif;box-shadow:0 8px 24px rgba(38,38,38,.12)}
 .td-assist{z-index:20}
 .td-assist.live{position:fixed;left:50%;bottom:18px;width:min(940px,calc(100vw - 36px));transform:translateX(-50%);z-index:20}
+.td-assist.board-open{position:fixed;left:calc(50% + 64px);bottom:18px;width:min(940px,calc(100vw - 152px));transform:translateX(-50%);z-index:20}
 .td-mark-layer{position:fixed;inset:0;z-index:9;pointer-events:none;overflow:visible}
 .td-mark-layer svg{position:absolute;inset:0;overflow:visible}
-.td-mark-layer ellipse,.td-mark-layer line{fill:none;stroke:#0067D9;stroke-width:3;stroke-linecap:round;stroke-linejoin:round;animation:td-mark-in .32s ease both}
-.td-mark-layer circle{fill:#0067D9;stroke:#fff;stroke-width:2;animation:td-mark-in .32s ease both}
-.td-mark-layer rect{fill:rgba(10,132,255,.16);stroke:#0067D9;stroke-width:2;rx:5;animation:td-mark-in .32s ease both}
-.td-mark-layer text{fill:#0067D9;font:500 16px "Google Sans Flex",sans-serif;animation:td-mark-in .32s ease both}
+.td-mark-layer ellipse,.td-mark-layer line{fill:none;stroke:#7C3AED;stroke-width:3;stroke-linecap:round;stroke-linejoin:round;animation:td-mark-in .32s ease both}
+.td-mark-layer circle{fill:#7C3AED;stroke:#fff;stroke-width:2;animation:td-mark-in .32s ease both}
+.td-mark-layer rect{fill:rgba(124,58,237,.12);stroke:#7C3AED;stroke-width:2;rx:5;animation:td-mark-in .32s ease both}
+.td-mark-layer text{fill:#7C3AED;font:500 16px "Google Sans Flex",sans-serif;animation:td-mark-in .32s ease both}
 .td-note{paint-order:stroke;stroke:#fff;stroke-width:5px}
-.td-note-box,.td-tip-box{box-sizing:border-box;width:100%;height:100%;display:flex;align-items:center;overflow:hidden;padding:8px;border-radius:9px;font:13px/1.35 "Google Sans Flex",sans-serif;overflow-wrap:anywhere;box-shadow:0 4px 12px rgba(0,0,0,.12);animation:td-mark-in .32s ease both}
-.td-note-box{background:#FFFDBD;color:#262626}
-.td-tip-box{padding:10px 12px;border-radius:12px;background:#161616;color:#F7F6F3}
-.gerald-pointer{position:absolute;z-index:2;color:#0A84FF;font-size:24px;line-height:1;text-shadow:-1px -1px #fff,1px -1px #fff,-1px 1px #fff,1px 1px #fff,0 2px 4px rgba(0,0,0,.25);transform:translate(-3px,-4px) rotate(-20deg);transition:opacity .15s ease-out}
-.gerald-pointer span{position:absolute;left:18px;top:16px;max-width:240px;padding:8px 12px;border-radius:12px;background:#fff;color:#262626;font-size:12px;line-height:1.35;white-space:nowrap;box-shadow:0 6px 18px rgba(0,0,0,.16);transform:rotate(20deg)}
+.td-note-box,.td-tip-box{box-sizing:border-box;width:100%;height:100%;display:flex;align-items:center;gap:10px;overflow:hidden;padding:8px 14px 8px 10px;border-radius:14px;font:14.5px/1.35 "Google Sans Flex",sans-serif;overflow-wrap:anywhere;box-shadow:0 10px 30px -12px rgba(76,29,149,.35);animation:gb-in .45s cubic-bezier(.2,.8,.2,1) both}
+.td-note-box{background:#fff;border:1px solid rgba(124,58,237,.3);color:#262626}
+.td-tip-box{background:#fff;border:1px solid rgba(124,58,237,.3);color:#262626}
+.gerald-pointer{position:absolute;z-index:2;display:flex;align-items:center;gap:8px;padding:5px 14px 5px 5px;border-radius:999px;background:#0a0a0b;color:#fff;font:500 15px/1 "Google Sans Flex",sans-serif;white-space:nowrap;box-shadow:0 6px 16px -6px rgba(0,0,0,.35);transform:translate(12px,16px);transition:opacity .15s ease-out;pointer-events:none}
 .td-caption{position:relative;z-index:21;max-width:640px;margin:0 auto 8px;padding:8px 16px;overflow:hidden;border:1px solid rgba(38,38,38,.08);border-radius:999px;background:rgba(255,255,255,.96);color:#262626;text-align:center;text-overflow:ellipsis;white-space:nowrap;box-shadow:0 6px 18px rgba(38,38,38,.1);animation:voice-caption-in .3s ease both;opacity:1;transition:opacity .4s ease}
 .td-caption.fade{opacity:0}
 .td-ask .voice-status{position:relative;width:44px;height:44px;display:grid;place-items:center;flex:none}
@@ -63,3 +66,18 @@ html,body,#root{margin:0;height:100%;overflow:hidden}
 .td-mic:disabled{opacity:.55;cursor:wait}
 @keyframes td-mark-in{from{opacity:0;stroke-dasharray:1;stroke-dashoffset:1}to{opacity:1;stroke-dashoffset:0}}
 @keyframes voice-caption-in{from{opacity:0;transform:translateY(5px)}to{opacity:1;transform:translateY(0)}}
+
+.td-assist .td-ask{padding:7px 8px 7px 10px;background:rgba(255,255,255,.86);border:1px solid rgba(0,0,0,.08);backdrop-filter:blur(18px) saturate(1.4);-webkit-backdrop-filter:blur(18px) saturate(1.4);box-shadow:0 12px 32px -14px rgba(76,29,149,.3)}
+.td-assist .td-ask input{color:#0a0a0b;font-size:15px}
+.td-assist .td-ask input::placeholder{color:rgba(0,0,0,.45)}
+.td-hold{display:flex;align-items:center;gap:6px;flex:none;color:rgba(0,0,0,.62);font:14px "Google Sans Flex",sans-serif;white-space:nowrap}
+.td-ask .td-hold kbd{font:500 12px "Google Sans Flex",sans-serif;color:#0a0a0b;padding:3px 7px;border:1px solid rgba(0,0,0,.1);border-bottom-width:2px;border-radius:7px;background:#fff}
+.td-wave{display:flex;gap:2px;align-items:center;height:18px;flex:none;padding-right:4px}
+.td-wave i{width:2px;height:100%;border-radius:2px;background:#3d2bff;transform:scaleY(.25);transition:transform .2s}
+.td-wave.on i{animation:wave 1.1s ease-in-out infinite}
+.td-mic,.td-stop{background:#0a0a0b}
+@media (max-width:640px){.td-hold{display:none}}
+.td-assist .td-ask .orb-wrap.orb-idle .gerald-mark{opacity:0}
+.td-assist .td-ask .orb-wrap.orb-idle::before{content:"";width:26px;height:26px;border-radius:50%;background:radial-gradient(circle at 35% 30%,#fff 0,#d9c8ff 18%,#8b5cf6 55%,#4c1d95 100%);box-shadow:0 0 0 3px rgba(139,92,246,.15),0 4px 12px rgba(109,40,217,.35);animation:td-breathe 3s ease-in-out infinite}
+@keyframes td-breathe{0%,100%{transform:scale(1)}50%{transform:scale(1.06)}}
+.td-wave i:nth-child(3n){transform:scaleY(.55)}.td-wave i:nth-child(3n+1){transform:scaleY(.35)}
