@@ -60,13 +60,17 @@ def search(
     for row in rows:
         keyword = _keyword_score(query_tokens, row["text"])
         score = keyword
+        embedding_usable = False
         blob = row["embedding"]
         if query_vector is not None and blob is not None:
             vector = np.frombuffer(blob, dtype=np.float32)
             if vector.size == query_vector.size:
+                embedding_usable = True
                 denominator = float(np.linalg.norm(vector) * np.linalg.norm(query_vector))
                 cosine = float(np.dot(vector, query_vector) / denominator) if denominator else 0.0
                 score = 0.7 * ((cosine + 1.0) / 2.0) + 0.3 * keyword
+        if keyword <= 0 and not embedding_usable:
+            continue
         hits.append(
             Hit(
                 row["course_title"],

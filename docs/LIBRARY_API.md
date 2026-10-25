@@ -42,6 +42,7 @@ search(store, query, embedder, course_id=None, k=5) -> list[Hit]
 
 PDF pages retain their 1-based page number; other supported formats use
 `None`. The indexer copies, extracts, chunks and embeds in batches of 64.
+Search may return fewer than `k`; keyword-only search drops chunks with no overlap.
 
 ```python
 Indexer(store, embedder)

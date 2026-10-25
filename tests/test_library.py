@@ -235,6 +235,38 @@ def test_hybrid_search_ranks_embedded_match_and_keyword_only_fallback(tmp_path):
     store.close()
 
 
+def test_keyword_only_search_drops_chunks_without_overlap(tmp_path):
+    store = Store(tmp_path / "library")
+    course = store.create_course("Géographie", "Géographie")
+    sources = {
+        "loire.txt": "Le fleuve Loire traverse Orléans.",
+        "mitochondries.txt": "Les mitochondries fournissent l'énergie cellulaire.",
+        "volcans.txt": "Les volcans émettent de la lave.",
+    }
+
+    class OfflineEmbedder:
+        def embed(self, _texts):
+            raise RuntimeError("offline")
+
+    embedder = OfflineEmbedder()
+    indexer = Indexer(store, embedder, workers=3)
+    completed = []
+    for filename, text in sources.items():
+        path = tmp_path / filename
+        path.write_text(text, encoding="utf-8")
+        event = threading.Event()
+        completed.append(event)
+        indexer.add_document(course.id, path, lambda _row, event=event: event.set())
+    assert all(event.wait(5) for event in completed)
+
+    hits = search(store, "Loire", embedder, course.id)
+    assert [hit.document for hit in hits] == ["loire.txt"]
+    assert search(store, "Atlantique", embedder, course.id) == []
+
+    indexer.close()
+    store.close()
+
+
 def test_openai_embedder_sends_versioned_user_agent_and_returns_float32(monkeypatch):
     captured = {}
 
