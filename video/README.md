@@ -8,17 +8,17 @@ npm run dev                      # Remotion Studio → http://localhost:3000/Lau
 npx remotion render Launch out/gerald-launch.mp4
 ```
 
-Structure (`src/Video.tsx`, 1920×1080 · 30 fps · ~65 s): hook → chatbot gives the answer → PISA 474 → **Meet Gerald** → board (sees, circles, speaks) → any app (fake desktop + Photoshop) → your courses + board → not a chatbot (92 %) → CTA. Voice-over: OpenAI TTS (`scripts_vo.py`, needs `OPENAI_API_KEY`; set `voiceOver: false` to mute). See `STORYBOARD.md`.
+Structure (`src/Video.tsx`, 1920×1080 · 30 fps · ~53 s, French): problem (stuck alone → chatbots give the answer) → **Voici Gerald** → real clips of the live site (TD, board + parabola, Photoshop guided) → CTA. Voice-over: OpenAI TTS (`python3 scripts_vo.py ash`, needs `OPENAI_API_KEY`; set `voiceOver: false` to mute). See `STORYBOARD.md`.
 
 ## Real footage
 
-Drop screen recordings in `public/footage/` and point the `footage` default props (`src/Root.tsx`) to them; `null` keeps the animated mock:
+`public/footage/clip1..3.mp4` are the real site recordings (1440×900, silent). `footage` default props in `src/Root.tsx` map them to scenes with a start offset in seconds; `null` keeps the animated mock:
 
 ```ts
-footage: { board: "board.mp4", photoshop: "photoshop.mp4", td: "td.mp4" }
+footage: { board: "clip2.mp4", photoshop: "clip3.mp4", td: "clip1.mp4", trim: { board: 9, photoshop: 8, td: 7 } }
 ```
 
-Each slot is shown with `objectFit: cover` in a 16:9 frame; record at 1920×1080 (or 1680×…) and trim to the scene length (board 12 s, photoshop 11 s, TD 9 s) or set `trimBefore` in `src/footage.tsx`.
+Clips are shown `objectFit: contain` in a 1360×850 (16:10) frame on the landing gradient stage.
 
 ## Audio
 

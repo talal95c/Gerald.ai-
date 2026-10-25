@@ -1,6 +1,6 @@
 import React from "react";
 import { Video } from "@remotion/media";
-import { staticFile } from "remotion";
+import { staticFile, useVideoConfig } from "remotion";
 import { FONT, T } from "./theme";
 
 /** Real screen recordings (public/footage/*.mp4). `null` = not delivered yet → mock placeholder is shown. */
@@ -8,12 +8,15 @@ export type FootageMap = {
   readonly board: string | null;
   readonly photoshop: string | null;
   readonly td: string | null;
+  readonly trim: { readonly board: number; readonly photoshop: number; readonly td: number };
 };
 
-export const Footage: React.FC<{ src: string | null; trimBefore?: number; label: string; children: React.ReactNode; style?: React.CSSProperties }> = ({ src, trimBefore = 0, label, children, style }) => (
+export const Footage: React.FC<{ src: string | null; trimSeconds?: number; label: string; children: React.ReactNode; style?: React.CSSProperties }> = ({ src, trimSeconds = 0, label, children, style }) => {
+  const { fps } = useVideoConfig();
+  return (
   <div style={{ position: "absolute", inset: 0, ...style }}>
     {src ? (
-      <Video src={staticFile(`footage/${src}`)} trimBefore={trimBefore} muted objectFit="cover" style={{ width: "100%", height: "100%" }} />
+      <Video src={staticFile(`footage/${src}`)} trimBefore={Math.round(trimSeconds * fps)} muted objectFit="contain" style={{ width: "100%", height: "100%" }} />
     ) : (
       <>
         {children}
@@ -22,3 +25,4 @@ export const Footage: React.FC<{ src: string | null; trimBefore?: number; label:
     )}
   </div>
 );
+};

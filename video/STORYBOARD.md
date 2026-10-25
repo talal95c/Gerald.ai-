@@ -1,20 +1,18 @@
-# Storyboard — Gerald launch video (~65 s, marketing cut)
+# Storyboard — vidéo de lancement Gerald (~53 s, soumission hackathon)
 
-Startup-launch tone (« vend du rêve »), readable without sound: a caption pill per scene + an OpenAI TTS voice-over (`public/audio/vo/`, voice *marin*, script in `scripts_vo.py`). Music: Mixkit *Motivating Mornings* (123 BPM, lifts at ~10 s), ducked under the voice.
+Lisible sans le son (une capsule de texte par scène) + voix off française (OpenAI gpt-4o-mini-tts, voix `ash`, script dans `scripts_vo.py`, normalisée à −16 LUFS). Musique Mixkit *Motivating Mornings* (0.3, ducking ×0.45 sous la voix). DA landing, accents violet #7C3AED. Les trois clips réels du site live (1440×900, muets, bulles de Gerald à l'écran) sont dans `public/footage/` et cadrés en 16:10 dans la scène gradient.
 
-| # | Scene | What you see | Caption(s) | Voice-over |
-|---|-------|--------------|------------|------------|
-| 1 | Hook (dark) | "11 pm. One exercise. Stuck. Alone." word by word, blinking equation, "That ends today." | — | Every student knows this moment… That ends today. |
-| 2 | Chatbot | Chat window streams the full solution, greys out | "Chatbots hand you the answer in 3 seconds." → "You learn nothing. Education deserves better." | Chatbots hand you the answer… Education deserves better. |
-| 3 | The number (dark) | 495 → **474**, −21 pts (OECD PISA 2022) | "A historic low. Private tutors cost a fortune. Until now." | Maths scores are at a historic low… Until now. |
-| 4 | Meet Gerald | Brand pop, badge "The world's first tutor that lives on your screen", "It sees. It talks. It draws. You finally learn.", Ctrl + Shift press | — | Meet Gerald. The world's first private tutor that lives on your screen. |
-| 5 | The board (**footage `board`**) | Handwriting, Gerald's cursor glides, violet circle on "+ 24", bubble, correction, tick, "Bravo" | "You write. Gerald watches every line." → "It circles the mistake — and explains it out loud." → "Like the best teacher you ever had. Right next to you." | You write. Gerald watches every line… you still find the answer yourself. |
-| 6 | Any app (**footage `photoshop`**) | Fake desktop + Photoshop: shape tool → rectangle → colour → fill | "One key. Any app. Gerald sees what you see." → "It points. You click. It checks." → "Design, code, maths — anything." | One key. Any app… Design, code, maths. Anything. |
-| 7 | Your courses (**footage `td`**) | TD + board, Δ underlined, parabola plotted with roots | "Drop your courses. Gerald learns them." → "The exact curve, plotted live on your board." | Drop your courses… plots the exact curve, live. |
-| 8 | Not a chatbot | "A revolution in learning. For every student. Any screen." + cards 77 → **92 %**, Real-time, Private | — | Real-time voice and vision… This is a revolution in learning. |
-| 9 | CTA | Brand, "Never be stuck again.", claim, keycaps, Try the demo / Learn live, GitHub | — | Gerald. It doesn't give you the answer… Never be stuck again. Try it today. |
+| # | Scène | Visuel | Capsule(s) | Voix off |
+|---|-------|--------|------------|----------|
+| 1 | Problème (fond noir) | « 23 h. Un exercice. Bloqué. Seul. » mot à mot, équation qui clignote, « Ça s'arrête aujourd'hui. » | — | 23 heures. Un exercice. Bloqué. Seul. Ça s'arrête aujourd'hui. |
+| 2 | Chatbot | Fenêtre de chat : la solution complète arrive d'un coup, puis se grise | « Les chatbots donnent la réponse. On n'apprend rien. » → « Maths au plus bas (PISA 2022 : 474). Les profs particuliers coûtent une fortune. » | Les chatbots donnent la réponse. On n'apprend rien. Et les profs particuliers coûtent une fortune. |
+| 3 | Solution · Voici Gerald | Logo, badge « Le prof particulier qui vit sur votre écran », « Il voit. Il parle. Il dessine. Vous apprenez enfin. », Ctrl + Shift | — | Voici Gerald. Le prof particulier qui vit sur votre écran. |
+| 4 | Vos cours (**clip1**, à partir de 7 s) | Bureau → Notes → TD « Polynômes du second degré », Gerald pointe et souligne l'exercice | « Déposez vos cours. Gerald les connaît. » → « Il lit votre TD avec vous et pointe ce qui compte. » | Déposez vos cours. Gerald les connaît, et lit votre TD avec vous. |
+| 5 | Le tableau (**clip2**, à partir de 9 s) | Tableau, parabole tracée, racines marquées | « Vous écrivez au tableau. Gerald suit chaque ligne. » → « Il trace la courbe exacte — et c'est vous qui trouvez. » | Vous écrivez au tableau. Gerald suit chaque ligne, explique à voix haute, trace la courbe exacte. Et c'est vous qui trouvez. |
+| 6 | N'importe quelle appli (**clip3**, à partir de 8 s) | Photoshop : Gerald pointe la barre d'outils, le panneau Formes ; guidage pas à pas (aucun carré rouge fini revendiqué) | « Une touche. N'importe quelle appli. Gerald voit ce que vous voyez. » → « Il pointe le bon outil. Vous cliquez. Il vous guide pas à pas. » | Une touche, n'importe quelle appli. Gerald pointe le bon outil et vous guide pas à pas. |
+| 7 | CTA | Logo, « Ne restez plus jamais bloqué. », « Il ne donne pas la réponse. Il vous aide à la trouver. », boutons Essayer la démo / Apprendre en live, GitHub | — | Gerald. Il ne donne pas la réponse, il vous aide à la trouver. |
 
-Scene lengths are derived from the voice-over durations (`src/vo.ts`, generated by `scripts_vo.py` → `public/audio/vo/manifest.json`); to change the script, edit `LINES` in `scripts_vo.py`, run it with `OPENAI_API_KEY`, and regenerate `src/vo.ts`.
+Durées de scène = durée de la voix off + 1 s (jamais sous le minimum visuel) ; pour changer le texte : éditer `LINES` dans `scripts_vo.py`, lancer `python3 scripts_vo.py <voice>` avec `OPENAI_API_KEY`, normaliser (loudnorm) et régénérer `src/vo.ts` (voir README).
 
 ## Footage to record (16:9, 1920×1080, no audio needed)
 

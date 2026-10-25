@@ -1,38 +1,30 @@
 {
  "hook": {
-  "text": "Every student knows this moment. Eleven p.m. One exercise. Stuck. Alone. That ends today.",
-  "dur": 7.99
+  "text": "23 heures. Un exercice. Bloqué. Seul. Ça s'arrête aujourd'hui.",
+  "dur": 7.42
  },
  "chat": {
-  "text": "Chatbots hand you the answer in three seconds. And you learn... nothing. Education deserves better.",
-  "dur": 8.05
- },
- "stat": {
-  "text": "Maths scores are at a historic low. Private tutors cost a fortune. Until now.",
-  "dur": 5.75
+  "text": "Les chatbots donnent la réponse. On n'apprend rien. Et les profs particuliers coûtent une fortune.",
+  "dur": 7.55
  },
  "meet": {
-  "text": "Meet Gerald. The world's first private tutor that lives on your screen.",
-  "dur": 4.21
- },
- "board": {
-  "text": "You write. Gerald watches every line, spots the mistake, circles it, and explains it out loud. Like the best teacher you ever had, sitting right next to you. And you still find the answer yourself.",
-  "dur": 12.98
- },
- "desktop": {
-  "text": "One key. Any app. Gerald sees what you see, points at what matters, and guides you step by step. Design, code, maths. Anything.",
-  "dur": 10.84
+  "text": "Voici Gerald. Le prof particulier qui vit sur votre écran.",
+  "dur": 5.15
  },
  "td": {
-  "text": "Drop your courses. Gerald learns them. When a drawing helps, it opens a board and plots the exact curve, live.",
-  "dur": 7.6
+  "text": "Déposez vos cours. Gerald les connaît, et lit votre TD avec vous.",
+  "dur": 5.41
  },
- "proof": {
-  "text": "Real-time voice and vision. Pedagogy measured at ninety-two percent. Private by design. This is not a chatbot. This is a revolution in learning.",
-  "dur": 10.68
+ "board": {
+  "text": "Vous écrivez au tableau. Gerald suit chaque ligne, explique à voix haute, trace la courbe exacte. Et c'est vous qui trouvez.",
+  "dur": 9.61
+ },
+ "desktop": {
+  "text": "Une touche, n'importe quelle appli. Gerald pointe le bon outil et vous guide pas à pas.",
+  "dur": 6.24
  },
  "cta": {
-  "text": "Gerald. It doesn't give you the answer. It helps you find it. Never be stuck again. Try it today.",
-  "dur": 6.35
+  "text": "Gerald. Il ne donne pas la réponse, il vous aide à la trouver.",
+  "dur": 5.09
  }
 }

@@ -19,7 +19,7 @@ export const RemotionRoot: React.FC = () => {
           music: "motivating-mornings.mp3",
           musicVolume: 0.3,
           voiceOver: true,
-          footage: { board: null, photoshop: null, td: null },
+          footage: { board: "clip2.mp4", photoshop: "clip3.mp4", td: "clip1.mp4", trim: { board: 9, photoshop: 8, td: 7 } },
         }}
       />
     </>

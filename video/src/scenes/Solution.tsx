@@ -4,6 +4,11 @@ import { Badge, Brand, Bg, Bubble, Caption, Circled, GeraldCursor, H, Hand, Keyc
 import { Footage } from "../footage";
 import { FONT, T } from "../theme";
 
+/** 16:10 frame (1440×900 clips) centred in the stage. */
+const Frame: React.FC<{ children: React.ReactNode }> = ({ children }) => (
+  <div style={{ position: "absolute", left: "50%", top: "50%", translate: "-50% -50%", width: 1360, height: 850, borderRadius: 18, overflow: "hidden", background: "#fff", boxShadow: "0 40px 80px -40px rgba(30,40,120,.5)" }}>{children}</div>
+);
+
 /** Scene · Meet Gerald — brand + the hero claim. */
 export const Meet: React.FC = () => {
   const frame = useCurrentFrame();
@@ -14,10 +19,10 @@ export const Meet: React.FC = () => {
     <Bg>
       <AbsoluteFill style={{ alignItems: "center", justifyContent: "center", textAlign: "center" }}>
         <div style={{ opacity: brand, scale: `${0.85 + 0.15 * brand}`, filter: `blur(${(1 - brand) * 12}px)` }}><Brand size={120} /></div>
-        <Reveal at={0.9} style={{ marginTop: 40 }}><Badge dot>The world's first tutor that lives on your screen</Badge></Reveal>
-        <Reveal at={1.2} style={{ marginTop: 30 }}><H size={100}>It sees. It talks. It draws.<br />You finally learn.</H></Reveal>
+        <Reveal at={0.9} style={{ marginTop: 40 }}><Badge dot>Le prof particulier qui vit sur votre écran</Badge></Reveal>
+        <Reveal at={1.2} style={{ marginTop: 30 }}><H size={100}>Il voit. Il parle. Il dessine.<br />Vous apprenez enfin.</H></Reveal>
         <Reveal at={2.4} style={{ marginTop: 40, display: "flex", alignItems: "center", gap: 14, font: `30px ${FONT.body}`, color: T.mut }}>
-          <Orb size={26} /> Hold <Keycap label="Ctrl" pressed={press} size={30} /> + <Keycap label="Shift" pressed={press} size={30} /> and speak
+          <Orb size={26} /> Maintenez <Keycap label="Ctrl" pressed={press} size={30} /> + <Keycap label="Shift" pressed={press} size={30} /> et parlez
         </Reveal>
       </AbsoluteFill>
     </Bg>
@@ -59,18 +64,15 @@ const BoardMock: React.FC = () => {
 };
 
 /** Scene · Gerald sees, circles, speaks — on the board. */
-export const Board: React.FC<{ footage: string | null }> = ({ footage }) => {
+export const Board: React.FC<{ footage: string | null; trim: number }> = ({ footage, trim }) => {
   const p = useP(0, 1.0);
   return (
     <Bg>
-      <Stage style={{ left: 120, right: 120, top: 70, bottom: 190, opacity: p, scale: `${0.97 + 0.03 * p}` }}>
-        <div style={{ position: "absolute", left: 70, right: 70, top: 50, bottom: 50, borderRadius: 24, boxShadow: "0 40px 80px -40px rgba(30,40,120,.5)" }}>
-          <Footage src={footage} label="board recording"><BoardMock /></Footage>
-        </div>
+      <Stage style={{ left: 120, right: 120, top: 60, bottom: 170, opacity: p, scale: `${0.97 + 0.03 * p}` }}>
+        <Frame><Footage src={footage} trimSeconds={trim} label="board recording"><BoardMock /></Footage></Frame>
       </Stage>
-      <Caption at={0.8} out={4.2}>You write. Gerald watches every line.</Caption>
-      <Caption at={4.6} out={8.4}>It circles the mistake — and explains it out loud.</Caption>
-      <Caption at={8.8}>Like the best teacher you ever had. Right next to you.</Caption>
+      <Caption at={0.8} out={5.0}>Vous écrivez au tableau. Gerald suit chaque ligne.</Caption>
+      <Caption at={5.4}>Il trace la courbe exacte — et c'est vous qui trouvez.</Caption>
     </Bg>
   );
 };
@@ -125,19 +127,15 @@ const PhotoshopMock: React.FC = () => {
 };
 
 /** Scene · Any app — the fake desktop with Photoshop, guided by voice. */
-export const Desktop: React.FC<{ footage: string | null }> = ({ footage }) => {
+export const Desktop: React.FC<{ footage: string | null; trim: number }> = ({ footage, trim }) => {
   const p = useP(0, 1.0);
   return (
     <Bg>
-      <Reveal at={0} style={{ position: "absolute", left: 120, top: 60 }}><Badge dot>Any app · Windows first</Badge></Reveal>
-      <div style={{ position: "absolute", left: 120, right: 120, top: 130, bottom: 190, borderRadius: 24, background: "linear-gradient(135deg,#dfe8ff,#eef1f8)", border: `1px solid ${T.line}`, boxShadow: "0 40px 80px -40px rgba(30,40,120,.4)", opacity: p, scale: `${0.97 + 0.03 * p}`, overflow: "hidden" }}>
-        <div style={{ position: "absolute", left: 60, right: 60, top: 40, bottom: 40, borderRadius: 18, boxShadow: "0 30px 60px -30px rgba(0,0,0,.6)" }}>
-          <Footage src={footage} label="photoshop recording"><PhotoshopMock /></Footage>
-        </div>
-      </div>
-      <Caption at={0.6} out={3.6}>One key. Any app. Gerald sees what you see.</Caption>
-      <Caption at={4.0} out={7.2}>It points. You click. It checks.</Caption>
-      <Caption at={7.6}>Design, code, maths — anything.</Caption>
+      <Stage style={{ left: 120, right: 120, top: 60, bottom: 170, opacity: p, scale: `${0.97 + 0.03 * p}` }}>
+        <Frame><Footage src={footage} trimSeconds={trim} label="photoshop recording"><PhotoshopMock /></Footage></Frame>
+      </Stage>
+      <Caption at={0.6} out={4.4}>Une touche. N'importe quelle appli. Gerald voit ce que vous voyez.</Caption>
+      <Caption at={4.8}>Il pointe le bon outil. Vous cliquez. Il vous guide pas à pas.</Caption>
     </Bg>
   );
 };
@@ -186,16 +184,15 @@ const TdMock: React.FC = () => {
 };
 
 /** Scene · Your course, your worksheets — the board opens when it helps. */
-export const Td: React.FC<{ footage: string | null }> = ({ footage }) => {
+export const Td: React.FC<{ footage: string | null; trim: number }> = ({ footage, trim }) => {
   const p = useP(0, 1.0);
   return (
     <Bg>
-      <Reveal at={0} style={{ position: "absolute", left: 120, top: 60 }}><Badge>Your courses · the board</Badge></Reveal>
-      <div style={{ position: "absolute", left: 120, right: 120, top: 130, bottom: 190, borderRadius: 24, boxShadow: "0 40px 80px -40px rgba(30,40,120,.4)", opacity: p, scale: `${0.97 + 0.03 * p}` }}>
-        <Footage src={footage} label="TD + board recording"><TdMock /></Footage>
-      </div>
-      <Caption at={0.6} out={3.4}>Drop your courses. Gerald learns them.</Caption>
-      <Caption at={3.8}>The exact curve, plotted live on your board.</Caption>
+      <Stage style={{ left: 120, right: 120, top: 60, bottom: 170, opacity: p, scale: `${0.97 + 0.03 * p}` }}>
+        <Frame><Footage src={footage} trimSeconds={trim} label="TD recording"><TdMock /></Footage></Frame>
+      </Stage>
+      <Caption at={0.6} out={3.6}>Déposez vos cours. Gerald les connaît.</Caption>
+      <Caption at={4.0}>Il lit votre TD avec vous et pointe ce qui compte.</Caption>
     </Bg>
   );
 };
