@@ -28,6 +28,7 @@ disponibles; la reconnaissance UIA et l'OCR Windows sont optionnels.
 - `Ctrl+Shift+R` ou l'action de la zone de notification : enregistrer un récapitulatif de la leçon.
 - `Ctrl+Shift+B` ou l'action « Tableau » de la zone de notification : ouvrir/fermer le tableau.
 - `Échap` : annuler une demande d'action, interrompre Gerald ou effacer les dessins.
+  Pendant une question, relâchez d'abord le raccourci puis appuyez sur `Échap` : sous Windows, `Ctrl+Shift+Échap` ouvre le Gestionnaire des tâches.
 
 Avant la première action de chaque tour, Gerald demande une autorisation réelle
 dans une capsule « Autoriser / Annuler »; le champ `confirmed` fourni par le
