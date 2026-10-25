@@ -360,10 +360,17 @@ function TD(){
     const resolveTarget=(target:Record<string,any>)=>paintMode?paintTargetRect(target):targetRect(target);
     const from=name==="arrow"?resolveTarget(args.from??{}):resolveTarget(args);
     const to=name==="arrow"?resolveTarget(args.to??{}):null;
-    if(name==="arrow"&&(!from||!to))return {ok:false,error:"arrow targets were not found"};
-    const endpoints=name==="arrow"&&from&&to?arrowEndpoints(from,to):null;
+    if(name==="arrow"&&!to){
+      const visible=elements().slice(0,40).map(e=>`[${e.id}] ${e.text.slice(0,100)}`).join("; ");
+      return {ok:false,error:`arrow target was not found. Visible targets: ${visible}`};
+    }
+    const containsTarget=!!(from&&to&&to.x>=from.x-2&&to.y>=from.y-2&&to.x+to.w<=from.x+from.w+2&&to.y+to.h<=from.y+from.h+2);
+    const arrowFrom=name==="arrow"&&to&&(!from||containsTarget)
+      ? {x:Math.min(innerWidth-2,to.x+to.w+60),y:Math.max(2,to.y-60),w:1,h:1}
+      : from;
+    const endpoints=name==="arrow"&&arrowFrom&&to?arrowEndpoints(arrowFrom,to):null;
     if(name==="arrow"&&!endpoints)return {ok:false,error:"arrow endpoints could not be calculated"};
-    const r=from??(typeof args.target_text!=="string"&&typeof args.x==="number"&&typeof args.y==="number"?{x:args.x,y:args.y,w:Number(args.w)||120,h:Number(args.h)||38}:null);
+    const r=name==="arrow"?to:from??(typeof args.target_text!=="string"&&typeof args.x==="number"&&typeof args.y==="number"?{x:args.x,y:args.y,w:Number(args.w)||120,h:Number(args.h)||38}:null);
     if(name==="tip"){
       if(typeof args.text!=="string")return {ok:false,error:"tip requires text"};
       const pos=r??{x:innerWidth/2,y:innerHeight-130,w:0,h:0};
@@ -391,7 +398,10 @@ function TD(){
       });
       return {ok:true};
     }
-    if(!r)return {ok:false,error:"target not found"};
+    if(!r){
+      const visible=elements().slice(0,40).map(e=>`[${e.id}] ${e.text.slice(0,100)}`).join("; ");
+      return {ok:false,error:`target not found. Visible targets: ${visible}`};
+    }
     if(!["circle","underline","point","highlight","arrow","note"].includes(name))return {ok:false,error:`unknown TD tool: ${name}`};
     const text=String(args.text??args.label??"");
     if(name==="note"){
@@ -522,7 +532,7 @@ function TD(){
       if(image)content.push({type:"input_image",image_url:image});
       sendEvent({type:"conversation.item.create",item:{type:"message",role:"user",content}});
     }
-    else {const text=elements().map(e=>`[${e.id}] "${e.text}" (${Math.round(e.rect.x)},${Math.round(e.rect.y)},${Math.round(e.rect.w)},${Math.round(e.rect.h)})`).join("\n");sendEvent({type:"conversation.item.create",item:{type:"message",role:"user",content:[{type:"input_text",text:`TD visible elements in CSS pixels:\n${text}`} ]}});}
+    else {const text=elements().map(e=>`[${e.id}] "${e.text}" (${Math.round(e.rect.x)},${Math.round(e.rect.y)},${Math.round(e.rect.w)},${Math.round(e.rect.h)})`).join("\n");sendEvent({type:"conversation.item.create",item:{type:"message",role:"user",content:[{type:"input_text",text:`Vue active : ${liveMode?"cours live":"TD"}\nTD visible elements in CSS pixels:\n${text}`} ]}});}
   };
   const pumpResponses=async()=>{
     if(!sessionReady.current||activeResponse.current||responseStartPending.current||processingTools.current||dispatchingResponse.current||channel.current?.readyState!=="open")return;
@@ -857,8 +867,8 @@ function TD(){
       </form>
     </div>
     {voiceMode&&<div className={`td-board-overlay ${boardOpen?"open":""}`}>{docMode
-      ? <button className="td-board-close" onClick={()=>{boardOpenRef.current=false;setBoardOpen(false);}}>Retour au document</button>
-      : !liveMode&&<button className="td-board-close" onClick={()=>{boardOpenRef.current=false;setBoardOpen(false);}}>Retour au TD</button>}
+      ? <button className="td-board-close" onClick={()=>{boardOpenRef.current=false;setBoardOpen(false);void sendContext();}}>Retour au document</button>
+      : !liveMode&&<button className="td-board-close" onClick={()=>{boardOpenRef.current=false;setBoardOpen(false);void sendContext();}}>Retour au TD</button>}
       {boardSrc&&<iframe ref={frame} title="Tableau" src={boardSrc} />}
     </div>}
     <audio ref={audio} autoPlay/>

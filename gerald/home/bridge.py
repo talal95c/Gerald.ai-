@@ -2,13 +2,15 @@ from __future__ import annotations
 
 from datetime import datetime
 import json
+import os
 from pathlib import Path
+import subprocess
 import threading
 import time
 
 from PyQt6.QtCore import QTimer, QUrl, QObject, pyqtSignal, pyqtSlot
 from PyQt6.QtGui import QDesktopServices
-from PyQt6.QtWidgets import QApplication, QFileDialog
+from PyQt6.QtWidgets import QApplication, QDialog, QFileDialog, QTextBrowser, QVBoxLayout
 
 from gerald.home.events import events
 from gerald.home.qa import default_ask
@@ -301,7 +303,29 @@ class Bridge(QObject):
 
     @pyqtSlot(str)
     def openRecap(self, path: str) -> None:
-        QDesktopServices.openUrl(QUrl.fromLocalFile(path))
+        if QDesktopServices.openUrl(QUrl.fromLocalFile(path)):
+            return
+        if os.name == "nt":
+            try:
+                os.startfile(path)
+                return
+            except OSError:
+                try:
+                    subprocess.Popen(["notepad.exe", path])
+                    return
+                except OSError:
+                    pass
+        self._show_recap_in_app(path)
+
+    def _show_recap_in_app(self, path: str) -> None:
+        dialog = QDialog()
+        dialog.setWindowTitle(Path(path).stem)
+        dialog.resize(720, 640)
+        browser = QTextBrowser(dialog)
+        browser.setMarkdown(Path(path).read_text(encoding="utf-8"))
+        layout = QVBoxLayout(dialog)
+        layout.addWidget(browser)
+        dialog.exec()
 
     @pyqtSlot(bool)
     def requestFocus(self, requested: bool) -> None:

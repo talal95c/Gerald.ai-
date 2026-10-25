@@ -6,6 +6,7 @@ import json
 import logging
 import os
 from pathlib import Path
+import socket
 from http.server import SimpleHTTPRequestHandler, ThreadingHTTPServer
 from urllib.error import HTTPError, URLError
 from urllib.parse import parse_qs, urlencode, urlsplit
@@ -54,7 +55,7 @@ COLOR_GUIDANCE = (
     "Code couleur : rouge (intent=correction) pour signaler une erreur ou la correction, "
     "vert (intent=valide) pour ce qui est juste, bleu (intent=remarque) pour une remarque "
     "ou un rappel de méthode ; l'écriture normale reste noire. Si tu montres une erreur "
-    "avec une flèche, souligne aussi le terme fautif en rouge (intent=correction) dans le même tour."
+    "avec une flèche, souligne aussi le même terme fautif avec underline (intent=correction) dans le même tour."
 )
 TD_EXERCISES = [
     ("exercice-1", "Exercice 1", ["Résous dans ℝ : x² − 5x + 6 = 0"]),
@@ -128,7 +129,8 @@ def _web_tools(
             )
         elif tool["name"] == "arrow":
             description += (
-                " Si l'élève demande explicitement une flèche, utilise arrow au lieu d'une underline ou circle."
+                " Le point de la flèche doit viser le target_text de to; si from est absent ou contient la cible, "
+                "pars d'un point libre à l'extérieur de la cible."
             )
         tools.append(
             {
@@ -270,8 +272,9 @@ def session_instructions(
         "Explique d’abord la méthode pour identifier a, b et c, puis comment former "
         "Δ = b² − 4ac, sans calculer sa valeur ni résoudre l’équation. Dis ensuite "
         "« à toi de jouer » et laisse l’élève faire ses erreurs. Ne donne jamais la "
-        "valeur de Δ ni les racines; si l’élève demande explicitement une flèche, utilise arrow "
-        "au lieu d’une underline ou circle. Sinon, s’il se trompe, utilise une seule underline ou circle "
+        "valeur de Δ ni les racines; si l’élève demande explicitement une flèche, utilise arrow et underline "
+        "(intent=correction) sur le même target_text dans le même tour. "
+        "Sinon, s’il se trompe, utilise une seule underline ou circle "
         "(intent=correction) sur le terme fautif et n'ajoute pas de note ou de tip. "
         "Pour toute demande de courbe ou de graphe, appelle plot avec l’expression correspondante; "
         "ne dessine jamais une courbe à la main avec draw_path; utilise une multiplication explicite, "
@@ -433,6 +436,11 @@ class WebVoiceHandler(SimpleHTTPRequestHandler):
         self.send_header("Cache-Control", "no-store")
         self.end_headers()
         self.wfile.write(body)
+        try:
+            self.wfile.flush()
+            self.connection.shutdown(socket.SHUT_WR)
+        except OSError:
+            pass
 
     def _read_body(self, limit: int = MAX_BODY_BYTES) -> bytes:
         try:

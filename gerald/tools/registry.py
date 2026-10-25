@@ -75,7 +75,12 @@ TOOL_SCHEMAS = [
             "target_text": {"type": "string", "description": "exact text of the target term"},
         },
     ),
-    _schema("arrow", "Draw an arrow from one target to another.", {"from": TARGET_SCHEMA, "to": TARGET_SCHEMA}, ["from", "to"]),
+    _schema(
+        "arrow",
+        "Draw an arrow whose head points to the target; the start point is optional.",
+        {"from": TARGET_SCHEMA, "to": TARGET_SCHEMA},
+        ["to"],
+    ),
     _schema("link", "Connect two targets with a labeled line.", {"a": TARGET_SCHEMA, "b": TARGET_SCHEMA, "label": {"type": "string"}}, ["a", "b"]),
     _targeted_schema(
         "underline",

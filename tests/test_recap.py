@@ -1,5 +1,6 @@
 from gerald.tools.recap import save_recap
 from gerald.tools import recap as recap_module
+from gerald.home import bridge as bridge_module
 
 
 def test_save_recap_writes_markdown_under_temporary_home(tmp_path):
@@ -46,3 +47,36 @@ def test_save_recap_falls_back_to_notepad_when_windows_association_fails(tmp_pat
     )
     path = save_recap("Windows recap", home=tmp_path)
     assert calls[0][0] == ["notepad.exe", str(path)]
+
+
+def test_bridge_open_recap_falls_back_to_notepad_when_url_handler_fails(tmp_path, monkeypatch):
+    calls = []
+
+    class WindowsOS:
+        name = "nt"
+
+        @staticmethod
+        def startfile(_path):
+            raise OSError("no markdown association")
+
+    monkeypatch.setattr(bridge_module.QDesktopServices, "openUrl", lambda _url: False)
+    monkeypatch.setattr(bridge_module, "os", WindowsOS)
+    monkeypatch.setattr(bridge_module.subprocess, "Popen", lambda args: calls.append(args))
+    bridge = bridge_module.Bridge(None, None, None)
+    path = tmp_path / "lesson.md"
+
+    bridge.openRecap(str(path))
+
+    assert calls == [["notepad.exe", str(path)]]
+
+
+def test_bridge_open_recap_uses_in_app_view_when_no_handler_exists(tmp_path, monkeypatch):
+    shown = []
+    monkeypatch.setattr(bridge_module.QDesktopServices, "openUrl", lambda _url: False)
+    monkeypatch.setattr(bridge_module.Bridge, "_show_recap_in_app", lambda _self, path: shown.append(path))
+    bridge = bridge_module.Bridge(None, None, None)
+    path = tmp_path / "lesson.md"
+
+    bridge.openRecap(str(path))
+
+    assert shown == [str(path)]

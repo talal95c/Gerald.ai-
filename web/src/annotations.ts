@@ -85,11 +85,14 @@ export function animateCursor(
     x: (from.x + to.x) / 2 + perpendicular.x * distance * 0.12,
     y: (from.y + to.y) / 2 + perpendicular.y * distance * 0.12,
   };
-  const startedAt = performance.now();
+  let last = performance.now();
+  let elapsed = 0;
 
   return new Promise((resolve) => {
     const frame = (now: number) => {
-      const linear = Math.min(1, (now - startedAt) / duration);
+      elapsed += Math.min(now - last, 28);
+      last = now;
+      const linear = Math.min(1, elapsed / (duration * 1.2));
       const progress = linear < 0.5
         ? 4 * linear ** 3
         : 1 - ((-2 * linear + 2) ** 3) / 2;
@@ -145,10 +148,13 @@ export function createCursorMotion(
         return Promise.resolve();
       }
       onUpdate({...position, visible: true});
-      const startedAt = performance.now();
+      let last = performance.now();
+      let elapsed = 0;
       return new Promise<void>((resolve) => {
         const frame = (now: number) => {
-          const linear = Math.min(1, (now - startedAt) / durationMs);
+          elapsed += Math.min(now - last, 34);
+          last = now;
+          const linear = Math.min(1, elapsed / (durationMs * 2));
           const progress = linear < 0.5
             ? 4 * linear ** 3
             : 1 - ((-2 * linear + 2) ** 3) / 2;

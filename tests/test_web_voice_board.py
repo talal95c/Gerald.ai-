@@ -143,7 +143,7 @@ def test_session_posts_sdp_and_filtered_realtime_config(monkeypatch, server):
     assert "write_math" in tools_by_name["write"]["description"]
     assert "LaTeX" in tools_by_name["write_math"]["description"]
     assert r"\Delta = b^2 - 4ac" in tools_by_name["write_math"]["description"]
-    assert "Si l'élève demande explicitement une flèche" in tools_by_name["arrow"]["description"]
+    assert "le target_text de to" in tools_by_name["arrow"]["description"]
     assert "réserve write aux mots français courts" in session["instructions"]
     intent_tool_names = {
         "write",
@@ -171,7 +171,7 @@ def test_session_posts_sdp_and_filtered_realtime_config(monkeypatch, server):
         "vert (intent=valide)",
         "bleu (intent=remarque)",
         "l'écriture normale reste noire",
-        "souligne aussi le terme fautif en rouge (intent=correction) dans le même tour",
+            "souligne aussi le même terme fautif avec underline (intent=correction) dans le même tour",
     ):
         assert color_intent in session["instructions"]
     assert "une seule underline ou circle (intent=correction)" in session["instructions"]
