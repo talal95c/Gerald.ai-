@@ -834,6 +834,8 @@ function Board() {
     elements().slice(0, 40).map((item) => `[${item.id}] ${item.text.slice(0, 100)}`).join("; ");
   const targetRect = (args: Record<string, unknown>) => {
     const wanted = typeof args.target_text === "string" ? args.target_text : "";
+    const pointX = args.x;
+    const pointY = args.y;
     const elementId = Number(args.element_id);
     const hasElementId = isNumber(args.element_id);
     const targets = visibleDomTargets();
@@ -853,15 +855,15 @@ function Board() {
     }
     const ink = elements().find((item) => item.id === elementId && item.id >= 10000);
     if (ink) return ink.rect;
-    if (!wanted && isNumber(args.x) && isNumber(args.y)) {
+    if (!wanted && isNumber(pointX) && isNumber(pointY)) {
       if (!isNumber(args.w) && !isNumber(args.h)) {
         const containing = elements().filter((item) =>
-          args.x >= item.rect.x && args.x <= item.rect.x + item.rect.w
-          && args.y >= item.rect.y && args.y <= item.rect.y + item.rect.h,
+          pointX >= item.rect.x && pointX <= item.rect.x + item.rect.w
+          && pointY >= item.rect.y && pointY <= item.rect.y + item.rect.h,
         ).sort((left, right) => left.rect.w * left.rect.h - right.rect.w * right.rect.h);
         if (containing[0]) return containing[0].rect;
       }
-      return {x: args.x, y: args.y, w: isNumber(args.w) ? args.w : 120, h: isNumber(args.h) ? args.h : 38};
+      return {x: pointX, y: pointY, w: isNumber(args.w) ? args.w : 120, h: isNumber(args.h) ? args.h : 38};
     }
     return null;
   };
@@ -1063,8 +1065,11 @@ function Board() {
         await new Promise<void>((resolve) => requestAnimationFrame(() => requestAnimationFrame(() => resolve())));
         let line = document.querySelector<HTMLElement>(`[data-gerald-text-id="${id}"]`);
         let bounds = line ? measuredWriteBounds(line) : null;
+        const measuredBounds = bounds;
+        const overlapsOccupied = measuredBounds !== null
+          && occupiedRects.some((rect) => writeBoundsOverlap(measuredBounds, rect));
         const shouldStartBelowAll = requestedY === null
-          || (bounds !== null && occupiedRects.some((rect) => writeBoundsOverlap(bounds, rect)));
+          || overlapsOccupied;
         if (bounds && shouldStartBelowAll && bounds.y < automaticY - 1) {
           y += automaticY - bounds.y;
           setGeraldTexts((items) => items.map((item) => item.id === id ? {...item, y} : item));
