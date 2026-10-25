@@ -23,7 +23,7 @@ from gerald.tools.registry import TOOL_SCHEMAS
 
 ROOT = Path(__file__).resolve().parents[1]
 WEB_ROOT = ROOT / "gerald" / "home" / "webui"
-SYSTEM_PROMPT = ROOT / "gerald" / "prompts" / "system_prompt.md"
+SYSTEM_PROMPT = ROOT / "gerald" / "prompts" / "web_system_prompt.md"
 PAINT_MODE_GUIDANCE = ROOT / "scripts" / "paint_mode_guidance.txt"
 DEFAULT_TITLE = "Exercice 1"
 DEFAULT_LINES = ["Résous dans ℝ : x² − 5x + 6 = 0"]
@@ -32,6 +32,7 @@ WEB_TOOL_NAMES = {
     "write_math",
     "plot",
     "clear_gerald",
+    "erase",
     "underline",
     "circle",
     "highlight",
@@ -40,6 +41,21 @@ WEB_TOOL_NAMES = {
     "note",
     "tip",
     "open_board",
+}
+WEB_TOOL_DESCRIPTIONS = {
+    "point": "Montre un élément visible ou un point de la vue active.",
+    "circle": "Entoure un élément visible ou une zone.",
+    "arrow": "Dessine une flèche dont la pointe vise la cible ; le point de départ est facultatif.",
+    "underline": "Souligne un élément visible ou un terme précis (target_text).",
+    "highlight": "Surligne un élément visible ou une zone.",
+    "note": "Ajoute une courte étiquette (1 à 4 mots) à côté d'une cible, sans recouvrir d'autre texte ; target_text peut désigner la cible par son texte.",
+    "tip": "Affiche une courte astuce dans une bulle à côté du curseur de Gerald.",
+    "write": "Écris un texte court au tableau ouvert. N'indique pas y : le tableau place la ligne sous ce qui est déjà écrit.",
+    "write_math": "Écris une formule (LaTeX) au tableau ouvert. N'indique pas y : le tableau place la ligne sous ce qui est déjà écrit.",
+    "plot": "Trace le graphe exact d'une ou plusieurs fonctions de x au tableau, avec axes, graduations et points nommés (racines, sommet, intersections).",
+    "clear_gerald": "Efface tout ce que Gerald a dessiné ou écrit sur la surface active (marques, lignes, courbe), sans toucher à l'écriture de l'élève. À appeler dès que l'élève demande d'effacer tes traits ou le tableau.",
+    "open_board": "Ouvre l'exercice du TD choisi au tableau, sans couper la session vocale.",
+    "erase": "Efface un élément précis : une de tes marques ou lignes (kind = point, circle, arrow, underline, highlight, note, tip, write, write_math, plot), ou une ligne d'encre de l'élève (kind = ink, seulement s'il le demande). Sans cible, efface la plus récente de ce type (scope=last) ou toutes (scope=all). À appeler tout de suite quand l'élève demande d'enlever quelque chose.",
 }
 INTENT_TOOL_NAMES = {
     "write",
@@ -99,7 +115,7 @@ def _web_tools(
             continue
         schema = deepcopy(tool["parameters"])
         preserve_targets(schema)
-        description = tool["description"]
+        description = WEB_TOOL_DESCRIPTIONS.get(tool["name"], tool["description"])
         if tool["name"] in INTENT_TOOL_NAMES:
             schema.setdefault("properties", {})["intent"] = {
                 "type": "string",
@@ -145,11 +161,36 @@ def _web_tools(
                 "parameters": schema,
             }
         )
+    if not paint_mode:
+        tools.append(
+            {
+                "type": "function",
+                "name": "erase",
+                "description": WEB_TOOL_DESCRIPTIONS["erase"],
+                "parameters": {
+                    "type": "object",
+                    "properties": {
+                        "kind": {
+                            "type": "string",
+                            "enum": [
+                                "point", "circle", "arrow", "underline", "highlight", "note",
+                                "tip", "write", "write_math", "plot", "ink",
+                            ],
+                        },
+                        "element_id": {"type": "number"},
+                        "target_text": {"type": "string"},
+                        "scope": {"type": "string", "enum": ["last", "all"]},
+                    },
+                    "required": ["kind"],
+                    "additionalProperties": False,
+                },
+            }
+        )
     tools.append(
         {
             "type": "function",
             "name": "tip",
-            "description": f"Show a short spoken hint in a bubble next to Gerald's pointer. {COLOR_GUIDANCE}",
+            "description": f"{WEB_TOOL_DESCRIPTIONS['tip']} {COLOR_GUIDANCE}",
             "parameters": {
                 "type": "object",
                 "properties": {
@@ -176,7 +217,7 @@ def _web_tools(
             {
                 "type": "function",
                 "name": "open_board",
-                "description": "Open an empty board over the current document without ending the voice session.",
+                "description": WEB_TOOL_DESCRIPTIONS["open_board"],
                 "parameters": {
                     "type": "object",
                     "properties": {},
@@ -190,7 +231,7 @@ def _web_tools(
             {
                 "type": "function",
                 "name": "open_board",
-                "description": "Open the selected TD exercise on the board without ending the voice session.",
+                "description": WEB_TOOL_DESCRIPTIONS["open_board"],
                 "parameters": {
                     "type": "object",
                     "properties": {
@@ -225,45 +266,45 @@ def session_instructions(
     prompt = SYSTEM_PROMPT.read_text(encoding="utf-8")
     if paint_mode:
         paint_guidance = PAINT_MODE_GUIDANCE.read_text(encoding="utf-8")
-        return f"{paint_guidance}{COLOR_GUIDANCE}"
+        return f"{prompt.rstrip()}\n{paint_guidance}{COLOR_GUIDANCE}"
     board_guidance = (
         "Pour cibler une écriture manuscrite, choisis l'element_id de sa boîte « encre élève #n » "
         "plutôt que des coordonnées devinées. Sur le tableau, utilise write_math avec du LaTeX "
         "(par exemple \\Delta = b^2 - 4ac) pour les formules; réserve write aux mots français courts. "
     )
     if live_mode:
-        prompt = prompt.partition("\n## Board mode\n")[0]
+        prompt = prompt.partition("\n## Mode tableau\n")[0]
         live_guidance = (
-            "LIVE BOARD MODE — no TD or exercise document is loaded. The empty board is already open. "
-            "Answer the learner's requested topic, using concise writing or marks on the board. "
-            "For each explanation request, demonstrate at least one useful formula or diagram on the board; "
-            "do not answer only with speech. "
-            "Do not call open_board. "
+            "MODE COURS LIVE — aucun TD ni document n'est chargé. Le tableau vide est déjà ouvert. "
+            "Réponds au sujet demandé par l'élève avec une écriture courte ou des marques au tableau. "
+            "Pour chaque demande d'explication, montre au moins une formule utile ou un schéma au tableau ; "
+            "ne réponds pas seulement à l'oral. N'appelle pas open_board. "
         )
         return f"{prompt.rstrip()}\n{live_guidance}{board_guidance}{COLOR_GUIDANCE}"
 
     if doc_mode:
-        prompt = prompt.partition("\n## Board mode\n")[0]
+        prompt = prompt.partition("\n## Mode tableau\n")[0]
         document_title = sanitize_document_title(title)
         document_guidance = (
-            f"DOCUMENT MODE — the learner opened « {document_title} ». Work directly on this visible document: "
-            "explain its content, point to relevant passages, and use element_id for underline, circle, highlight, "
-            "arrow, or other marks. The learner's visible document elements are supplied with each turn. "
-            "Never invent document content or provide a full exercise solution; guide the learner one step at a time. "
-            "If the learner asks to use the board, call parameterless open_board to open an empty board overlay; "
-            "the document remains open underneath. Do not include or assume any TD exercise list. "
+            f"MODE DOCUMENT — l'élève a ouvert « {document_title} ». Travaille directement sur ce document visible : "
+            "explique son contenu, montre les passages utiles et utilise element_id pour underline, circle, highlight, "
+            "arrow ou les autres marques. Les éléments visibles du document te sont envoyés à chaque tour. "
+            "N'invente jamais le contenu du document et ne donne pas la solution complète d'un exercice ; guide "
+            "l'élève une étape à la fois. Si l'élève veut utiliser le tableau, appelle open_board sans paramètre "
+            "pour ouvrir un tableau vide par-dessus ; le document reste ouvert dessous. Ne suppose aucune liste "
+            "d'exercices de TD. "
         )
         return f"{prompt.rstrip()}\n{document_guidance}{board_guidance}{COLOR_GUIDANCE}"
 
     exercise_lines = lines if lines is not None else DEFAULT_LINES
     td_context = "\n".join(
-        ["TD MODE — exercises and stable exercise_id values:"]
+        ["MODE TD — exercices et leur exercise_id (ce sont les seuls exercices du TD) :"]
         + [
             f"- {exercise_id}: {exercise_title} — {'; '.join(items)}"
             for exercise_id, exercise_title, items in TD_EXERCISES
         ]
     )
-    board_context = "\n".join(["BOARD MODE", f"Exercise: {title}", *exercise_lines])
+    board_context = "\n".join(["BOARD MODE", f"Exercice : {title}", *exercise_lines])
     td_guidance = (
         "Sur le TD, commence par expliquer oralement et pointer les éléments du document sans quitter la page. "
         "Propose « Viens, on va au tableau » et n'appelle open_board avec l'exercise_id correspondant "

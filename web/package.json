@@ -4,7 +4,8 @@
   "version": "1.0.0",
   "type": "module",
   "scripts": {
-    "build": "vite build"
+    "build": "vite build",
+    "typecheck": "tsc --noEmit -p ."
   },
   "dependencies": {
     "katex": "^0.16.22",

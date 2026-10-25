@@ -18,5 +18,6 @@ usage.jsonl
 evals/results/*
 !evals/results/.gitkeep
 evals/pedagogy/results/
+evals/web_voice/results/
 !gerald/home/webui/vendor/minipaint/dist/
 !web/public/vendor/minipaint/dist/

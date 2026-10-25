@@ -130,7 +130,7 @@ def test_session_posts_sdp_and_filtered_realtime_config(monkeypatch, server):
     }
     assert session["instructions"] == web_voice_board.session_instructions(title, lines)
     assert session["instructions"].startswith(web_voice_board.SYSTEM_PROMPT.read_text(encoding="utf-8"))
-    assert "BOARD MODE\nExercise: Exercice 1" in session["instructions"]
+    assert "BOARD MODE\nExercice : Exercice 1" in session["instructions"]
     assert "« à toi de jouer »" in session["instructions"]
     assert (
         "valeur de Δ ni les racines tant que l’élève ne les a pas trouvées lui-même. Dès qu’il a écrit "
@@ -241,10 +241,9 @@ def test_live_session_omits_default_exercise_context(monkeypatch, server):
         if part.get_param("name", header="content-disposition") == "session"
     )
     session = json.loads(session_part.get_content())
-    assert "LIVE BOARD MODE" in session["instructions"]
-    assert "do not answer only with speech" in session["instructions"]
+    assert "MODE COURS LIVE" in session["instructions"]
+    assert "ne réponds pas seulement à l'oral" in session["instructions"]
     assert "x² − 5x + 6" not in session["instructions"]
-    assert "x**2-5*x+6" not in session["instructions"]
     assert "x**2-5*x+6" not in " ".join(
         tool["description"] for tool in session["tools"]
     )
@@ -259,12 +258,11 @@ def test_document_session_uses_sanitized_title_and_live_tools():
         doc_mode=True,
     )
     instructions = config["instructions"]
-    assert "DOCUMENT MODE" in instructions
+    assert "MODE DOCUMENT" in instructions
     assert "« Cours de Pythagore »" in instructions
     assert "x² − 5x + 6" not in instructions
-    assert "x**2-5*x+6" not in instructions
-    assert "do not answer only with speech" not in instructions
-    assert "provide a full exercise solution" in instructions
+    assert "MODE COURS LIVE" not in instructions
+    assert "ne donne pas la solution complète d'un exercice" in instructions
     tools = {tool["name"]: tool for tool in config["tools"]}
     assert set(tools) == web_voice_board.WEB_TOOL_NAMES
     open_board = tools["open_board"]["parameters"]
@@ -282,7 +280,10 @@ def test_document_title_sanitization_strips_controls_and_limits_length():
 def test_paint_mode_uses_guidance_and_exact_tool_list():
     config = web_voice_board.build_session_config("gpt-realtime-2", paint_mode=True)
     guidance = web_voice_board.PAINT_MODE_GUIDANCE.read_text(encoding="utf-8")
-    assert config["instructions"].startswith(guidance)
+    assert config["instructions"].startswith(
+        web_voice_board.SYSTEM_PROMPT.read_text(encoding="utf-8")
+    )
+    assert guidance in config["instructions"]
     assert config["instructions"].endswith(web_voice_board.COLOR_GUIDANCE)
     assert [tool["name"] for tool in config["tools"]] == [
         "point",
@@ -297,6 +298,34 @@ def test_paint_mode_uses_guidance_and_exact_tool_list():
     assert "plot" not in {tool["name"] for tool in config["tools"]}
     assert "open_board" not in {tool["name"] for tool in config["tools"]}
 
+
+def test_erase_tool_schema_is_available_except_in_paint_mode():
+    expected_kind = [
+        "point", "circle", "arrow", "underline", "highlight", "note",
+        "tip", "write", "write_math", "plot", "ink",
+    ]
+    configs = [
+        web_voice_board.build_session_config("gpt-realtime-2"),
+        web_voice_board.build_session_config("gpt-realtime-2", live_mode=True),
+        web_voice_board.build_session_config("gpt-realtime-2", doc_mode=True),
+    ]
+    for config in configs:
+        tools = {tool["name"]: tool for tool in config["tools"]}
+        erase = tools["erase"]
+        assert erase["description"] == web_voice_board.WEB_TOOL_DESCRIPTIONS["erase"]
+        assert erase["parameters"] == {
+            "type": "object",
+            "properties": {
+                "kind": {"type": "string", "enum": expected_kind},
+                "element_id": {"type": "number"},
+                "target_text": {"type": "string"},
+                "scope": {"type": "string", "enum": ["last", "all"]},
+            },
+            "required": ["kind"],
+            "additionalProperties": False,
+        }
+    paint = web_voice_board.build_session_config("gpt-realtime-2", paint_mode=True)
+    assert "erase" not in {tool["name"] for tool in paint["tools"]}
 
 def test_minipaint_index_is_served(server):
     status, _body, _headers = _request(server, "GET", "/vendor/minipaint/index.html")
