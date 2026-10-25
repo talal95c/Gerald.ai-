@@ -15,8 +15,12 @@ from transformers import AutoModelForCausalLM
 
 MODEL_ID = "vikhyatk/moondream2"
 MODEL_REVISION = "2025-06-21"
+MAX_IMAGE_URL_CHARS = 15_000_000
+MAX_IMAGE_PIXELS = 40_000_000
 TOKEN = secrets.token_urlsafe(16)
 print(f"Moondream grounder token: {TOKEN}")
+
+Image.MAX_IMAGE_PIXELS = MAX_IMAGE_PIXELS
 
 model = None
 app = FastAPI()
@@ -61,13 +65,19 @@ async def point(
 ) -> dict[str, object]:
     if not x_moondream_auth or not hmac.compare_digest(x_moondream_auth, TOKEN):
         raise HTTPException(status_code=401, detail="Invalid token")
+    if len(request.image_url) > MAX_IMAGE_URL_CHARS:
+        raise HTTPException(status_code=413, detail="Image payload is too large")
     header, separator, encoded = request.image_url.partition(",")
     if not separator or not re.fullmatch(r"data:image/[A-Za-z0-9.+-]+;base64", header):
         raise HTTPException(status_code=400, detail="Invalid image_url")
     try:
         image_data = base64.b64decode(encoded, validate=True)
         with Image.open(io.BytesIO(image_data)) as opened:
+            if opened.width * opened.height > MAX_IMAGE_PIXELS:
+                raise HTTPException(status_code=413, detail="Image dimensions are too large")
             image = opened.convert("RGB")
+    except Image.DecompressionBombError:
+        raise HTTPException(status_code=413, detail="Image dimensions are too large") from None
     except (binascii.Error, UnidentifiedImageError, ValueError):
         raise HTTPException(status_code=400, detail="Invalid image_url") from None
     if model is None:

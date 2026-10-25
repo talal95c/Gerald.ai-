@@ -232,8 +232,16 @@ def load_moondream_cloud_settings(path: str | Path | None = None) -> dict[str, s
         pass
     except (OSError, json.JSONDecodeError):
         logger.warning("Could not read Moondream Cloud settings")
-    endpoint = os.getenv("MOONDREAM_ENDPOINT", "").strip() or str(saved.get("endpoint", "")).strip()
-    api_key = os.getenv("MOONDREAM_API_KEY", "").strip() or str(saved.get("api_key", "")).strip()
+    saved_endpoint = saved.get("endpoint")
+    saved_api_key = saved.get("api_key")
+    endpoint = (
+        (saved_endpoint.strip() if isinstance(saved_endpoint, str) else "")
+        or os.getenv("MOONDREAM_ENDPOINT", "").strip()
+    )
+    api_key = (
+        (saved_api_key.strip() if isinstance(saved_api_key, str) else "")
+        or os.getenv("MOONDREAM_API_KEY", "").strip()
+    )
     return {
         "endpoint": endpoint.rstrip("/") or MOONDREAM_ENDPOINT,
         "api_key": api_key,

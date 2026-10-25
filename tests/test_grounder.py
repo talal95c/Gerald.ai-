@@ -216,7 +216,7 @@ def test_configured_moondream_cloud_requires_key_and_uses_model_override(tmp_pat
     assert grounder.api_key == "secret-key"
 
 
-def test_moondream_cloud_settings_file_permissions_and_env_precedence(tmp_path, monkeypatch):
+def test_moondream_cloud_settings_file_permissions_and_precedence(tmp_path, monkeypatch):
     settings_path = tmp_path / ".gerald" / "grounder.json"
     saved_path = grounder_module.save_moondream_cloud_settings(
         "https://colab.example/v1/",
@@ -235,6 +235,12 @@ def test_moondream_cloud_settings_file_permissions_and_env_precedence(tmp_path, 
     monkeypatch.setenv("MOONDREAM_ENDPOINT", "https://env.example/v1/")
     monkeypatch.setenv("MOONDREAM_API_KEY", "env-key")
     assert grounder_module.load_moondream_cloud_settings(settings_path) == {
+        "endpoint": "https://colab.example/v1",
+        "api_key": "saved-key",
+    }
+
+    settings_path.write_text(json.dumps({"endpoint": "", "api_key": ""}), encoding="utf-8")
+    assert grounder_module.load_moondream_cloud_settings(settings_path) == {
         "endpoint": "https://env.example/v1",
         "api_key": "env-key",
     }
@@ -245,8 +251,8 @@ def test_configured_moondream_cloud_hot_swaps_saved_settings(tmp_path, monkeypat
     monkeypatch.setattr(grounder_module, "_instances", {})
     monkeypatch.setattr(grounder_module, "_runtime_backend", None)
     monkeypatch.delenv("GERALD_GROUNDER", raising=False)
-    monkeypatch.delenv("MOONDREAM_ENDPOINT", raising=False)
-    monkeypatch.delenv("MOONDREAM_API_KEY", raising=False)
+    monkeypatch.setenv("MOONDREAM_ENDPOINT", "https://env.example/v1")
+    monkeypatch.setenv("MOONDREAM_API_KEY", "env-key")
     grounder_module.save_moondream_cloud_settings("https://first.example/v1", "first-key")
     grounder_module.set_runtime_grounder_backend("moondream-cloud")
     first = grounder_module.configured_grounder()

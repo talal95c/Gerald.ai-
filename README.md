@@ -49,6 +49,9 @@ Le localisateur visuel optionnel est désactivé par défaut
 Moondream gratuit comprend 5 $ de crédit par mois
 ([tarifs Moondream](https://moondream.ai/pricing)). Le modèle cloud par défaut
 est `moondream3.1-9B-A2B`; `GERALD_GROUNDER_MODEL` permet de le remplacer.
+Les valeurs enregistrées avec Grounder… dans `~/.gerald/grounder.json` priment
+sur `MOONDREAM_ENDPOINT` et `MOONDREAM_API_KEY`; les variables d'environnement
+servent de repli si une valeur n'est pas enregistrée.
 
 ## Free GPU fallback (Colab)
 

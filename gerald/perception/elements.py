@@ -634,32 +634,41 @@ def collect_elements_detailed(
 
     def merge(ocr: list[Element]) -> list[Element]:
         result = list(uia[:150])
+        suppressing_roles = {
+            "button",
+            "splitbutton",
+            "menuitem",
+            "hyperlink",
+            "tabitem",
+            "checkbox",
+            "radiobutton",
+            "listitem",
+            "treeitem",
+            "headeritem",
+            "text",
+            "combobox",
+        }
+
+        def normalized_name(name: str) -> str:
+            return " ".join(
+                "".join(character if character.isalnum() else " " for character in name.casefold()).split()
+            )
+
         for candidate in ocr:
             cx, cy, cw, ch = candidate.rect
-            enclosing = [
-                element
-                for element in uia[:150]
-                if element.rect[0] <= cx
+            candidate_name = normalized_name(candidate.name)
+            suppressed = bool(candidate_name) and any(
+                element.role.casefold().rsplit(".", maxsplit=1)[-1].removesuffix("control")
+                in suppressing_roles
+                and element.rect[0] <= cx
                 and element.rect[1] <= cy
                 and element.rect[0] + element.rect[2] >= cx + cw
                 and element.rect[1] + element.rect[3] >= cy + ch
-            ]
-            smallest = min(
-                enclosing,
-                key=lambda element: element.rect[2] * element.rect[3],
-                default=None,
+                and element.rect[2] * element.rect[3] <= 6 * cw * ch
+                and f" {candidate_name} " in f" {normalized_name(element.name)} "
+                for element in uia[:150]
             )
-            candidate_name = " ".join(
-                "".join(character if character.isalnum() else " " for character in candidate.name.casefold()).split()
-            )
-            smallest_name = (
-                " ".join(
-                    "".join(character if character.isalnum() else " " for character in smallest.name.casefold()).split()
-                )
-                if smallest is not None
-                else ""
-            )
-            if not candidate_name or f" {candidate_name} " not in f" {smallest_name} ":
+            if not suppressed:
                 result.append(candidate)
         final = []
         for index, element in enumerate(result[:300]):

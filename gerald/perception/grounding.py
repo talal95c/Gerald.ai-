@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from difflib import SequenceMatcher
-from math import hypot
+from math import hypot, isfinite
 import unicodedata
 from typing import Literal
 
@@ -77,15 +77,6 @@ def _matched_word_rect(element: Element, query: str) -> tuple[int, int, int, int
         if tokens == query_tokens:
             selected.update(index for _token, index in flattened[start : start + len(query_tokens)])
             break
-    if not selected:
-        for index, (word, _rect) in enumerate(element.word_boxes):
-            tokens = _normalize_text(word).split()
-            if any(
-                token in query_tokens
-                or any(SequenceMatcher(None, token, query_token).ratio() >= 0.8 for query_token in query_tokens)
-                for token in tokens
-            ):
-                selected.add(index)
     if not selected:
         return None
     rectangles = [element.word_boxes[index][1] for index in selected]
@@ -303,6 +294,13 @@ def resolve_target(
     target_text = args.get("text")
     query = None if force_coordinates else args.get("text")
     weak_text_matches = []
+
+    def point_sort_key(match, image_x: float, image_y: float):
+        element, score, _rank, _rect = match
+        ex, ey, ew, eh = element.rect
+        distance = hypot(image_x - (ex + ew / 2), image_y - (ey + eh / 2))
+        return distance, -score[0], -score[1], ew * eh, element.id
+
     if query is not None:
         if not isinstance(query, str):
             raise ValueError("text must be a string")
@@ -343,15 +341,10 @@ def resolve_target(
                     ):
                         raise ValueError("x and y must be numbers")
                     image_x, image_y = float(x), float(y)
-
-                    def point_sort(match):
-                        element, score, _rank, _rect = match
-                        ex, ey, ew, eh = element.rect
-                        distance = hypot(image_x - (ex + ew / 2), image_y - (ey + eh / 2))
-                        area = ew * eh
-                        return distance, -score[0], -score[1], area, element.id
-
-                    element, _score, _rank, rect = min(matches, key=point_sort)
+                    element, _score, _rank, rect = min(
+                        matches,
+                        key=lambda match: point_sort_key(match, image_x, image_y),
+                    )
                 else:
                     element, _score, _rank, rect = min(
                         matches,
@@ -397,6 +390,25 @@ def resolve_target(
                 )
 
     if weak_text_matches:
+        x, y = args.get("x"), args.get("y")
+        valid_point = (
+            isinstance(x, (int, float))
+            and not isinstance(x, bool)
+            and isinstance(y, (int, float))
+            and not isinstance(y, bool)
+        )
+        if valid_point:
+            try:
+                image_x, image_y = float(x), float(y)
+                valid_point = isfinite(image_x) and isfinite(image_y)
+            except OverflowError:
+                valid_point = False
+        if valid_point:
+            element, _score, _rank, rect = min(
+                weak_text_matches,
+                key=lambda match: point_sort_key(match, image_x, image_y),
+            )
+            return resolved(_screen_rect(capture, rect), _element_layer(element))
         element, _score, _rank, rect = min(
             weak_text_matches,
             key=lambda match: (

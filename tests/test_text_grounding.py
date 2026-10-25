@@ -100,6 +100,19 @@ def test_hn_long_navigation_label_keeps_weak_match_without_grounder(monkeypatch)
     assert resolve_target({"text": "login"}, capture, [bar]) == ScreenRect(-1000, 80, 400, 40)
 
 
+def test_weak_text_matches_use_coordinates_before_score(monkeypatch):
+    capture = make_capture()
+    first = Element(1, "DataItem", "login submit past comments ask", (0, 10, 30, 10), "uia")
+    second = Element(2, "DataItem", "login submit past comments ask", (60, 10, 30, 10), "uia")
+    monkeypatch.setattr("gerald.perception.grounder.configured_grounder", lambda: None)
+
+    assert resolve_target(
+        {"text": "login", "x": 75, "y": 15},
+        capture,
+        [first, second],
+    ) == ScreenRect(-760, 80, 120, 40)
+
+
 def test_text_ambiguity_uses_nearest_coordinate():
     capture = make_capture()
     elements = [
@@ -133,6 +146,37 @@ def test_ocr_text_match_narrows_to_matched_word_boxes():
     ]
 
     assert resolve_target({"text": "shortcut"}, capture, elements) == ScreenRect(-904, 88, 96, 40)
+
+
+def test_ocr_phrase_match_requires_all_contiguous_query_words():
+    capture = make_capture()
+    elements = [
+        Element(
+            1,
+            "Text",
+            "Delete draft",
+            (0, 10, 70, 10),
+            "ocr",
+            (
+                ("Delete", (0, 10, 35, 10)),
+                ("draft", (38, 10, 32, 10)),
+            ),
+        ),
+        Element(
+            2,
+            "Text",
+            "Delete account now",
+            (0, 30, 120, 10),
+            "ocr",
+            (
+                ("Delete", (10, 30, 30, 10)),
+                ("account", (43, 30, 40, 10)),
+                ("now", (87, 30, 20, 10)),
+            ),
+        ),
+    ]
+
+    assert resolve_target({"text": "Delete account"}, capture, elements) == ScreenRect(-960, 160, 292, 40)
 
 
 def test_ocr_splits_a_line_at_large_horizontal_word_gaps():
@@ -340,6 +384,32 @@ def test_full_window_uia_container_does_not_suppress_ocr_search_label():
     assert any(element.name == "Search" and element.source == "ocr" for element in collection)
 
 
+def test_named_window_does_not_suppress_ocr_but_small_button_does():
+    capture = make_capture()
+
+    class Provider:
+        def __init__(self, elements):
+            self.elements = elements
+
+        def get_elements(self, _capture):
+            return self.elements
+
+    ocr = Element(0, "text", "Save", (-950, 60, 48, 20), "ocr")
+    window_result = collect_elements(
+        capture,
+        Provider([Element(0, "Window", "Save document", (-1000, 40, 400, 200), "uia")]),
+        Provider([ocr]),
+    )
+    assert any(element.source == "ocr" and element.name == "Save" for element in window_result)
+
+    button_result = collect_elements(
+        capture,
+        Provider([Element(0, "ButtonControl", "Save", (-950, 60, 48, 20), "uia")]),
+        Provider([ocr]),
+    )
+    assert not any(element.source == "ocr" and element.name == "Save" for element in button_result)
+
+
 def test_empty_edit_container_keeps_ocr_but_named_button_dedupes_it():
     capture = make_capture()
 
@@ -355,8 +425,8 @@ def test_empty_edit_container_keeps_ocr_but_named_button_dedupes_it():
     editor_result = collect_elements(capture, Provider([editor]), Provider([editor_ocr]))
     assert any(element.name == "print" for element in editor_result)
 
-    button = Element(0, "ButtonControl", "Save", (-950, 60, 60, 18), "uia")
-    button_ocr = Element(0, "text", "Save", (-950, 60, 60, 18), "ocr")
+    button = Element(0, "ButtonControl", "Save", (-950, 60, 48, 20), "uia")
+    button_ocr = Element(0, "text", "Save", (-950, 60, 48, 20), "ocr")
     button_result = collect_elements(capture, Provider([button]), Provider([button_ocr]))
     assert not any(element.source == "ocr" and element.name == "Save" for element in button_result)
 
