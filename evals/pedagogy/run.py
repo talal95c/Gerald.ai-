@@ -332,7 +332,7 @@ async def run_scenario(scenario: dict[str, Any], defaults: dict[str, Any], setti
             await asyncio.sleep(0.3)
             target_ids = turn.get("targets", scenario.get("targets", []))
             targets = [targets_by_page[page][t] for t in target_ids if t in targets_by_page.get(page, {})]
-            annotated = annotate(image, [m for m in state["marks"] if m["type"] != "ClearCommand"], [b for b in state["board_ops"] if b["name"] != "clear_gerald"], capture.scale)
+            annotated = annotate(image, [m for m in state["marks"] if m["type"] not in {"ClearCommand", "DiagramCommand", "TipCommand"}], [b for b in state["board_ops"] if b["name"] != "clear_gerald"], capture.scale)
             annotated = render_rich(annotated, state["raw"])
             image_path = out / f"{scenario['id']}-t{index}.png"
             annotated.save(image_path)
