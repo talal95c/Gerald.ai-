@@ -8,14 +8,17 @@ LINES = [
  ("demo1",   "Hold a key, and just talk. Your worksheet is already on screen. I make the classic mistake, and Gerald stops me, and points at the exercise, instead of giving the answer."),
  ("demo2",   "I write on the board, by hand. Gerald follows every line, underlines the sign error in red, and lets me fix it. Only then does it write the clean solution."),
  ("demo3",   "Ask for the parabola, and it plots the real curve: roots, vertex, live, right where you work."),
- ("demo4",   "Same engine, any app. In Photoshop, Gerald points at Shapes, Rectangle, the fill colour, the hex code, and waits for my click at every step, until the red square is on the canvas. Gerald points. You click."),
- ("vs",      "Chatbots are stuck in a chat box. Clicky does the task for you. Gerald is the only one that sees your work, shows you exactly where, writes on it, and lets you try first."),
+ ("demo4",   "Same engine, any software. In Photoshop, I ask for a red square. Gerald points at Shapes, then Rectangle, then the fill colour and the hex code, and waits for my click at every step. By the end, I don't just have a red square: I know the tool. Photoshop today, Excel or Figma tomorrow. Gerald points. You click. You learn."),
+ ("agents",  "Now, the market. Clicky, Claude computer use, OpenAI's agent: brilliant, but they're assistants. They take the mouse and do the task for you. You learn nothing. ChatGPT and Gemini are stuck in a chat box. Gerald is different: it's a teacher. It sees your work, shows you exactly where, writes on it, and lets you try first."),
  ("numbers", "Zero equations retyped. Thirty-seven times more precise pointing. Half a second to find any target. Pedagogy score from seventy-seven to ninety-three percent. All for a fraction of a cent."),
  ("cta",     "Stop retyping. Stop screenshotting. Just ask Gerald. The first teacher you can actually mute."),
 ]
 key = os.environ["ELEVEN_API_KEY"]
+ONLY = set(sys.argv[2].split(",")) if len(sys.argv) > 2 else None
 out = {}
 for name, text in LINES:
+    if ONLY and name not in ONLY:
+        out[name] = json.load(open("public/audio/vo-pitch2/manifest.json"))[name]; continue
     body = json.dumps({"text": text, "model_id": "eleven_multilingual_v2",
         "voice_settings": {"stability": 0.4, "similarity_boost": 0.8, "style": 0.4, "use_speaker_boost": True, "speed": 1.05}}).encode()
     req = urllib.request.Request(f"https://api.elevenlabs.io/v1/text-to-speech/{VOICE}?output_format=mp3_44100_128", data=body,

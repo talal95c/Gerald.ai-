@@ -24,12 +24,12 @@
   "dur": 5.93
  },
  "demo4": {
-  "text": "Same engine, any app. In Photoshop, Gerald points at Shapes, Rectangle, the fill colour, the hex code, and waits for my click at every step, until the red square is on the canvas. Gerald points. You click.",
-  "dur": 13.98
+  "text": "Same engine, any software. In Photoshop, I ask for a red square. Gerald points at Shapes, then Rectangle, then the fill colour and the hex code, and waits for my click at every step. By the end, I don't just have a red square: I know the tool. Photoshop today, Excel or Figma tomorrow. Gerald points. You click. You learn.",
+  "dur": 21.58
  },
- "vs": {
-  "text": "Chatbots are stuck in a chat box. Clicky does the task for you. Gerald is the only one that sees your work, shows you exactly where, writes on it, and lets you try first.",
-  "dur": 9.27
+ "agents": {
+  "text": "Now, the market. Clicky, Claude computer use, OpenAI's agent: brilliant, but they're assistants. They take the mouse and do the task for you. You learn nothing. ChatGPT and Gemini are stuck in a chat box. Gerald is different: it's a teacher. It sees your work, shows you exactly where, writes on it, and lets you try first.",
+  "dur": 22.54
  },
  "numbers": {
   "text": "Zero equations retyped. Thirty-seven times more precise pointing. Half a second to find any target. Pedagogy score from seventy-seven to ninety-three percent. All for a fraction of a cent.",
