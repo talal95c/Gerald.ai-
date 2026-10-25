@@ -5,6 +5,6 @@ export const VO = {
   meet: { file: "vo/meet.mp3", dur: 5.15, text: "Voici Gerald. Le prof particulier qui vit sur votre écran." },
   td: { file: "vo/td.mp3", dur: 5.41, text: "Déposez vos cours. Gerald les connaît, et lit votre TD avec vous." },
   board: { file: "vo/board.mp3", dur: 9.61, text: "Vous écrivez au tableau. Gerald suit chaque ligne, explique à voix haute, trace la courbe exacte. Et c'est vous qui trouvez." },
-  desktop: { file: "vo/desktop.mp3", dur: 6.24, text: "Une touche, n'importe quelle appli. Gerald pointe le bon outil et vous guide pas à pas." },
+  desktop: { file: "vo/desktop.mp3", dur: 8.67, text: "Une touche, n'importe quelle appli. Gerald vous guide pas à pas, jusqu'au carré rouge. Et c'est vous qui cliquez." },
   cta: { file: "vo/cta.mp3", dur: 5.09, text: "Gerald. Il ne donne pas la réponse, il vous aide à la trouver." },
 } as const;

@@ -1,5 +1,5 @@
 import React from "react";
-import { AbsoluteFill, Easing, interpolate, useCurrentFrame, useVideoConfig } from "remotion";
+import { AbsoluteFill, Easing, Sequence, interpolate, useCurrentFrame, useVideoConfig } from "remotion";
 import { Badge, Brand, Bg, Bubble, Caption, Circled, GeraldCursor, H, Hand, Keycap, Orb, Reveal, Stage, TalkPill, Tick, useGlide, useP } from "../ui";
 import { Footage } from "../footage";
 import { FONT, T } from "../theme";
@@ -126,16 +126,35 @@ const PhotoshopMock: React.FC = () => {
   );
 };
 
-/** Scene · Any app — the fake desktop with Photoshop, guided by voice. */
+/** Clip3 moments (seconds in the clip, length): Shapes panel → Color picker on red → the red square. */
+const PS_CUTS: readonly (readonly [number, number])[] = [[6, 3.5], [20, 3], [32.5, 3.5]];
+
+/** Scene · Any app — Photoshop guided to the red square (real clip, three cuts). */
 export const Desktop: React.FC<{ footage: string | null; trim: number }> = ({ footage, trim }) => {
   const p = useP(0, 1.0);
+  const { fps } = useVideoConfig();
+  let acc = 0;
   return (
     <Bg>
       <Stage style={{ left: 120, right: 120, top: 60, bottom: 170, opacity: p, scale: `${0.97 + 0.03 * p}` }}>
-        <Frame><Footage src={footage} trimSeconds={trim} label="photoshop recording"><PhotoshopMock /></Footage></Frame>
+        <Frame>
+          {footage ? (
+            PS_CUTS.map(([from, len], i) => {
+              const start = acc;
+              acc += len;
+              return (
+                <Sequence key={i} from={Math.round(start * fps)} durationInFrames={Math.round(len * fps)} layout="none">
+                  <Footage src={footage} trimSeconds={from} label="photoshop recording"><PhotoshopMock /></Footage>
+                </Sequence>
+              );
+            })
+          ) : (
+            <Footage src={footage} trimSeconds={trim} label="photoshop recording"><PhotoshopMock /></Footage>
+          )}
+        </Frame>
       </Stage>
       <Caption at={0.6} out={4.4}>Une touche. N'importe quelle appli. Gerald voit ce que vous voyez.</Caption>
-      <Caption at={4.8}>Il pointe le bon outil. Vous cliquez. Il vous guide pas à pas.</Caption>
+      <Caption at={4.8}>Il vous guide jusqu'au carré rouge. C'est vous qui cliquez.</Caption>
     </Bg>
   );
 };

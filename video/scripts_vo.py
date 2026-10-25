@@ -6,7 +6,7 @@ LINES = [
  ("meet",  "Voici Gerald. Le prof particulier qui vit sur votre écran."),
  ("td",    "Déposez vos cours. Gerald les connaît, et lit votre TD avec vous."),
  ("board", "Vous écrivez au tableau. Gerald suit chaque ligne, explique à voix haute, trace la courbe exacte. Et c'est vous qui trouvez."),
- ("desktop","Une touche, n'importe quelle appli. Gerald pointe le bon outil et vous guide pas à pas."),
+ ("desktop","Une touche, n'importe quelle appli. Gerald vous guide pas à pas, jusqu'au carré rouge. Et c'est vous qui cliquez."),
  ("cta",   "Gerald. Il ne donne pas la réponse, il vous aide à la trouver."),
 ]
 key = os.environ["OPENAI_API_KEY"]
