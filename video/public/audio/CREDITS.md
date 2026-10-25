@@ -10,5 +10,4 @@ Orchestral alternatives (Mixkit Stock Music Free License):
 - romantic-getaway.mp3 — "Romantic Getaway" (Classical), asset id 88
 - i-wont-surrender.mp3 — "I Won't surrender" (Film Score), asset id 846
 - ElevenLabs voice-over (`public/audio/vo-pitch2/`, voice Eric, eleven_multilingual_v2): generated on a free-tier key → requires attribution to ElevenLabs if published commercially.
-||||||| 1841774
 Sound effects: https://remotion.media (whoosh, mouse-click, ding).
