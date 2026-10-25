@@ -52,6 +52,11 @@ def test_openrouter_grounder_maps_absolute_resized_coordinates(monkeypatch):
 
     assert np.allclose(point, (160, 100))
     assert requested["timeout"] == 4.0
+    headers = {
+        name.casefold(): value
+        for name, value in requested["request"].header_items()
+    }
+    assert headers["user-agent"] == grounder_module.USER_AGENT
     payload = json.loads(requested["request"].data)
     assert payload["messages"][0]["content"][0]["text"] == (
         "Output only the coordinate of one point in your answer. "
@@ -132,6 +137,7 @@ def test_moondream_cloud_request_and_normalized_point_mapping(monkeypatch):
     headers = {name.casefold(): value for name, value in request.header_items()}
     assert headers["content-type"] == "application/json"
     assert headers["x-moondream-auth"] == "secret-key"
+    assert headers["user-agent"] == grounder_module.USER_AGENT
     payload = json.loads(request.data)
     assert payload["model"] == "moondream3.1-9B-A2B"
     assert payload["object"] == "search field"

@@ -15,7 +15,10 @@ from typing import Protocol
 
 from PIL import Image
 
+from gerald import __version__
+
 logger = logging.getLogger(__name__)
+USER_AGENT = f"gerald/{__version__}"
 MOONDREAM_REVISION = "2025-06-21"
 MOONDREAM_ENDPOINT = "https://api.moondream.ai/v1"
 MAX_PIXELS = 16384 * 28 * 28
@@ -107,6 +110,7 @@ class OpenRouterGrounder:
             headers={
                 "Authorization": f"Bearer {api_key}",
                 "Content-Type": "application/json",
+                "User-Agent": USER_AGENT,
             },
             method="POST",
         )
@@ -193,6 +197,7 @@ class MoondreamCloudGrounder:
             headers={
                 "Content-Type": "application/json",
                 "X-Moondream-Auth": self.api_key,
+                "User-Agent": USER_AGENT,
             },
             method="POST",
         )
