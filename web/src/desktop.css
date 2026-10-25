@@ -15,6 +15,9 @@ body.desktop-page{min-width:320px;min-height:100vh;overflow:hidden;background:#2
 .desktop-window-controls{position:absolute;left:12px;display:flex;gap:7px}
 .window-light{width:12px;height:12px;border:0;border-radius:50%;padding:0}
 .window-light.close{background:#FF5F57}.window-light.minimize{background:#FEBC2E}
+.window-light::before{display:block;color:rgba(0,0,0,.5);font-size:8px;line-height:1;opacity:0;transition:opacity .12s}
+.window-light.close::before{content:"×"}.window-light.minimize::before{content:"−"}
+.desktop-window-controls:hover .window-light::before,.window-light:hover::before{opacity:1}
 .desktop-window-body{position:relative;flex:1;min-height:0;background:#fff}
 .desktop-window-body iframe{display:block;width:100%;height:100%;border:0;background:#fff}
 .desktop-window.dragging iframe{pointer-events:none}

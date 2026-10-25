@@ -29,23 +29,43 @@ function Desktop() {
   const hotkeyTarget = useRef<"Photoshop" | "Notes" | null>(null);
   const demo = new URLSearchParams(location.search).get("demo") === "1";
 
-  const clamp = useCallback((x: number, y: number, width: number, height: number) => ({
+  const usableArea = useCallback(() => {
+    const top = 52;
+    const bottom = Math.max(top, window.innerHeight - 112);
+    return {top, bottom, height: bottom - top};
+  }, []);
+  const clampDrag = useCallback((x: number, y: number, width: number) => ({
     x: Math.max(0, Math.min(x, window.innerWidth - width)),
-    y: Math.max(0, Math.min(y, window.innerHeight - Math.min(38, height))),
+    y: Math.max(0, Math.min(y, window.innerHeight - 38)),
+  }), []);
+  const clampToUsable = useCallback((x: number, y: number, width: number, height: number, area: ReturnType<typeof usableArea>) => ({
+    x: Math.max(0, Math.min(x, window.innerWidth - width)),
+    y: Math.max(area.top, Math.min(y, area.bottom - height)),
   }), []);
   const openWindow = useCallback((app: "Photoshop" | "Notes") => {
     setWindows(previous => {
       const current = previous[app];
       const zIndex = ++zCounter.current;
       if (current?.open) return {...previous, [app]: {...current, minimized: false, zIndex}};
-      const width = Math.min(1100, Math.max(320, window.innerWidth * .86));
-      const height = Math.min(720, Math.max(340, window.innerHeight * .78));
-      const offset = (cascade.current++ % 5) * 28;
-      const position = clamp((window.innerWidth - width) / 2 + offset, (window.innerHeight - height) / 2 + offset, width, height);
+      const area = usableArea();
+      const width = Math.min(1100, window.innerWidth * .86);
+      const height = Math.min(720, area.height);
+      const startX = (window.innerWidth - width) / 2;
+      const startY = area.top + (area.height - height) / 2;
+      const offset = cascade.current * 28;
+      const fits = startX + offset + width <= window.innerWidth && startY + offset + height <= area.bottom;
+      const position = clampToUsable(
+        fits ? startX + offset : startX,
+        fits ? startY + offset : startY,
+        width,
+        height,
+        area,
+      );
+      cascade.current = fits ? cascade.current + 1 : 0;
       return {...previous, [app]: {open: true, minimized: false, ...position, width, height, zIndex, token: (current?.token ?? 0) + 1}};
     });
     setFocused(app);
-  }, [clamp]);
+  }, [clampToUsable, usableArea]);
   const focusWindow = useCallback((app: "Photoshop" | "Notes") => {
     setFocused(app);
     setWindows(previous => previous[app]?.open
@@ -106,6 +126,26 @@ function Desktop() {
     };
   }, [stableTalk]);
 
+  useEffect(() => {
+    const reclamp = () => {
+      const area = usableArea();
+      setWindows(previous => {
+        const next = {...previous};
+        runningApps.forEach(app => {
+          const item = previous[app];
+          if (!item?.open) return;
+          const width = Math.min(item.width, window.innerWidth * .86, 1100);
+          const height = Math.min(item.height, area.height, 720);
+          const position = clampToUsable(item.x, item.y, width, height, area);
+          next[app] = {...item, ...position, width, height};
+        });
+        return next;
+      });
+    };
+    window.addEventListener("resize", reclamp);
+    return () => window.removeEventListener("resize", reclamp);
+  }, [clampToUsable, usableArea]);
+
   const openApp = (app: DesktopApp) => {
     setSelected(app);
     if (app === "Mail" || app === "Musique" || app === "Photos") {
@@ -121,7 +161,7 @@ function Desktop() {
     setWindows(previous => {
       const item = previous[app];
       if (!item) return previous;
-      return {...previous, [app]: {...item, ...clamp(x, y, item.width, item.height)}};
+      return {...previous, [app]: {...item, ...clampDrag(x, y, item.width)}};
     });
   };
   const closeWindow = (app: "Photoshop" | "Notes") => {
