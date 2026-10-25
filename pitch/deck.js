@@ -9,16 +9,16 @@ addEventListener('resize',fit);fit();
 slides.forEach(sl=>sl.querySelectorAll('.r').forEach((el,i)=>el.style.setProperty('--i',i)));
 
 const lines=[
-  "Tu as ouvert l'exercice 1. On le fait ensemble ?",
-  "Pas de souci. Regarde d'abord : il y a un x², donc ce n'est pas affine. C'est une parabole.",
-  "Je la trace. Résoudre l'équation, c'est trouver où elle coupe l'axe.",
-  "Elle coupe en deux points. Calcule Δ = b² − 4ac pour les retrouver. À toi !",
-  "Bravo. Je t'ai préparé la fiche de révision de la session."
+  "You opened exercise 1. Shall we do it together?",
+  "No worries. Look first: there's an x², so it's not linear. It's a parabola.",
+  "Let me plot it. Solving the equation means finding where it crosses the axis.",
+  "It crosses at two points. Compute Δ = b² − 4ac to find them. Your turn!",
+  "Well done. I've prepared your revision sheet for this session."
 ];
 function demo(on){
   const board=document.querySelector('.board'),items=[...document.querySelectorAll('.steps li')],say=document.querySelector('.say');
   clearInterval(demoTimer);let s=0;
-  if(!board.querySelector('.sheet'))board.insertAdjacentHTML('beforeend','<div class="sheet"><p class="eyebrow"><b></b>Fiche de révision</p><h4>Second degré</h4><ul><li>x² → parabole, pas une droite</li><li>Δ = b² − 4ac ; Δ &gt; 0 → deux racines</li><li>x² − 5x + 6 = 0 → x = 2 ou x = 3</li><li>À revoir : ordre de a et b</li></ul></div>');
+  if(!board.querySelector('.sheet'))board.insertAdjacentHTML('beforeend','<div class="sheet"><p class="eyebrow"><b></b>Revision sheet</p><h4>Quadratics</h4><ul><li>x² → a parabola, not a line</li><li>Δ = b² − 4ac ; Δ &gt; 0 → two roots</li><li>x² − 5x + 6 = 0 → x = 2 or x = 3</li><li>To review: order of a and b</li></ul></div>');
   const set=i=>{board.dataset.s=i;items.forEach((li,k)=>li.classList.toggle('on',k===i));say.textContent=lines[i];say.classList.remove('swap');void say.offsetWidth;say.classList.add('swap')};
   if(!on){set(0);return}
   set(0);demoTimer=setInterval(()=>{s=(s+1)%lines.length;set(s)},3200);

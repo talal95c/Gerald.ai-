@@ -91,3 +91,12 @@ body:hover .dock,.dock:focus-within{opacity:1}
 #progress{position:fixed;left:0;right:0;top:0;height:3px;z-index:5}#progress i{display:block;height:100%;background:var(--ink);width:0;transition:width .5s var(--ease)}
 @media(prefers-reduced-motion:reduce){*,*::before,*::after{animation-duration:.01ms!important;transition-duration:.01ms!important}}
 @media print{.dock,#progress{display:none}}
+/* logo */
+.mark{fill:currentColor;display:block}.mark-c{transform-box:view-box;transform-origin:67.5% 50%;animation:breathe 3.2s ease-in-out infinite}
+@keyframes breathe{0%,100%{transform:scale(1)}50%{transform:scale(1.04)}}
+.brand{position:absolute;top:60px;right:150px;z-index:2;display:flex;align-items:center;gap:12px;font-size:24px;font-weight:500;letter-spacing:-.03em;color:var(--ink);transition:opacity .4s}
+.brand .mark{width:40px;height:24px}
+#stage:has(.cover.active) .brand{opacity:0}
+.cover .notch .mark{width:30px;height:18px;color:var(--paper)}
+.logo-xl{display:flex;align-items:center;gap:44px;color:var(--ink)}.logo-xl .mark{width:280px;height:168px;flex:none}.cover .lead{max-width:1500px}
+@media(prefers-reduced-motion:reduce){.mark-c{animation:none}}
