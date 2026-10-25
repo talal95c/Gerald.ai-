@@ -11,6 +11,7 @@ from gerald.app import (
     _finalize_board_collection,
     _include_board_ink,
     _key_name,
+    make_home_opener,
     _show_offline_status,
     _show_runtime_error,
 )
@@ -22,6 +23,76 @@ def test_key_name_maps_windows_control_character_and_virtual_key_codes():
     assert _key_name(SimpleNamespace(char="\x02", vk=66)) == "b"
     assert _key_name(SimpleNamespace(char=None, vk=48)) == "0"
     assert _key_name(SimpleNamespace(char="\x03", vk=None)) == "c"
+
+
+def test_make_home_opener_forwards_callbacks_and_reuses_widget():
+    class FakeWidget:
+        def __init__(self):
+            self.show_count = 0
+            self.raise_count = 0
+            self.activate_count = 0
+
+        def show(self):
+            self.show_count += 1
+
+        def raise_(self):
+            self.raise_count += 1
+
+        def activateWindow(self):
+            self.activate_count += 1
+
+    calls = []
+    widgets = []
+
+    def open_home(*args, **kwargs):
+        calls.append((args, kwargs))
+        widget = FakeWidget()
+        widgets.append(widget)
+        return widget
+
+    store = object()
+    indexer = object()
+    settings = object()
+    on_library_changed = object()
+    open_board = object()
+    end_session = object()
+    open_window = make_home_opener(
+        open_home,
+        store,
+        indexer,
+        settings,
+        on_library_changed,
+        open_board=open_board,
+        end_session=end_session,
+    )
+
+    open_window()
+    open_window()
+
+    assert len(calls) == 1
+    args, kwargs = calls[0]
+    assert args == (store, indexer, settings, on_library_changed)
+    assert kwargs["open_board"] is open_board
+    assert kwargs["end_session"] is end_session
+    assert (widgets[0].show_count, widgets[0].raise_count, widgets[0].activate_count) == (
+        2,
+        2,
+        2,
+    )
+
+
+def test_make_home_opener_with_no_factory_is_a_noop():
+    open_window = make_home_opener(
+        None,
+        object(),
+        object(),
+        object(),
+        object(),
+        open_board=object(),
+        end_session=object(),
+    )
+
+    open_window()
 
 
 def test_short_hold_cancels_before_board_hotkey_and_never_starts_a_turn():

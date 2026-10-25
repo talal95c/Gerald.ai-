@@ -86,8 +86,8 @@ def test_bridge_state_lists_recaps_newest_first(tmp_path):
     older.write_text("Texte\n# Ancienne révision", encoding="utf-8")
     newer = tmp_path / "fiche-du-jour.md"
     newer.write_text("# Polynômes du second degré", encoding="utf-8")
-    os.utime(older, (100, 100))
-    os.utime(newer, (200, 200))
+    os.utime(older, (1_700_000_000, 1_700_000_000))
+    os.utime(newer, (1_700_000_100, 1_700_000_100))
 
     recaps = json.loads(bridge.state())["recaps"]
 
@@ -137,25 +137,60 @@ def test_bridge_open_td_emits_request():
     assert requested == [True]
 
 
-def test_seed_demo_is_idempotent():
+def test_seed_demo_is_idempotent(monkeypatch):
+    monkeypatch.delenv("GERALD_DEMO", raising=False)
     store = FakeStore()
     indexer = FakeIndexer(store)
 
     seed_demo(store, indexer)
     seed_demo(store, indexer)
 
-    assert store.get_profile().name == ""
+    assert store.get_profile() is None
     assert [course.title for course in store.list_courses()] == ["Maths — Second degré"]
     documents = store.list_documents(store.list_courses()[0].id)
     assert len(documents) == 4
     assert len(store.calls["add_document"]) == 4
 
 
+def test_seed_demo_skips_store_with_existing_course():
+    store = FakeStore()
+    store.create_course("Cours existant", "Histoire")
+
+    seed_demo(store, FakeIndexer(store))
+
+    assert [course.title for course in store.list_courses()] == ["Cours existant"]
+    assert not store.calls.get("add_document")
+
+
+def test_seed_demo_skips_store_with_profile():
+    store = FakeStore()
+    store.save_profile("Ada", "Lycée", ["Maths"])
+
+    seed_demo(store, FakeIndexer(store))
+
+    assert store.get_profile().name == "Ada"
+    assert not store.list_courses()
+    assert not store.calls.get("add_document")
+
+
+def test_seed_demo_can_be_disabled_with_environment(monkeypatch):
+    monkeypatch.setenv("GERALD_DEMO", "0")
+    store = FakeStore()
+
+    seed_demo(store, FakeIndexer(store))
+
+    assert store.get_profile() is None
+    assert not store.list_courses()
+    assert not store.calls.get("create_course")
+    assert not store.calls.get("add_document")
+
+
 def test_end_session_discovers_recap_and_closes_session(tmp_path):
     bridge = Bridge(EmptyStore(), object(), object())
     bridge._recap_dir = tmp_path
     bridge._session_open = True
-    bridge._recap_requested_at = time.time() - 1
+    bridge._recap_error = "ancienne erreur"
+    bridge._recap_requested_at = bridge._clock() - 1
     recap = tmp_path / "fiche.md"
     recap.write_text("# Révision", encoding="utf-8")
     received = []
@@ -165,6 +200,75 @@ def test_end_session_discovers_recap_and_closes_session(tmp_path):
 
     assert received == [str(recap)]
     assert not bridge._session_open
+    assert json.loads(bridge.state())["recap_error"] is None
+
+
+def test_end_session_offline_callback_keeps_session_open():
+    bridge = Bridge(EmptyStore(), object(), object(), end_session=lambda: False)
+    bridge._session_open = True
+
+    bridge.endSession()
+
+    state = json.loads(bridge.state())
+    assert state["recap_error"] == "Hors ligne : la fiche sera possible une fois Gerald reconnecté."
+    assert state["session_open"]
+    assert not state["recap_pending"]
+    assert not bridge._recap_timer.isActive()
+
+
+def test_end_session_without_callback_reports_recap_unavailable():
+    bridge = Bridge(EmptyStore(), object(), object())
+    bridge._session_open = True
+
+    bridge.endSession()
+
+    state = json.loads(bridge.state())
+    assert state["recap_error"] == "La fiche n'est pas disponible pour le moment."
+    assert state["session_open"]
+    assert not state["recap_pending"]
+    assert not bridge._recap_timer.isActive()
+
+
+def test_end_session_true_callback_starts_recap_polling():
+    callbacks = []
+
+    def end_session():
+        callbacks.append(True)
+        return True
+
+    bridge = Bridge(EmptyStore(), object(), object(), end_session=end_session)
+    bridge._session_open = True
+
+    bridge.endSession()
+
+    state = json.loads(bridge.state())
+    assert callbacks == [True]
+    assert state["recap_pending"]
+    assert state["recap_error"] is None
+    assert bridge._recap_timer.isActive()
+    bridge._recap_timer.stop()
+
+
+def test_end_session_timeout_can_be_retried(tmp_path):
+    now = [100.0]
+    bridge = Bridge(EmptyStore(), object(), object(), end_session=lambda: True)
+    bridge._recap_dir = tmp_path
+    bridge._clock = lambda: now[0]
+    bridge._session_open = True
+
+    bridge.endSession()
+    now[0] += Bridge.RECAP_TIMEOUT_S + 0.1
+    bridge._find_recap()
+
+    state = json.loads(bridge.state())
+    assert not state["recap_pending"]
+    assert state["recap_error"] == "La fiche n'a pas pu être générée. Réessaie."
+    assert state["session_open"]
+    assert not bridge._recap_timer.isActive()
+
+    bridge.endSession()
+
+    assert json.loads(bridge.state())["recap_error"] is None
 
 
 def test_document_completion_from_worker_thread_updates_state(qapplication):
