@@ -31,9 +31,9 @@ def ask(
         {"role": message.role, "text": message.text}
         for message in store.get_messages(conversation.id)[-10:]
     ]
-    store.add_message(conversation.id, "user", question)
     hits = search(store, question, embedder, course_id=course_id, k=5)
     result = answer(question, hits, history, store.get_profile(), api_key, model)
+    store.add_message(conversation.id, "user", question)
     store.add_message(
         conversation.id,
         "assistant",

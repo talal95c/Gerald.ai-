@@ -4,7 +4,7 @@ from types import SimpleNamespace
 
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
-from PyQt6.QtCore import QPoint, QPointF, QRect, Qt
+from PyQt6.QtCore import QPoint, QPointF, QRect, QRectF, Qt
 from PyQt6.QtGui import QColor
 from PyQt6.QtTest import QTest
 from PyQt6.QtWidgets import QApplication, QPushButton
@@ -40,6 +40,70 @@ def test_board_capture_preserves_one_to_one_image_mapping():
     app.processEvents()
 
 
+def test_plot_uses_widget_mapping_and_avoids_exercise_on_hidpi_capture():
+    app = QApplication.instance() or QApplication([])
+    board = BoardWindow()
+    board.resize(1200, 800)
+    board.set_exercise("Exercice 1", ["Résous x² − 5x + 6 = 0"])
+    board._capture = SimpleNamespace(
+        image=SimpleNamespace(size=(2400, 1600)),
+        monitor=SimpleNamespace(left=0, top=0),
+        scale=1.0,
+        img_to_screen=lambda x, y: (x, y),
+    )
+    requested = (1540, 80, 600, 400)
+    result = json.loads(
+        board.execute_tool(
+            "plot",
+            {
+                "functions": [{"expr": "x**2-5*x+6"}],
+                "x_min": -1,
+                "x_max": 6,
+                "x": requested[0],
+                "y": requested[1],
+                "w": requested[2],
+                "h": requested[3],
+            },
+        )
+    )
+
+    plot = board._gerald[-1]["plot"]
+    scale_x, scale_y = board._image_scale_to_local()
+    local_x, local_y = board._image_to_local(plot.box[0], plot.box[1])
+    painted_rect = QRectF(
+        local_x,
+        local_y,
+        plot.box[2] * scale_x,
+        plot.box[3] * scale_y,
+    )
+    exercise_rect = board._exercise_card_rect()
+
+    assert result["ok"]
+    assert tuple(plot.box) != requested
+    assert exercise_rect is not None
+    assert 0 <= painted_rect.left() <= painted_rect.right() <= board.width()
+    assert 0 <= painted_rect.top() <= painted_rect.bottom() <= board.height()
+    assert not painted_rect.intersects(exercise_rect)
+
+    board._gerald[-1]["created"] -= 1
+    board.show()
+    app.processEvents()
+    pixmap = board.grab()
+    image = pixmap.toImage()
+    ratio = pixmap.devicePixelRatioF()
+    sample_x = round(painted_rect.center().x() * ratio)
+    sample_y = round(painted_rect.top() * ratio)
+    assert any(
+        image.pixelColor(sample_x + dx, sample_y + dy).lightness() < 245
+        for dx in range(-2, 3)
+        for dy in range(-2, 3)
+        if 0 <= sample_x + dx < image.width()
+        and 0 <= sample_y + dy < image.height()
+    )
+    board.close()
+    app.processEvents()
+
+
 def test_board_write_math_and_path_commands():
     app = QApplication.instance() or QApplication([])
     board = BoardWindow()
@@ -51,6 +115,21 @@ def test_board_write_math_and_path_commands():
     )["ok"]
     assert [item["kind"] for item in board._gerald] == ["text", "image", "path"]
     assert board._reveal_timer.isActive()
+    board.close()
+    app.processEvents()
+
+
+def test_plot_local_rect_uses_independent_capture_to_widget_scales():
+    app = QApplication.instance() or QApplication([])
+    board = BoardWindow()
+    board.resize(1200, 700)
+    board._capture = SimpleNamespace(
+        image=SimpleNamespace(size=(2400, 1200)),
+    )
+
+    rect = board._plot_local_rect(SimpleNamespace(box=(400, 300, 600, 360)))
+
+    assert rect == QRectF(200, 175, 300, 210)
     board.close()
     app.processEvents()
 

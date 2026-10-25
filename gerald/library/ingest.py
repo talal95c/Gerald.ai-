@@ -112,7 +112,11 @@ class Indexer:
             destination = Path(document.stored_path)
             if source.resolve() != destination.resolve():
                 shutil.copy2(source, destination)
-            chunks = chunk_pages(extract_text(destination))
+            pages = extract_text(destination)
+            if self.store.get_document(document.id) is None:
+                self.store._remove_files([document.stored_path])
+                return
+            chunks = chunk_pages(pages)
             stored_chunks: list[tuple[int | None, str, bytes | None]] = []
             embedding_available = True
             warned = False

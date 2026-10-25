@@ -303,7 +303,11 @@ async def run_scenario(scenario: dict[str, Any], defaults: dict[str, Any], setti
         if name == "plot":
             from gerald.tools.plot import build_plot
             try:
-                plot, result = build_plot(args, state["image_size"])
+                plot, result = build_plot(
+                    args,
+                    state["image_size"],
+                    state.get("occupied_boxes", []),
+                )
             except ValueError as exc:
                 return json.dumps({"ok": False, "error": str(exc)})
             state["raw"].append(plot)
@@ -333,6 +337,11 @@ async def run_scenario(scenario: dict[str, Any], defaults: dict[str, Any], setti
             capture = capture_from_image(image, MonitorRect(0, 0, image.width, image.height), settings.max_image_width)
             elements = collect_elements_detailed(capture).elements
             context = serialize_context(elements, capture.image_width, capture.image_height)
+            state["occupied_boxes"] = [
+                tuple(element.rect)
+                for element in elements
+                if element.source in {"uia", "ocr"}
+            ]
             if scenario.get("board"):
                 context = f"BOARD MODE\n{context}"
             reset_turn()

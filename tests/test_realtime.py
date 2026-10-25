@@ -1,5 +1,6 @@
 import asyncio
 import json
+from pathlib import Path
 import threading
 
 from PIL import Image
@@ -26,6 +27,16 @@ class RecordingPlayer:
 
     def enqueue(self, data):
         pass
+
+
+def test_system_prompt_targets_faulty_terms_and_names_note_elements():
+    prompt = (
+        Path(__file__).parents[1] / "gerald" / "prompts" / "system_prompt.md"
+    ).read_text(encoding="utf-8")
+
+    assert "uniquement sur le terme fautif avec `target_text` (ex. « + 24 »)" in prompt
+    assert "`description` doit nommer l’élément annoté" in prompt
+    assert "« x₁ = 2 »" in prompt
 
 
 def make_client(player=None):
