@@ -73,9 +73,10 @@ h3{font-size:36px;letter-spacing:-.025em}
 .aside{font:600 52px Caveat,cursive;color:var(--vio);margin-top:-14px}
 
 .mark{position:relative;display:inline-block;white-space:nowrap}
-.mark svg{position:absolute;left:-5%;top:-24%;width:110%;height:150%;overflow:visible;pointer-events:none}
-.mark path{fill:none;stroke:var(--vio);stroke-width:3.5;stroke-linecap:round;vector-effect:non-scaling-stroke;stroke-dasharray:1;stroke-dashoffset:1}
-.active .mark path{animation:ink 1s 1.6s cubic-bezier(.5,0,.3,1) forwards}
+.mark svg{position:absolute;left:-2%;bottom:-.18em;width:104%;height:.3em;overflow:visible;pointer-events:none}
+.mark path,.circ path{fill:none;stroke:var(--vio);stroke-width:4;stroke-linecap:round;vector-effect:non-scaling-stroke}
+.mark svg{clip-path:inset(-50% 100% -50% -5%)}
+.active .mark svg{animation:wipe .9s 1.6s cubic-bezier(.5,0,.3,1) forwards}
 
 /* problem */
 .grid3{display:grid;grid-template-columns:repeat(3,1fr);gap:28px;width:100%}
@@ -104,9 +105,9 @@ h3{font-size:36px;letter-spacing:-.025em}
 .hw.on,.fix.on{clip-path:inset(-30px -60px -30px 0)}
 .fix{color:var(--vio);margin:-6px 0 6px 130px;font-size:44px}
 .err{position:relative;display:inline-block;padding:0 8px}
-.circ{position:absolute;left:-12px;top:-8px;width:calc(100% + 24px);height:calc(100% + 16px);overflow:visible}
-.circ path{fill:none;stroke:var(--vio);stroke-width:3.5;stroke-linecap:round;vector-effect:non-scaling-stroke;stroke-dasharray:1;stroke-dashoffset:1;transition:stroke-dashoffset .8s ease}
-.circ.on path{stroke-dashoffset:0}
+.circ{position:absolute;left:4px;bottom:-.12em;width:calc(100% - 8px);height:.3em;overflow:visible}
+.circ{clip-path:inset(-50% 100% -50% -5%);transition:clip-path .8s ease}
+.circ.on{clip-path:inset(-50% -5% -50% -5%)}
 .tick{display:inline-block;color:#16a34a;transform:scale(0);transition:transform .4s cubic-bezier(.3,1.6,.5,1)}.tick.on{transform:scale(1)}
 .gcur{position:absolute;left:640px;top:520px;display:flex;align-items:center;gap:8px;padding:6px 14px 6px 7px;border-radius:999px;background:var(--ink);color:#fff;font-size:17px;transition:left .9s cubic-bezier(.4,0,.2,1),top .9s cubic-bezier(.4,0,.2,1)}
 .gcur.at-err{left:330px;top:300px}.gcur.at-end{left:440px;top:440px}
@@ -164,6 +165,7 @@ h3{font-size:36px;letter-spacing:-.025em}
 body.show-notes #notes{display:block}
 
 @keyframes ink{to{stroke-dashoffset:0}}
+@keyframes wipe{to{clip-path:inset(-50% -5% -50% -5%)}}
 @keyframes pulse{0%,100%{box-shadow:0 0 0 6px rgba(61,43,255,.15)}50%{box-shadow:0 0 0 10px rgba(61,43,255,.05)}}
 @keyframes wave{0%,100%{transform:scaleY(.25)}50%{transform:scaleY(1)}}
 @keyframes breathe{0%,100%{transform:scale(1)}50%{transform:scale(1.07)}}
