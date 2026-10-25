@@ -27,9 +27,10 @@ html,body,#root{margin:0;height:100%;overflow:hidden}
 .gerald-write .katex{font-size:1em}
 .gerald-marks{overflow:visible}
 .gerald-marks ellipse,.gerald-marks line{fill:none;stroke:#7C3AED;stroke-width:3;stroke-linecap:round;stroke-linejoin:round}
+.gerald-marks path,.td-mark-layer path{fill:none;stroke:#7C3AED;stroke-width:3;stroke-linecap:round;stroke-linejoin:round}
+.gerald-marks .sketch-ghost,.td-mark-layer .sketch-ghost{stroke-width:1.4;opacity:.35}
 .gerald-marks circle{fill:#7C3AED;stroke:#fff;stroke-width:2;animation:td-mark-in .32s ease both}
 .gerald-marks rect{fill:rgba(124,58,237,.12);stroke:#7C3AED;stroke-width:2;animation:td-mark-in .32s ease both}
-.gerald-marks marker path{fill:#7C3AED}
 .gerald-marks text{fill:#262626;font:12px "Google Sans Flex",sans-serif}
 .gerald-note{box-sizing:border-box;display:flex;align-items:center;gap:10px;width:100%;height:100%;overflow:hidden;padding:8px 14px 8px 10px;border-radius:12px;background:#fff;border:1px solid rgba(124,58,237,.3);color:#262626;font-size:14.5px;line-height:1.35;overflow-wrap:anywhere;box-shadow:0 10px 30px -12px rgba(76,29,149,.35);animation:gb-in .45s cubic-bezier(.2,.8,.2,1) both}
 .gerald-tip{position:absolute;z-index:5;box-sizing:border-box;display:flex;align-items:center;gap:10px;max-width:340px;padding:10px 16px 10px 12px;border-radius:14px;background:#fff;border:1px solid rgba(124,58,237,.3);color:#262626;font-size:14.5px;line-height:1.35;overflow-wrap:anywhere;box-shadow:0 10px 30px -12px rgba(76,29,149,.35);pointer-events:none;animation:gb-in .45s cubic-bezier(.2,.8,.2,1) both}

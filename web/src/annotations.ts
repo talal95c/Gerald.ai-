@@ -6,6 +6,9 @@ export type ColorIntent = "correction" | "valide" | "remarque";
 export type ArrowEndpoints = {x1: number; y1: number; x2: number; y2: number};
 export type CursorPoint = {x: number; y: number};
 export type CursorVisual = CursorPoint & {visible: boolean};
+export const SAFE_GAP = 12;
+export const POINTER_OFFSET = {x: 12, y: 16};
+export const POINTER_SIZE = {w: 100, h: 34};
 export type CursorMotion = {
   moveTo: (to: CursorPoint, onProgress?: (progress: number) => void) => Promise<void>;
   enqueue: (action: (motion: CursorMotion) => void | Promise<void>) => Promise<void>;
@@ -159,7 +162,6 @@ export function intentColor(intent: unknown, fallback: string | null = null, alp
   return `rgba(${red}, ${green}, ${blue}, ${alpha})`;
 }
 
-const gap = 12;
 const mathRuns = /[\\abcxyΔ0-9²√±=+*×\/^().,\s\-−]+/giu;
 
 function isMathRun(value: string): boolean {
@@ -228,32 +230,170 @@ export function placeAnnotation(
   occupied: AnnotationRect[],
   viewport: {w: number; h: number},
 ): AnnotationPlacement | null {
+  const inflate = (rect: AnnotationRect): AnnotationRect => ({
+    x: rect.x - SAFE_GAP,
+    y: rect.y - SAFE_GAP,
+    w: rect.w + SAFE_GAP * 2,
+    h: rect.h + SAFE_GAP * 2,
+  });
+  const expandedOccupied = occupied.map(inflate);
   const directions = [
-    {name: "right", rect: {x: target.x + target.w + gap, y: target.y + (target.h - size.h) / 2, ...size}},
-    {name: "above", rect: {x: target.x + (target.w - size.w) / 2, y: target.y - size.h - gap, ...size}},
-    {name: "below", rect: {x: target.x + (target.w - size.w) / 2, y: target.y + target.h + gap, ...size}},
-    {name: "left", rect: {x: target.x - size.w - gap, y: target.y + (target.h - size.h) / 2, ...size}},
+    {name: "right", rect: {x: target.x + target.w + SAFE_GAP, y: target.y + (target.h - size.h) / 2, ...size}},
+    {name: "above", rect: {x: target.x + (target.w - size.w) / 2, y: target.y - size.h - SAFE_GAP, ...size}},
+    {name: "below", rect: {x: target.x + (target.w - size.w) / 2, y: target.y + target.h + SAFE_GAP, ...size}},
+    {name: "left", rect: {x: target.x - size.w - SAFE_GAP, y: target.y + (target.h - size.h) / 2, ...size}},
   ] as const;
 
   for (const direction of directions) {
     let rect = {...direction.rect};
     for (let attempt = 0; attempt < 128; attempt += 1) {
       if (!inBounds(rect, viewport.w, viewport.h)) break;
-      const collision = occupied.find((item) => intersects(rect, item));
+      const collision = expandedOccupied.find((item) => intersects(rect, item));
       if (!collision) {
         const distance = direction.name === "right" ? rect.x - (target.x + target.w)
           : direction.name === "left" ? target.x - (rect.x + rect.w)
           : direction.name === "above" ? target.y - (rect.y + rect.h)
           : rect.y - (target.y + target.h);
-        return {rect, leader: distance > gap + 4};
+        return {rect, leader: distance > SAFE_GAP + 4};
       }
-      if (direction.name === "right") rect.x = collision.x + collision.w + gap;
-      else if (direction.name === "left") rect.x = collision.x - rect.w - gap;
-      else if (direction.name === "above") rect.y = collision.y - rect.h - gap;
-      else rect.y = collision.y + collision.h + gap;
+      if (direction.name === "right") rect.x = collision.x + collision.w;
+      else if (direction.name === "left") rect.x = collision.x - rect.w;
+      else if (direction.name === "above") rect.y = collision.y - rect.h;
+      else rect.y = collision.y + collision.h;
     }
   }
   return null;
+}
+
+function inflateRect(rect: AnnotationRect, amount: number): AnnotationRect {
+  return {x: rect.x - amount, y: rect.y - amount, w: rect.w + amount * 2, h: rect.h + amount * 2};
+}
+
+export function cursorRestBeside(
+  target: AnnotationRect,
+  occupied: AnnotationRect[],
+  viewport: {w: number; h: number},
+): CursorPoint {
+  const belowRight = {x: target.x + target.w - 20, y: target.y + target.h + SAFE_GAP};
+  const candidates = [
+    belowRight,
+    {x: target.x + target.w + SAFE_GAP, y: target.y + target.h / 2 - POINTER_SIZE.h / 2},
+    {x: target.x - POINTER_SIZE.w + 20, y: belowRight.y},
+    {x: belowRight.x, y: target.y - POINTER_SIZE.h - SAFE_GAP},
+  ];
+  const blockers = [target, ...occupied].map((rect) => inflateRect(rect, SAFE_GAP));
+  const toCursor = (pill: CursorPoint): CursorPoint => ({
+    x: pill.x - POINTER_OFFSET.x,
+    y: pill.y - POINTER_OFFSET.y,
+  });
+  const isClear = (pill: CursorPoint) => {
+    const rect = {...pill, w: POINTER_SIZE.w, h: POINTER_SIZE.h};
+    return rect.x >= 0
+      && rect.y >= 0
+      && rect.x + rect.w <= viewport.w
+      && rect.y + rect.h <= viewport.h
+      && blockers.every((blocker) => !intersects(rect, blocker));
+  };
+  for (const candidate of candidates) {
+    if (isClear(candidate)) return toCursor(candidate);
+  }
+  for (let attempt = 1; attempt <= 40; attempt += 1) {
+    const candidate = {x: belowRight.x, y: belowRight.y + attempt * 8};
+    if (isClear(candidate)) return toCursor(candidate);
+  }
+  return toCursor(belowRight);
+}
+
+function seededRandom(seed: number): () => number {
+  let state = Math.floor((((seed % 1) + 1) % 1) * 0x100000000) >>> 0;
+  return () => {
+    let value = state += 0x6D2B79F5;
+    value = Math.imul(value ^ value >>> 15, value | 1);
+    value ^= value + Math.imul(value ^ value >>> 7, value | 61);
+    return ((value ^ value >>> 14) >>> 0) / 0x100000000;
+  };
+}
+
+export function seedFrom(id: string): number {
+  let hash = 0x811C9DC5;
+  for (let index = 0; index < id.length; index += 1) {
+    hash ^= id.charCodeAt(index);
+    hash = Math.imul(hash, 0x01000193);
+  }
+  return (hash >>> 0) / 0x100000000;
+}
+
+export function sketchEllipsePoints(
+  cx: number,
+  cy: number,
+  rx: number,
+  ry: number,
+  seed: number,
+  samples = 56,
+): CursorPoint[] {
+  const random = seededRandom(seed);
+  const phaseA = random() * Math.PI * 2;
+  const phaseB = random() * Math.PI * 2;
+  const rotation = (-6 + random() * 4) * Math.PI / 180;
+  const cosine = Math.cos(rotation);
+  const sine = Math.sin(rotation);
+  const paddedRx = rx + 6;
+  const paddedRy = ry + 6;
+  const start = -0.6 * Math.PI;
+  const sweep = Math.PI * 2 + 0.35;
+  return Array.from({length: Math.max(2, samples)}, (_, index) => {
+    const angle = start + sweep * index / (Math.max(2, samples) - 1);
+    const wobble = 1 + 0.02 * Math.sin(2 * angle + phaseA) + 0.02 * Math.sin(3 * angle + phaseB);
+    const x = paddedRx * Math.cos(angle) * wobble;
+    const y = paddedRy * Math.sin(angle) * wobble;
+    return {x: cx + x * cosine - y * sine, y: cy + x * sine + y * cosine};
+  });
+}
+
+export function sketchArrow(
+  x1: number,
+  y1: number,
+  x2: number,
+  y2: number,
+  seed: number,
+): {shaft: CursorPoint[]; head: [CursorPoint, CursorPoint, CursorPoint]} {
+  const random = seededRandom(seed);
+  const dx = x2 - x1;
+  const dy = y2 - y1;
+  const length = Math.hypot(dx, dy);
+  const perpendicular = length ? {x: -dy / length, y: dx / length} : {x: 0, y: 0};
+  const bend = (0.06 + random() * 0.04) * length * (random() < 0.5 ? -1 : 1);
+  const control = {x: (x1 + x2) / 2 + perpendicular.x * bend, y: (y1 + y2) / 2 + perpendicular.y * bend};
+  const shaft = Array.from({length: 24}, (_, index) => {
+    const t = index / 23;
+    const remaining = 1 - t;
+    return {
+      x: remaining ** 2 * x1 + 2 * remaining * t * control.x + t ** 2 * x2,
+      y: remaining ** 2 * y1 + 2 * remaining * t * control.y + t ** 2 * y2,
+    };
+  });
+  const tangent = {x: x2 - control.x, y: y2 - control.y};
+  const backAngle = Math.atan2(-tangent.y, -tangent.x);
+  const wingLength = Math.min(14, 0.3 * length);
+  const wing = (angle: number): CursorPoint => ({
+    x: x2 + Math.cos(backAngle + angle) * wingLength,
+    y: y2 + Math.sin(backAngle + angle) * wingLength,
+  });
+  return {shaft, head: [wing(-Math.PI / 180 * 28), {x: x2, y: y2}, wing(Math.PI / 180 * 28)]};
+}
+
+export function pointsToPath(points: CursorPoint[]): string {
+  if (!points.length) return "";
+  const position = (point: CursorPoint) => `${point.x.toFixed(2)} ${point.y.toFixed(2)}`;
+  let path = `M ${position(points[0])}`;
+  for (let index = 1; index < points.length; index += 1) {
+    const previous = points[index - 1];
+    const current = points[index];
+    const midpoint = {x: (previous.x + current.x) / 2, y: (previous.y + current.y) / 2};
+    path += ` Q ${position(previous)} ${position(midpoint)}`;
+  }
+  if (points.length > 1) path += ` Q ${position(points[points.length - 1])} ${position(points[points.length - 1])}`;
+  return path;
 }
 
 export function annotationLeader(target: AnnotationRect, bubble: AnnotationRect) {
