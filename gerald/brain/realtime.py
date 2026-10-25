@@ -39,7 +39,10 @@ class RealtimeClient:
         capture_after_action: Callable[[], tuple[Capture, list[Element], str]] | None = None,
         on_marks_visible: Callable[[bool], None] | None = None,
         input_actions: InputActions | None = None,
-        request_action_confirmation: Callable[[str, tuple[int, int] | None, float], bool] | None = None,
+        request_action_confirmation: Callable[
+            [str, tuple[int, int, int, int] | None, float], bool
+        ]
+        | None = None,
     ) -> None:
         self.api_key = api_key
         self.model = model

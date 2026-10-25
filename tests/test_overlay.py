@@ -10,6 +10,7 @@ from PyQt6.QtWidgets import QApplication
 from gerald.overlay.window import (
     OverlayWindow,
     _build_screen_mappings,
+    _confirmation_position,
     _physical_to_logical,
 )
 from gerald.perception.grounding import ScreenRect
@@ -76,13 +77,16 @@ def test_confirmation_pill_renders_and_declines_without_accepting_focus():
     overlay.setGeometry(0, 0, 640, 400)
     completion = threading.Event()
     result = {"approved": False}
-    overlay.show_confirmation("Gerald veut cliquer ici", (100, 100), completion, result)
+    overlay.show_confirmation("Gerald veut cliquer ici", (100, 100, 20, 20), completion, result)
     app.processEvents()
 
     pill = overlay._confirmation
     assert pill is not None
     assert pill.windowFlags() & Qt.WindowType.WindowDoesNotAcceptFocus
     assert not pill.windowFlags() & Qt.WindowType.WindowTransparentForInput
+    assert pill.label.font().pointSize() == 13
+    assert pill.height() >= 32
+    assert all(button.minimumHeight() >= 24 for button, _approved in pill.buttons)
     image = QImage(pill.width(), pill.height(), QImage.Format.Format_ARGB32)
     image.fill(0)
     painter = QPainter(image)
@@ -95,3 +99,8 @@ def test_confirmation_pill_renders_and_declines_without_accepting_focus():
     assert result["approved"] is False
     overlay.close()
     app.processEvents()
+
+
+def test_confirmation_position_avoids_target_and_flips_above_when_needed():
+    assert _confirmation_position((90, 90, 20, 20), (0, 0, 600, 400), (300, 68)) == (0, 122)
+    assert _confirmation_position((190, 330, 20, 20), (0, 0, 400, 400), (300, 68)) == (50, 250)

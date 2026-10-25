@@ -70,6 +70,23 @@ ACCENT = _accent_color()
 Rect = tuple[int, int, int, int]
 
 
+def _confirmation_position(
+    target: Rect,
+    area: Rect,
+    pill_size: tuple[int, int],
+    gap: int = 12,
+) -> tuple[int, int]:
+    target_x, target_y, target_width, target_height = target
+    area_x, area_y, area_width, area_height = area
+    pill_width, pill_height = pill_size
+    x = round(target_x + target_width / 2 - pill_width / 2)
+    x = min(max(area_x, x), area_x + area_width - pill_width)
+    below = target_y + target_height + gap
+    y = below if below + pill_height <= area_y + area_height else target_y - gap - pill_height
+    y = min(max(area_y, y), area_y + area_height - pill_height)
+    return x, y
+
+
 @dataclass(frozen=True)
 class _ScreenMapping:
     physical: Rect
@@ -264,27 +281,23 @@ class _ConfirmationPill(QWidget):
         self.finish = finish
         self.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground, True)
         self.setAttribute(Qt.WidgetAttribute.WA_ShowWithoutActivating, True)
-        self.setFixedSize(430, 58)
+        self.setFixedSize(520, 68)
         layout = QHBoxLayout(self)
-        layout.setContentsMargins(12, 7, 12, 7)
-        layout.setSpacing(8)
+        layout.setContentsMargins(16, 10, 16, 10)
+        layout.setSpacing(10)
         self.label = QLabel(text, self)
-        self.label.setFont(QFont(owner._font_family, 10, QFont.Weight.Medium))
+        self.label.setFont(QFont(owner._font_family, 13, QFont.Weight.Medium))
         self.label.setStyleSheet("QLabel { background: transparent; color: #F5F5F7; }")
-        self.label.setMaximumWidth(225)
+        self.label.setMaximumWidth(280)
         layout.addWidget(self.label, 1)
+        self.buttons: list[tuple[QPushButton, bool]] = []
         for title, approved in (("Autoriser", True), ("Annuler", False)):
             button = QPushButton(title, self)
-            button.setFixedHeight(34)
-            button.setFont(QFont(owner._font_family, 9, QFont.Weight.Medium))
-            color = ACCENT.name() if approved else "rgba(255,255,255,0.12)"
-            button.setStyleSheet(
-                f"QPushButton {{ color: #F5F5F7; background: {color}; border: none; "
-                "border-radius: 17px; padding: 0 12px; }"
-                "QPushButton:hover { background: rgba(255,255,255,0.22); }"
-            )
+            button.setMinimumHeight(40)
+            button.setFont(QFont(owner._font_family, 11, QFont.Weight.Medium))
             button.clicked.connect(lambda _checked=False, value=approved: self.finish(value))
             layout.addWidget(button)
+            self.buttons.append((button, approved))
         QTimer.singleShot(15000, lambda: self.finish(False))
 
     def paintEvent(self, event) -> None:
@@ -292,10 +305,20 @@ class _ConfirmationPill(QWidget):
         painter = QPainter(self)
         painter.setRenderHint(QPainter.RenderHint.Antialiasing)
         dark = self.owner._dark_for_global_logical(self.frameGeometry().center())
-        self.owner._draw_glass_card(painter, QRectF(self.rect()), 29, dark)
+        self.owner._draw_glass_card(painter, QRectF(self.rect()), self.height() / 2, dark)
+        _fill, label, _hairline = self.owner._palette_colors(dark)
         self.label.setStyleSheet(
-            f"QLabel {{ background: transparent; color: {'#F5F5F7' if dark else '#1D1D1F'}; }}"
+            f"QLabel {{ background: transparent; color: {label.name()}; }}"
         )
+        cancel_background = "rgba(255,255,255,0.12)" if dark else "rgba(0,0,0,0.06)"
+        for button, approved in self.buttons:
+            background = ACCENT.name() if approved else cancel_background
+            foreground = "#1D1D1F" if approved else label.name()
+            button.setStyleSheet(
+                f"QPushButton {{ color: {foreground}; background: {background}; border: none; "
+                "border-radius: 20px; padding: 0 14px; }"
+                "QPushButton:hover { background: rgba(127,127,127,0.22); }"
+            )
         painter.end()
 
 
@@ -429,7 +452,7 @@ class OverlayWindow(QWidget):
         self._marks_visible = visible
         self.update()
 
-    def show_confirmation(self, text, point, completion, result) -> None:
+    def show_confirmation(self, text, target_rect, completion, result) -> None:
         self.dismiss_confirmation()
         holder: dict[str, _ConfirmationPill] = {}
 
@@ -445,18 +468,36 @@ class OverlayWindow(QWidget):
         pill = _ConfirmationPill(self, text, finish)
         holder["pill"] = pill
         self._confirmation = pill
-        if point is None:
+        if target_rect is None:
             from PyQt6.QtGui import QCursor
 
-            x, y = QCursor.pos().x(), QCursor.pos().y()
+            cursor = QCursor.pos()
+            target = (cursor.x(), cursor.y(), 0, 0)
         else:
-            mapped = self._global_physical_to_logical(*point)
-            x, y = mapped[:2] if mapped is not None else point
-        screen = QApplication.screenAt(QPoint(round(x), round(y))) or QApplication.primaryScreen()
+            left, top, width, height = target_rect
+            mapped_top = self._global_physical_to_logical(left, top)
+            mapped_bottom = self._global_physical_to_logical(left + width, top + height)
+            if mapped_top is None or mapped_bottom is None:
+                ratio = QApplication.primaryScreen().devicePixelRatio()
+                mapped_top = (left / ratio, top / ratio, ratio)
+                mapped_bottom = ((left + width) / ratio, (top + height) / ratio, ratio)
+            target = (
+                round(mapped_top[0]),
+                round(mapped_top[1]),
+                max(1, round(mapped_bottom[0] - mapped_top[0])),
+                max(1, round(mapped_bottom[1] - mapped_top[1])),
+            )
+        center = QPoint(round(target[0] + target[2] / 2), round(target[1] + target[3] / 2))
+        screen = QApplication.screenAt(center) or QApplication.primaryScreen()
         if screen is not None:
             area = screen.availableGeometry()
-            x = min(max(area.left(), round(x + 18)), area.right() - pill.width())
-            y = min(max(area.top(), round(y + 18)), area.bottom() - pill.height())
+            x, y = _confirmation_position(
+                target,
+                (area.x(), area.y(), area.width(), area.height()),
+                (pill.width(), pill.height()),
+            )
+        else:
+            x, y = target[0], target[1] + target[3] + 12
         pill.move(x, y)
         pill.show()
         pill.raise_()

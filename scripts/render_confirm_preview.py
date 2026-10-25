@@ -11,7 +11,7 @@ from PyQt6.QtGui import QImage, QPainter
 from PyQt6.QtWidgets import QApplication
 
 from gerald.capture.screen import MonitorRect, capture_from_image
-from gerald.overlay.window import OverlayWindow
+from gerald.overlay.window import OverlayWindow, _ScreenMapping, _confirmation_position
 from gerald.perception.grounding import ScreenRect
 from gerald.tools.registry import (
     ArrowCommand,
@@ -32,7 +32,12 @@ def render() -> None:
     capture = capture_from_image(source, MonitorRect(0, 0, width, height), max_width=width)
     app = QApplication.instance() or QApplication([])
     overlay = OverlayWindow()
-    overlay.setGeometry(0, 0, width, height)
+    dpr = width / 1600
+    logical_width, logical_height = round(width / dpr), round(height / dpr)
+    overlay.setGeometry(0, 0, logical_width, logical_height)
+    overlay._screen_mappings = lambda: [
+        _ScreenMapping((0, 0, width, height), (0, 0, logical_width, logical_height), dpr)
+    ]
     overlay.set_capture(capture)
 
     sx, sy = width / 1600, height / 1200
@@ -59,11 +64,14 @@ def render() -> None:
     painter = QPainter(screen)
     source_image = QImage(source.tobytes(), width, height, width * 3, QImage.Format.Format_RGB888).copy()
     painter.drawImage(0, 0, source_image)
+    painter.save()
+    painter.scale(dpr, dpr)
     overlay.render(painter)
-    point = (mic[0], mic[1])
+    painter.restore()
+    target_rect = (mic[0] - round(18 * sx), mic[1] - round(18 * sy), round(36 * sx), round(36 * sy))
     overlay.show_confirmation(
         "Gerald veut cliquer ici",
-        point,
+        target_rect,
         threading.Event(),
         {"approved": False},
     )
@@ -71,9 +79,17 @@ def render() -> None:
     pill = overlay._confirmation
     if pill is None:
         raise RuntimeError("Confirmation pill was not created")
-    pill.move(min(width - pill.width() - 24, point[0] + 18), min(height - pill.height() - 24, point[1] + 18))
+    target_logical = tuple(round(value / dpr) for value in target_rect)
+    pill.move(
+        *_confirmation_position(
+            target_logical,
+            (0, 0, logical_width, logical_height),
+            (pill.width(), pill.height()),
+        )
+    )
     app.processEvents()
     painter.save()
+    painter.scale(dpr, dpr)
     painter.translate(pill.x(), pill.y())
     pill.render(painter)
     painter.restore()

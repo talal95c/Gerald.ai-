@@ -47,7 +47,7 @@ class InputActions:
         keyboard_factory: Callable[[], Any] | None = None,
         click_delay: float = 0.35,
         delay_wait: Callable[[threading.Event, float], bool] | None = None,
-        request_confirmation: Callable[[str, tuple[int, int] | None, float], bool] | None = None,
+        request_confirmation: Callable[[str, tuple[int, int, int, int] | None, float], bool] | None = None,
         confirmation_timeout: float = 15.0,
     ) -> None:
         self.require_confirmation = require_confirmation
@@ -126,7 +126,11 @@ class InputActions:
         if session.abort_event.is_set():
             return error("action cancelled")
 
-        point = tuple(round(value) for value in target.rect.center) if name in {"click", "scroll"} and target else None
+        target_rect = (
+            (target.rect.x, target.rect.y, target.rect.w, target.rect.h)
+            if name in {"click", "scroll"} and target
+            else None
+        )
         if name == "click" and target is not None:
             on_commands([PointCommand(target.rect)])
         elif name == "scroll" and target is not None and self.require_confirmation and not session.approved:
@@ -136,7 +140,7 @@ class InputActions:
             with session.confirmation_lock:
                 if not session.approved:
                     if self.request_confirmation is None or not self.request_confirmation(
-                        prompt, point, self.confirmation_timeout
+                        prompt, target_rect, self.confirmation_timeout
                     ):
                         return error("user declined")
                     session.approved = True
