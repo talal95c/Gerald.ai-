@@ -90,6 +90,7 @@ def main() -> int:
         capture_terminal_failed = pyqtSignal(object)
         capture_overlay = pyqtSignal(object)
         action_confirmation = pyqtSignal(object)
+        confirmation_expired = pyqtSignal(str)
         mic_level = pyqtSignal(float)
         output_level = pyqtSignal(float)
         audio_unavailable = pyqtSignal()
@@ -137,10 +138,17 @@ def main() -> int:
                 logger.warning("Overlay capture restore timed out")
 
     def request_action_confirmation(text, point, timeout) -> bool:
+        import uuid
+
+        token = uuid.uuid4().hex
         completion = threading.Event()
-        result = {"approved": False}
-        bridge.action_confirmation.emit((text, point, completion, result))
-        return completion.wait(timeout) and bool(result["approved"])
+        result = {"approved": False, "expired": False}
+        bridge.action_confirmation.emit((text, point, completion, result, token))
+        if not completion.wait(timeout):
+            result["expired"] = True
+            bridge.confirmation_expired.emit(token)
+            return False
+        return bool(result["approved"]) and not result["expired"]
 
     prompt = (Path(__file__).parent / "prompts" / "system_prompt.md").read_text(encoding="utf-8")
     client = RealtimeClient(
@@ -485,6 +493,10 @@ def main() -> int:
         def action_confirmation(self, request) -> None:
             overlay.show_confirmation(*request)
 
+        @pyqtSlot(str)
+        def confirmation_expired(self, token) -> None:
+            overlay.expire_confirmation(token)
+
         @pyqtSlot(object)
         def action_marks_visible(self, request) -> None:
             overlay.set_marks_visible(request[0])
@@ -498,6 +510,7 @@ def main() -> int:
     bridge.capture_ready.connect(capture_ready)
     bridge.capture_overlay.connect(ui_request_slots.capture_overlay)
     bridge.action_confirmation.connect(ui_request_slots.action_confirmation)
+    bridge.confirmation_expired.connect(ui_request_slots.confirmation_expired)
     bridge.action_marks_visible.connect(ui_request_slots.action_marks_visible)
     bridge.capture_terminal_failed.connect(ui_request_slots.terminal_capture_failed)
     bridge.capture_failed.connect(

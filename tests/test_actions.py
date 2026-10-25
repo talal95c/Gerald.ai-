@@ -68,6 +68,41 @@ def test_action_without_user_approval_is_refused_without_creating_controllers():
     assert calls == []
 
 
+def test_action_approval_is_scoped_to_tool_kind_and_text_prompt_is_exact(monkeypatch):
+    prompts = []
+    keyboard = FakeKeyboard()
+    mouse = FakeMouse()
+    actions = InputActions(
+        mouse_factory=lambda: mouse,
+        keyboard_factory=lambda: keyboard,
+        click_delay=0,
+        delay_wait=lambda _event, _delay: False,
+        request_confirmation=lambda text, *_args: (prompts.append(text) or len(prompts) == 1),
+    )
+    pynput = ModuleType("pynput")
+    pynput.__path__ = []
+    mouse_module = ModuleType("pynput.mouse")
+    mouse_module.Button = type("Button", (), {"left": "left-button", "right": "right-button"})
+    monkeypatch.setitem(sys.modules, "pynput", pynput)
+    monkeypatch.setitem(sys.modules, "pynput.mouse", mouse_module)
+    capture, image = setup_capture()
+    session = actions.new_session()
+
+    first = actions.execute(
+        session, "click", {"x": 50, "y": 50}, capture, [], image,
+        lambda _commands: None, lambda _visible: None,
+    )
+    second = actions.execute(
+        session, "type_text", {"text": "texte exact à écrire"}, capture, [], image,
+        lambda _commands: None, lambda _visible: None,
+    )
+
+    assert json.loads(first)["ok"] is True
+    assert json.loads(second)["error"] == "user declined"
+    assert prompts == ["Gerald veut cliquer ici", "Gerald veut taper « texte exact à écrire »"]
+    assert session.approved_kinds == {"click"}
+
+
 def test_confirmed_click_emits_point_then_clicks_physical_coordinates(monkeypatch):
     events = []
     mouse = FakeMouse(events=events)

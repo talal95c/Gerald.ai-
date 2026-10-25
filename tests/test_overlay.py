@@ -104,3 +104,41 @@ def test_confirmation_pill_renders_and_declines_without_accepting_focus():
 def test_confirmation_position_avoids_target_and_flips_above_when_needed():
     assert _confirmation_position((90, 90, 20, 20), (0, 0, 600, 400), (300, 68)) == (0, 122)
     assert _confirmation_position((190, 330, 20, 20), (0, 0, 400, 400), (300, 68)) == (50, 250)
+
+
+def test_expired_confirmation_ignores_late_approval():
+    app = QApplication.instance() or QApplication([])
+    overlay = OverlayWindow()
+    completion = threading.Event()
+    result = {"approved": False, "expired": False}
+    token = "expired"
+    overlay.show_confirmation("Confirmer", (100, 100, 20, 20), completion, result, token)
+    pill = overlay._confirmation
+
+    overlay.expire_confirmation(token)
+    pill.buttons[0][0].click()
+
+    assert completion.is_set()
+    assert result == {"approved": False, "expired": True}
+    overlay.close()
+    app.processEvents()
+
+
+def test_new_confirmation_replaces_old_and_old_button_is_stale():
+    app = QApplication.instance() or QApplication([])
+    overlay = OverlayWindow()
+    old_completion = threading.Event()
+    old_result = {"approved": False}
+    overlay.show_confirmation("Ancienne demande", (100, 100, 20, 20), old_completion, old_result, "old")
+    old_pill = overlay._confirmation
+    new_completion = threading.Event()
+    new_result = {"approved": False}
+
+    overlay.show_confirmation("Nouvelle demande", (200, 100, 20, 20), new_completion, new_result, "new")
+    old_pill.buttons[0][0].click()
+
+    assert overlay._confirmation is not old_pill
+    assert not new_completion.is_set()
+    assert not new_result["approved"]
+    overlay.close()
+    app.processEvents()

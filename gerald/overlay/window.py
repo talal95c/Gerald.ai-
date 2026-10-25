@@ -4,6 +4,7 @@ import math
 import os
 import sys
 import time
+import uuid
 from dataclasses import dataclass
 
 from PyQt6.QtCore import QEvent, QPoint, QPointF, QRectF, Qt, QTimer
@@ -281,14 +282,27 @@ class _ConfirmationPill(QWidget):
         self.finish = finish
         self.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground, True)
         self.setAttribute(Qt.WidgetAttribute.WA_ShowWithoutActivating, True)
-        self.setFixedSize(520, 68)
         layout = QHBoxLayout(self)
         layout.setContentsMargins(16, 10, 16, 10)
         layout.setSpacing(10)
         self.label = QLabel(text, self)
-        self.label.setFont(QFont(owner._font_family, 13, QFont.Weight.Medium))
+        label_font = QFont(owner._font_family, 13, QFont.Weight.Medium)
+        self.label.setFont(label_font)
+        self.label.setWordWrap(True)
         self.label.setStyleSheet("QLabel { background: transparent; color: #F5F5F7; }")
         self.label.setMaximumWidth(280)
+        words = text.split()
+        metrics = QFontMetrics(label_font)
+        lines = 1
+        line = ""
+        for word in words:
+            candidate = f"{line} {word}".strip()
+            if line and metrics.horizontalAdvance(candidate) > 280:
+                lines += 1
+                line = word
+            else:
+                line = candidate
+        self.setFixedSize(520, max(68, lines * metrics.lineSpacing() + 20))
         layout.addWidget(self.label, 1)
         self.buttons: list[tuple[QPushButton, bool]] = []
         for title, approved in (("Autoriser", True), ("Annuler", False)):
@@ -355,6 +369,10 @@ class OverlayWindow(QWidget):
         self._text_input_cancel = None
         self._text_input = _GlassTextInput(self)
         self._confirmation: _ConfirmationPill | None = None
+        self._confirmation_token: str | None = None
+        self._confirmation_completion = None
+        self._confirmation_result = None
+        self._expired_confirmation_tokens: set[str] = set()
         self._timer = QTimer(self)
         self._timer.timeout.connect(self._tick)
         self._set_capture_exclusion()
@@ -452,22 +470,36 @@ class OverlayWindow(QWidget):
         self._marks_visible = visible
         self.update()
 
-    def show_confirmation(self, text, target_rect, completion, result) -> None:
+    def show_confirmation(self, text, target_rect, completion, result, token=None) -> None:
         self.dismiss_confirmation()
+        token = token or uuid.uuid4().hex
+        self._expired_confirmation_tokens.discard(token)
         holder: dict[str, _ConfirmationPill] = {}
 
         def finish(approved: bool) -> None:
             pill = holder.get("pill")
-            if pill is None or self._confirmation is not pill:
+            if (
+                pill is None
+                or self._confirmation is not pill
+                or self._confirmation_token != token
+                or token in self._expired_confirmation_tokens
+                or result.get("expired")
+            ):
                 return
             result["approved"] = approved
             completion.set()
             self._confirmation = None
+            self._confirmation_token = None
+            self._confirmation_completion = None
+            self._confirmation_result = None
             pill.close()
 
         pill = _ConfirmationPill(self, text, finish)
         holder["pill"] = pill
         self._confirmation = pill
+        self._confirmation_token = token
+        self._confirmation_completion = completion
+        self._confirmation_result = result
         if target_rect is None:
             from PyQt6.QtGui import QCursor
 
@@ -508,6 +540,23 @@ class OverlayWindow(QWidget):
         pill = self._confirmation
         pill.finish(False)
         return True
+
+    def expire_confirmation(self, token: str) -> None:
+        self._expired_confirmation_tokens.add(token)
+        if token != self._confirmation_token:
+            return
+        if self._confirmation_result is not None:
+            self._confirmation_result["expired"] = True
+            self._confirmation_result["approved"] = False
+        if self._confirmation_completion is not None:
+            self._confirmation_completion.set()
+        pill = self._confirmation
+        self._confirmation = None
+        self._confirmation_token = None
+        self._confirmation_completion = None
+        self._confirmation_result = None
+        if pill is not None:
+            pill.close()
 
     def has_confirmation(self) -> bool:
         return self._confirmation is not None

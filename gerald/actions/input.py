@@ -21,7 +21,7 @@ class ActionSession:
     abort_event: threading.Event = field(default_factory=threading.Event)
     action_count: int = 0
     last_mouse_position: tuple[int, int] | None = None
-    approved: bool = False
+    approved_kinds: set[str] = field(default_factory=set)
     lock: threading.Lock = field(default_factory=threading.Lock)
     confirmation_lock: threading.Lock = field(default_factory=threading.Lock)
 
@@ -133,17 +133,17 @@ class InputActions:
         )
         if name == "click" and target is not None:
             on_commands([PointCommand(target.rect)])
-        elif name == "scroll" and target is not None and self.require_confirmation and not session.approved:
+        elif name == "scroll" and target is not None and self.require_confirmation and name not in session.approved_kinds:
             on_commands([PointCommand(target.rect)])
-        if self.require_confirmation and not session.approved:
+        if self.require_confirmation and name not in session.approved_kinds:
             prompt = self._confirmation_prompt(name, args)
             with session.confirmation_lock:
-                if not session.approved:
+                if name not in session.approved_kinds:
                     if self.request_confirmation is None or not self.request_confirmation(
                         prompt, target_rect, self.confirmation_timeout
                     ):
                         return error("user declined")
-                    session.approved = True
+                    session.approved_kinds.add(name)
 
         try:
             mouse = self.mouse_factory()
@@ -256,9 +256,7 @@ class InputActions:
                 "double": "Gerald veut double-cliquer ici",
             }[args.get("button", "left")]
         if name == "type_text":
-            text = args["text"]
-            shown = text if len(text) <= 48 else f"{text[:45]}…"
-            return f"Gerald veut taper « {shown} »"
+            return f"Gerald veut taper « {args['text']} »"
         if name == "press_keys":
             formatted = "+".join(
                 part.title() if part.casefold() in {"ctrl", "shift", "alt", "altgr"} else part.title()
