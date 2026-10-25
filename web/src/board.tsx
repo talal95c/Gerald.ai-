@@ -3,7 +3,7 @@ import { createRoot } from "react-dom/client";
 import katex from "katex";
 import "katex/dist/katex.min.css";
 import "./board.css";
-import {annotationLeader, annotationSize, arrowEndpoints, createCursorMotion, cursorRestBeside, intentColor, placeAnnotation, pointsToPath, seedFrom, sketchArrow, sketchEllipsePoints, segmentBoardText, type AnnotationRect, type BoardTextPart, type CursorMotion, type CursorPoint, type CursorVisual} from "./annotations";
+import {annotationLeader, annotationSize, arrowEndpoints, arrowEndpointsAroundTarget, arrowEndpointsFromSource, createCursorMotion, cursorRestBeside, intentColor, placeAnnotation, pointsToPath, seedFrom, sketchArrow, sketchEllipsePoints, segmentBoardText, type AnnotationRect, type BoardTextPart, type CursorMotion, type CursorPoint, type CursorVisual} from "./annotations";
 import { mountNotch } from "./notch";
 
 type Pt = {x: number; y: number; p: number};
@@ -43,6 +43,16 @@ function unionBounds(...rects: AnnotationRect[]): AnnotationRect {
   const right = Math.max(...rects.map((rect) => rect.x + rect.w));
   const bottom = Math.max(...rects.map((rect) => rect.y + rect.h));
   return {x: left, y: top, w: right - left, h: bottom - top};
+}
+
+function measuredWriteBounds(element: HTMLElement): AnnotationRect {
+  const mathRects = [...element.querySelectorAll<HTMLElement>(".katex")]
+    .map((math) => math.getBoundingClientRect())
+    .filter((rect) => rect.width > 0 && rect.height > 0)
+    .map((rect) => ({x: rect.x, y: rect.y, w: rect.width, h: rect.height}));
+  if (mathRects.length) return unionBounds(...mathRects);
+  const rect = element.getBoundingClientRect();
+  return {x: rect.x, y: rect.y, w: rect.width, h: rect.height};
 }
 
 function traceSketchPath(ctx: CanvasRenderingContext2D, points: CursorPoint[]) {
@@ -857,10 +867,11 @@ function Board() {
     }
     if (name === "write" || name === "write_math") {
       const text = name === "write" ? args.text : args.latex;
-      if (typeof text !== "string" || !isNumber(args.x) || !isNumber(args.y)) {
-        return {ok: false, error: "write requires text or latex and numeric x,y coordinates"};
+      if (typeof text !== "string" || !isNumber(args.x) || (args.y !== undefined && !isNumber(args.y))) {
+        return {ok: false, error: "write requires text or latex and numeric x coordinates"};
       }
       const size = isNumber(args.size) ? args.size : 32;
+      const requestedY = isNumber(args.y) ? Number(args.y) : null;
       const html = name === "write_math"
         ? katex.renderToString(text, {throwOnError: false, output: "htmlAndMathml"})
         : undefined;
@@ -870,12 +881,35 @@ function Board() {
           : part)
         : undefined;
       const x = Math.max(Number(args.x), minBoardContentX());
-      const y = Number(args.y);
       motion.enqueue(async (queue) => {
+        const previousRects = [...document.querySelectorAll<HTMLElement>(".gerald-write")]
+          .map(measuredWriteBounds);
+        const previousBottom = previousRects.reduce((bottom, rect) => Math.max(bottom, rect.y + rect.h), 0);
+        let y = requestedY ?? Math.max(160, previousBottom + 12);
+        if (requestedY !== null && previousRects.some((rect) => y < rect.y + rect.h + 8 && y + size * 1.25 > rect.y - 8)) {
+          y = Math.max(160, previousBottom + 12);
+        }
         await queue.moveTo({x, y});
         setGeraldTexts((items) => [...items, {id, text, x, y, size, color: color ?? "#111", html, parts}]);
-        const bounds = {x, y: y - size, w: Math.max(size, text.length * size * 0.65), h: size * 1.25};
-        await moveToRest(queue, restBeside(bounds));
+        await new Promise<void>((resolve) => requestAnimationFrame(() => requestAnimationFrame(() => resolve())));
+        let line = document.querySelector<HTMLElement>(`[data-gerald-text-id="${id}"]`);
+        let bounds = line ? measuredWriteBounds(line) : null;
+        if (bounds) {
+          const actualBottom = previousRects.reduce((bottom, rect) => Math.max(bottom, rect.y + rect.h), 0);
+          const desiredY = Math.max(160, actualBottom + 12);
+          const overlaps = previousRects.some((rect) =>
+            bounds!.y < rect.y + rect.h + 8 && bounds!.y + bounds!.h > rect.y - 8,
+          );
+          if ((requestedY === null && bounds.y < desiredY - 1) || overlaps) {
+            y += desiredY - bounds.y;
+            setGeraldTexts((items) => items.map((item) => item.id === id ? {...item, y} : item));
+            await new Promise<void>((resolve) => requestAnimationFrame(() => requestAnimationFrame(() => resolve())));
+            line = document.querySelector<HTMLElement>(`[data-gerald-text-id="${id}"]`);
+            bounds = line ? measuredWriteBounds(line) : null;
+          }
+        }
+        const measured = bounds ?? {x, y, w: Math.max(size, text.length * size * 0.65), h: size * 1.25};
+        await moveToRest(queue, restBeside(measured));
       });
       return {ok: true};
     }
@@ -900,8 +934,12 @@ function Board() {
     if (name === "arrow") {
       const from = targetRect((args.from ?? {}) as Record<string, unknown>);
       const to = targetRect((args.to ?? {}) as Record<string, unknown>);
-      if (!from || !to) return {ok: false, error: `target not found. Visible targets: ${visibleTargetSummary()}`};
-      const endpoints = arrowEndpoints(from, to);
+      if (!to) return {ok: false, error: `target not found. Visible targets: ${visibleTargetSummary()}`};
+      const containsTarget = !!from && to.x >= from.x - 2 && to.y >= from.y - 2
+        && to.x + to.w <= from.x + from.w + 2 && to.y + to.h <= from.y + from.h + 2;
+      const endpoints = !from || containsTarget
+        ? arrowEndpointsAroundTarget(to, elements().map((item) => item.rect), viewport())
+        : arrowEndpointsFromSource(from, to, elements().map((item) => item.rect), viewport());
       if (!endpoints) return {ok: false, error: "arrow endpoints could not be calculated"};
       const {x1, y1, x2, y2} = endpoints;
       const {shaft, head} = sketchArrow(x1, y1, x2, y2, seedFrom(id));
@@ -1022,7 +1060,7 @@ function Board() {
     <canvas ref={canvas} className={tool} onPointerDown={down} onPointerMove={move}/>
     {!liveMode&&<aside className="ex-card" ref={exerciseCard} data-gerald-id="100"><div className="ex-label"><i/>{title.toUpperCase()}</div>{lines.map((line, index) => <p key={index} data-gerald-id={101 + index}>{line}</p>)}</aside>}
     <div className="gerald-text-layer">
-      {geraldTexts.map((item,index) => <div key={item.id} className="gerald-write" data-gerald-id={300+index} style={{left: item.x, top: item.y, fontSize: item.size, color: item.color}}>
+      {geraldTexts.map((item,index) => <div key={item.id} className="gerald-write" data-gerald-id={300+index} data-gerald-text-id={item.id} style={{left: item.x, top: item.y, fontSize: item.size, color: item.color}}>
         {item.html ? <span dangerouslySetInnerHTML={{__html: item.html}}/> : item.parts
           ? item.parts.map((part, partIndex) => part.html
             ? <span key={partIndex} dangerouslySetInnerHTML={{__html: part.html}}/>

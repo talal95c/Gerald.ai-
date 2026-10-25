@@ -66,6 +66,105 @@ export function arrowEndpoints(
   };
 }
 
+function segmentIntersectsRect(start: CursorPoint, end: CursorPoint, rect: AnnotationRect): boolean {
+  const dx = end.x - start.x;
+  const dy = end.y - start.y;
+  let low = 0;
+  let high = 1;
+  for (const [p, q] of [
+    [-dx, start.x - rect.x],
+    [dx, rect.x + rect.w - start.x],
+    [-dy, start.y - rect.y],
+    [dy, rect.y + rect.h - start.y],
+  ]) {
+    if (p === 0) {
+      if (q < 0) return false;
+      continue;
+    }
+    const ratio = q / p;
+    if (p < 0) low = Math.max(low, ratio);
+    else high = Math.min(high, ratio);
+    if (low > high) return false;
+  }
+  return true;
+}
+
+function arrowTouchesRect(start: CursorPoint, end: CursorPoint, rect: AnnotationRect): boolean {
+  const dx = end.x - start.x;
+  const dy = end.y - start.y;
+  const length = Math.hypot(dx, dy) || 1;
+  const unit = {x: dx / length, y: dy / length};
+  const wing = {x: end.x - unit.x * 12, y: end.y - unit.y * 12};
+  const side = {x: -unit.y * 7, y: unit.x * 7};
+  return segmentIntersectsRect(start, end, rect)
+    || segmentIntersectsRect(end, {x: wing.x + side.x, y: wing.y + side.y}, rect)
+    || segmentIntersectsRect(end, {x: wing.x - side.x, y: wing.y - side.y}, rect);
+}
+
+export function arrowEndpointsAroundTarget(
+  target: AnnotationRect,
+  obstacles: AnnotationRect[],
+  viewport: {w: number; h: number},
+): ArrowEndpoints | null {
+  const center = {x: target.x + target.w / 2, y: target.y + target.h / 2};
+  const candidates = [
+    {x: target.x + target.w + 70, y: target.y + target.h + 70},
+    {x: target.x + target.w + 70, y: center.y},
+    {x: target.x + target.w + 70, y: target.y - 70},
+    {x: center.x, y: target.y + target.h + 70},
+  ];
+  const otherRects = obstacles.filter((rect) =>
+    !(target.x >= rect.x && target.y >= rect.y
+      && target.x + target.w <= rect.x + rect.w && target.y + target.h <= rect.y + rect.h),
+  );
+  for (const start of candidates) {
+    if (start.x < 0 || start.y < 0 || start.x > viewport.w || start.y > viewport.h) continue;
+    const dx = start.x - center.x;
+    const dy = start.y - center.y;
+    const length = Math.hypot(dx, dy) || 1;
+    const unit = {x: dx / length, y: dy / length};
+    const edge = Math.min(
+      unit.x === 0 ? Infinity : target.w / 2 / Math.abs(unit.x),
+      unit.y === 0 ? Infinity : target.h / 2 / Math.abs(unit.y),
+    );
+    const tip = {x: center.x + unit.x * (edge + 2), y: center.y + unit.y * (edge + 2)};
+    const inflated = otherRects.map((rect) => ({x: rect.x - 4, y: rect.y - 4, w: rect.w + 8, h: rect.h + 8}));
+    if (inflated.some((rect) => arrowTouchesRect(start, tip, rect))) continue;
+    return {x1: start.x, y1: start.y, x2: tip.x, y2: tip.y};
+  }
+  return null;
+}
+
+export function arrowEndpointsFromSource(
+  source: AnnotationRect,
+  target: AnnotationRect,
+  obstacles: AnnotationRect[],
+  viewport: {w: number; h: number},
+): ArrowEndpoints | null {
+  const clipped = arrowEndpoints(source, target, 2, viewport);
+  if (!clipped) return null;
+  const center = {x: target.x + target.w / 2, y: target.y + target.h / 2};
+  const direction = Math.atan2(clipped.y1 - center.y, clipped.x1 - center.x);
+  const otherRects = obstacles.filter((rect) => {
+    const contains = (inner: AnnotationRect, outer: AnnotationRect) =>
+      inner.x >= outer.x && inner.y >= outer.y
+      && inner.x + inner.w <= outer.x + outer.w && inner.y + inner.h <= outer.y + outer.h;
+    return !contains(target, rect) && !contains(source, rect);
+  }).map((rect) => ({x: rect.x - 4, y: rect.y - 4, w: rect.w + 8, h: rect.h + 8}));
+  for (const offset of [0, 0.35, -0.35, 0.7, -0.7]) {
+    const angle = direction + offset;
+    const unit = {x: Math.cos(angle), y: Math.sin(angle)};
+    const edge = Math.min(
+      unit.x === 0 ? Infinity : target.w / 2 / Math.abs(unit.x),
+      unit.y === 0 ? Infinity : target.h / 2 / Math.abs(unit.y),
+    );
+    const tip = {x: center.x + unit.x * (edge + 2), y: center.y + unit.y * (edge + 2)};
+    if (otherRects.some((rect) => arrowTouchesRect({x: clipped.x1, y: clipped.y1}, tip, rect))) continue;
+    return {...clipped, x2: tip.x, y2: tip.y};
+  }
+  return null;
+}
+
 export function animateCursor(
   from: CursorPoint,
   to: CursorPoint,
@@ -85,12 +184,12 @@ export function animateCursor(
     x: (from.x + to.x) / 2 + perpendicular.x * distance * 0.12,
     y: (from.y + to.y) / 2 + perpendicular.y * distance * 0.12,
   };
-  let last = performance.now();
+  let last: number | null = null;
   let elapsed = 0;
 
   return new Promise((resolve) => {
     const frame = (now: number) => {
-      elapsed += Math.min(now - last, 28);
+      if (last !== null) elapsed += Math.min(now - last, 28);
       last = now;
       const linear = Math.min(1, elapsed / (duration * 1.2));
       const progress = linear < 0.5
@@ -113,11 +212,22 @@ export function createCursorMotion(
   onUpdate: (cursor: CursorVisual) => void,
 ): CursorMotion {
   let position = {...initial};
+  let hasAppeared = false;
   let queue = Promise.resolve();
   const reducedMotion = typeof window !== "undefined"
     && window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+  const appearNear = (point: CursorPoint) => {
+    const width = typeof window === "undefined" ? Infinity : window.innerWidth;
+    const height = typeof window === "undefined" ? Infinity : window.innerHeight;
+    position = {
+      x: Math.max(0, Math.min(width - 80, point.x - 48)),
+      y: Math.max(0, Math.min(height - 50, point.y - 34)),
+    };
+    hasAppeared = true;
+  };
   const motion: CursorMotion = {
     async moveTo(to, onProgress) {
+      if (!hasAppeared) appearNear(to);
       const from = {...position};
       onUpdate({...position, visible: true});
       if (!reducedMotion) {
@@ -135,6 +245,10 @@ export function createCursorMotion(
         onProgress?.(1);
         return Promise.resolve();
       }
+      if (!hasAppeared) {
+        appearNear(points[0]);
+        points = [position, ...points];
+      }
       const end = points[points.length - 1];
       const cumulative = [0];
       for (let index = 1; index < points.length; index += 1) {
@@ -148,11 +262,11 @@ export function createCursorMotion(
         return Promise.resolve();
       }
       onUpdate({...position, visible: true});
-      let last = performance.now();
+      let last: number | null = null;
       let elapsed = 0;
       return new Promise<void>((resolve) => {
         const frame = (now: number) => {
-          elapsed += Math.min(now - last, 34);
+          if (last !== null) elapsed += Math.min(now - last, 34);
           last = now;
           const linear = Math.min(1, elapsed / (durationMs * 2));
           const progress = linear < 0.5

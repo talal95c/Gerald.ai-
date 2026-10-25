@@ -7,7 +7,7 @@ import "./board.css";
 import {getBridge} from "./bridge";
 import {Orb} from "./orb";
 import {Reveal} from "./reveal";
-import {annotationLeader, annotationSize, arrowEndpoints, createCursorMotion, cursorRestBeside, intentColor, placeAnnotation, pointsToPath, seedFrom, sketchArrow, sketchEllipsePoints, type AnnotationRect, type CursorMotion, type CursorPoint, type CursorVisual} from "./annotations";
+import {annotationLeader, annotationSize, arrowEndpoints, arrowEndpointsAroundTarget, arrowEndpointsFromSource, createCursorMotion, cursorRestBeside, intentColor, placeAnnotation, pointsToPath, seedFrom, sketchArrow, sketchEllipsePoints, type AnnotationRect, type CursorMotion, type CursorPoint, type CursorVisual} from "./annotations";
 import {mountNotch} from "./notch";
 import * as pdfjs from "pdfjs-dist";
 import pdfWorker from "pdfjs-dist/build/pdf.worker.min.mjs?url";
@@ -212,6 +212,7 @@ function TD(){
   const [suggestion,setSuggestion]=useState(false);
   const boardOpenRef=useRef(liveMode||boardMode);
   const frame=useRef<HTMLIFrameElement>(null), paintFrame=useRef<HTMLIFrameElement>(null), audio=useRef<HTMLAudioElement>(null);
+  const paintHotkeysCleanup=useRef<(()=>void)|null>(null);
   const paintIds=useRef(new WeakMap<Element,number>()), nextPaintId=useRef(7000);
   const peer=useRef<RTCPeerConnection|null>(null), channel=useRef<RTCDataChannel|null>(null), stream=useRef<MediaStream|null>(null);
   const audioContext=useRef<AudioContext|null>(null), micAnalyser=useRef<AnalyserNode|null>(null), remoteAnalyser=useRef<AnalyserNode|null>(null);
@@ -360,15 +361,20 @@ function TD(){
     const resolveTarget=(target:Record<string,any>)=>paintMode?paintTargetRect(target):targetRect(target);
     const from=name==="arrow"?resolveTarget(args.from??{}):resolveTarget(args);
     const to=name==="arrow"?resolveTarget(args.to??{}):null;
+    const boardClosedHint=boardOpenRef.current?"":" Le tableau est fermé : ce texte n’existe peut-être que sur le tableau. Vise un élément visible du TD ci-dessus, ou rouvre le tableau avec open_board si l’élève parle de ce qu’il y a écrit.";
     if(name==="arrow"&&!to){
       const visible=elements().slice(0,40).map(e=>`[${e.id}] ${e.text.slice(0,100)}`).join("; ");
-      return {ok:false,error:`arrow target was not found. Visible targets: ${visible}`};
+      return {ok:false,error:`arrow target was not found. Visible targets: ${visible}${boardClosedHint}`};
     }
     const containsTarget=!!(from&&to&&to.x>=from.x-2&&to.y>=from.y-2&&to.x+to.w<=from.x+from.w+2&&to.y+to.h<=from.y+from.h+2);
     const arrowFrom=name==="arrow"&&to&&(!from||containsTarget)
       ? {x:Math.min(innerWidth-2,to.x+to.w+60),y:Math.max(2,to.y-60),w:1,h:1}
       : from;
-    const endpoints=name==="arrow"&&arrowFrom&&to?arrowEndpoints(arrowFrom,to):null;
+    const endpoints=name==="arrow"&&arrowFrom&&to
+      ? !from||containsTarget
+        ? arrowEndpointsAroundTarget(to,elements().map(e=>e.rect),viewport())
+        : arrowEndpointsFromSource(arrowFrom,to,elements().map(e=>e.rect),viewport())
+      : null;
     if(name==="arrow"&&!endpoints)return {ok:false,error:"arrow endpoints could not be calculated"};
     const r=name==="arrow"?to:from??(typeof args.target_text!=="string"&&typeof args.x==="number"&&typeof args.y==="number"?{x:args.x,y:args.y,w:Number(args.w)||120,h:Number(args.h)||38}:null);
     if(name==="tip"){
@@ -400,7 +406,7 @@ function TD(){
     }
     if(!r){
       const visible=elements().slice(0,40).map(e=>`[${e.id}] ${e.text.slice(0,100)}`).join("; ");
-      return {ok:false,error:`target not found. Visible targets: ${visible}`};
+      return {ok:false,error:`target not found. Visible targets: ${visible}${boardClosedHint}`};
     }
     if(!["circle","underline","point","highlight","arrow","note"].includes(name))return {ok:false,error:`unknown TD tool: ${name}`};
     const text=String(args.text??args.label??"");
@@ -785,7 +791,7 @@ function TD(){
       if(channel.current?.readyState==="open")setStatus(pttPreviousMic.current?"listening":"idle");
     }
   };
-  useEffect(()=>()=>{stop();if(captionTimer.current)clearTimeout(captionTimer.current);},[]);
+  useEffect(()=>()=>{paintHotkeysCleanup.current?.();stop();if(captionTimer.current)clearTimeout(captionTimer.current);},[]);
   useEffect(()=>{
     const down=(event:KeyboardEvent)=>{if(event.ctrlKey&&event.shiftKey&&!event.repeat){event.preventDefault();beginPushToTalk();}};
     const up=(event:KeyboardEvent)=>{if(event.key==="Control"||event.key==="Shift")endPushToTalk();};
@@ -817,7 +823,21 @@ function TD(){
   const onSubmit=(event:React.FormEvent)=>{event.preventDefault();if(voiceMode)void sendQuestion(question);else sendMock();};
   const clickExercise=(ex:typeof exercises[number])=>{setActiveExercise(ex);if(voiceMode)openBoard(ex.id);else bridge.openBoard(ex.title,JSON.stringify(ex.lines));};
   const sessionOpen=channel.current?.readyState==="open";
-  return <main className={`td-root${docMode?" document-mode":""}${paintMode?" paint-mode":""}`}>{paintMode&&<iframe ref={paintFrame} className="paint-editor" title="miniPaint" src="/vendor/minipaint/index.html"/>}{!liveMode&&!docMode&&!paintMode&&<article className="paper"><header className="td-head" data-gerald-id="1"><div className="td-meta"><span>Lycée — Mathématiques</span><span>TD 4</span></div><h1 data-gerald-id="2">Polynômes du second degré</h1><div className="td-student"><span>Nom : __________________</span><span>Date : ________________</span></div></header>
+  const attachPaintHotkeys=()=>{
+    paintHotkeysCleanup.current?.();
+    const frameWindow=paintFrame.current?.contentWindow;
+    if(!frameWindow)return;
+    const down=(event:KeyboardEvent)=>{if(event.ctrlKey&&event.shiftKey&&!event.repeat){event.preventDefault();beginPushToTalk();}};
+    const up=(event:KeyboardEvent)=>{if(event.key==="Control"||event.key==="Shift")endPushToTalk();};
+    const blur=()=>endPushToTalk();
+    const cleanup=()=>{frameWindow.removeEventListener("keydown",down);frameWindow.removeEventListener("keyup",up);frameWindow.removeEventListener("blur",blur);frameWindow.removeEventListener("pagehide",cleanup);if(paintHotkeysCleanup.current===cleanup)paintHotkeysCleanup.current=null;};
+    paintHotkeysCleanup.current=cleanup;
+    frameWindow.addEventListener("keydown",down);frameWindow.addEventListener("keyup",up);frameWindow.addEventListener("blur",blur);
+    frameWindow.addEventListener("pagehide",cleanup,{once:true});
+  };
+  return <main className={`td-root${docMode?" document-mode":""}${paintMode?" paint-mode":""}`}>
+    {paintMode&&<iframe ref={paintFrame} className="paint-editor" title="miniPaint" src="/vendor/minipaint/index.html" onLoad={attachPaintHotkeys}/>}
+    {!liveMode&&!docMode&&!paintMode&&<article className="paper"><header className="td-head" data-gerald-id="1"><div className="td-meta"><span>Lycée — Mathématiques</span><span>TD 4</span></div><h1 data-gerald-id="2">Polynômes du second degré</h1><div className="td-student"><span>Nom : __________________</span><span>Date : ________________</span></div></header>
     <section className="reminder" data-gerald-id="3"><h2 data-gerald-id="4">Rappel de cours</h2><p data-gerald-id="5">Pour <span dangerouslySetInnerHTML={{__html:katex.renderToString("ax^2+bx+c=0")}} />, le discriminant vaut <span dangerouslySetInnerHTML={{__html:katex.renderToString("\\Delta=b^2-4ac")}} />. Si <span dangerouslySetInnerHTML={{__html:katex.renderToString("\\Delta>0")}} />, l’équation possède deux racines réelles.</p></section>
     {exercises.map((ex,i)=><section className="exercise" data-gerald-id={10+i*3} key={ex.id} onClick={()=>clickExercise(ex)}><p className="exercise-lead" data-gerald-id={11+i*3}><strong>{ex.title}.</strong><span dangerouslySetInnerHTML={{__html:katex.renderToString(ex.math)}}/></p><p data-gerald-id={12+i*3}>{ex.instruction}</p><button className="open-ex">Ouvrir au tableau →</button></section>)}
   </article>}

@@ -185,8 +185,8 @@ TOOL_SCHEMAS = [
         },
         ["query"],
     ),
-    _schema("write", "Write text on the open teaching board.", {"text": {"type": "string"}, "x": {"type": "number"}, "y": {"type": "number"}, "size": {"type": "number"}}, ["text", "x", "y"]),
-    _schema("write_math", "Write a math expression on the open teaching board.", {"latex": {"type": "string"}, "x": {"type": "number"}, "y": {"type": "number"}, "size": {"type": "number"}}, ["latex", "x", "y"]),
+    _schema("write", "Write text on the open teaching board.", {"text": {"type": "string"}, "x": {"type": "number"}, "y": {"type": "number"}, "size": {"type": "number"}}, ["text", "x"]),
+    _schema("write_math", "Write a math expression on the open teaching board.", {"latex": {"type": "string"}, "x": {"type": "number"}, "y": {"type": "number"}, "size": {"type": "number"}}, ["latex", "x"]),
     _schema("draw_path", "Draw a path on the open teaching board.", {"points": {"type": "array", "items": {"type": "array", "items": {"type": "number"}, "minItems": 2, "maxItems": 2}}, "closed": {"type": "boolean"}}, ["points"]),
     _schema(
         "plot",
