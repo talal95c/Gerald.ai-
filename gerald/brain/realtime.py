@@ -1,0 +1,275 @@
+from __future__ import annotations
+
+import asyncio
+import base64
+import json
+import logging
+import time
+from collections.abc import Callable
+from pathlib import Path
+from typing import Any
+from urllib.parse import quote
+
+from gerald.audio.player import AudioPlayer
+from gerald.capture.screen import Capture
+from gerald.perception.elements import Element
+from gerald.tools.registry import TOOL_SCHEMAS, execute_tool
+
+logger = logging.getLogger(__name__)
+REALTIME_URL = "wss://api.openai.com/v1/realtime"
+
+
+class RealtimeClient:
+    def __init__(
+        self,
+        api_key: str,
+        model: str,
+        voice: str,
+        instructions: str,
+        player: AudioPlayer | None = None,
+        on_event: Callable[[dict[str, Any]], None] | None = None,
+        on_commands: Callable[[list[object]], None] | None = None,
+        usage_log: Path | None = None,
+    ) -> None:
+        self.api_key = api_key
+        self.model = model
+        self.voice = voice
+        self.instructions = instructions
+        self.player = player or AudioPlayer()
+        self.on_event = on_event or (lambda event: None)
+        self.on_commands = on_commands or (lambda commands: None)
+        self.usage_log = usage_log if usage_log is not None else Path.home() / ".gerald" / "usage.jsonl"
+        self.websocket = None
+        self.capture: Capture | None = None
+        self.elements: list[Element] = []
+        self._tool_rounds = 0
+        self._turn_started_at: float | None = None
+        self._closed = False
+        self._response_active = False
+
+    @property
+    def session_url(self) -> str:
+        return f"{REALTIME_URL}?model={quote(self.model)}"
+
+    def session_update_event(self) -> dict[str, Any]:
+        return {
+            "type": "session.update",
+            "session": {
+                "type": "realtime",
+                "instructions": self.instructions,
+                "tools": TOOL_SCHEMAS,
+                "tool_choice": "auto",
+                "output_modalities": ["audio", "text"],
+                "audio": {
+                    "input": {
+                        "format": {"type": "audio/pcm", "rate": 24000},
+                        "transcription": {"model": "gpt-4o-mini-transcribe"},
+                        "turn_detection": None,
+                    },
+                    "output": {
+                        "format": {"type": "audio/pcm", "rate": 24000},
+                        "voice": self.voice,
+                    },
+                },
+            },
+        }
+
+    async def connect(self, websocket_factory: Callable[..., Any] | None = None) -> None:
+        if websocket_factory is None:
+            from websockets.asyncio.client import connect
+
+            websocket_factory = connect
+        self.websocket = await websocket_factory(
+            self.session_url,
+            additional_headers={"Authorization": f"Bearer {self.api_key}"},
+            max_size=32 * 1024 * 1024,
+        )
+        await self._send(self.session_update_event())
+        while True:
+            event = await self._receive()
+            if event.get("type") == "session.updated":
+                self.on_event(event)
+                break
+            if event.get("type") == "error":
+                raise RuntimeError(event.get("error", {}).get("message", "Realtime session setup failed"))
+
+    async def _send(self, event: dict[str, Any]) -> None:
+        if self.websocket is None:
+            raise RuntimeError("Realtime connection is not open")
+        await self.websocket.send(json.dumps(event))
+
+    async def _receive(self) -> dict[str, Any]:
+        if self.websocket is None:
+            raise RuntimeError("Realtime connection is not open")
+        data = await self.websocket.recv()
+        return json.loads(data)
+
+    async def start_turn(self) -> None:
+        self.player.stop()
+        if self.websocket is not None and self._response_active:
+            await self._send({"type": "response.cancel"})
+            self._response_active = False
+        self._tool_rounds = 0
+        self._turn_started_at = time.monotonic()
+
+    async def send_audio(self, audio: bytes) -> None:
+        if audio:
+            await self._send(
+                {
+                    "type": "input_audio_buffer.append",
+                    "audio": base64.b64encode(audio).decode("ascii"),
+                }
+            )
+
+    async def finish_turn(
+        self,
+        capture: Capture,
+        elements: list[Element],
+        context: str,
+        question: str = "",
+        has_audio: bool = True,
+    ) -> None:
+        self.capture = capture
+        self.elements = elements
+        if has_audio:
+            await self._send({"type": "input_audio_buffer.commit"})
+        else:
+            await self._send({"type": "input_audio_buffer.clear"})
+        text = context if not question else f"{context}\n\nQuestion: {question}"
+        await self._send(
+            {
+                "type": "conversation.item.create",
+                "item": {
+                    "type": "message",
+                    "role": "user",
+                    "content": [
+                        {"type": "input_image", "image_url": capture.data_url},
+                        {"type": "input_text", "text": text},
+                    ],
+                },
+            }
+        )
+        await self._send({"type": "response.create"})
+        self._response_active = True
+        self._turn_started_at = time.monotonic()
+
+    async def cancel(self) -> None:
+        self.player.stop()
+        if self.websocket is not None and self._response_active:
+            await self._send({"type": "response.cancel"})
+        if self.websocket is not None:
+            await self._send({"type": "input_audio_buffer.clear"})
+        self._response_active = False
+
+    async def close(self) -> None:
+        self._closed = True
+        self.player.close()
+        websocket, self.websocket = self.websocket, None
+        if websocket is not None:
+            await websocket.close()
+
+    async def run(self) -> None:
+        delay = 1.0
+        while not self._closed:
+            try:
+                if self.websocket is None:
+                    await self.connect()
+                    delay = 1.0
+                event = await self._receive()
+                await self.handle_event(event)
+            except asyncio.CancelledError:
+                raise
+            except Exception:
+                logger.warning("Realtime connection dropped; reconnecting", exc_info=True)
+                self.on_event({"type": "connection.lost"})
+                websocket, self.websocket = self.websocket, None
+                if websocket is not None:
+                    try:
+                        await websocket.close()
+                    except Exception:
+                        pass
+                await asyncio.sleep(delay)
+                delay = min(delay * 2, 15)
+
+    async def handle_event(self, event: dict[str, Any]) -> None:
+        event_type = event.get("type")
+        if event_type == "response.created":
+            self._response_active = True
+        elif event_type in {"response.output_audio.delta", "response.audio.delta"}:
+            audio = event.get("delta", "")
+            if audio:
+                self.player.enqueue(base64.b64decode(audio))
+        elif event_type in {
+            "response.output_audio_transcript.delta",
+            "response.audio_transcript.delta",
+            "conversation.item.input_audio_transcription.completed",
+        }:
+            self.on_event(event)
+        elif event_type == "response.done":
+            response = event.get("response", {})
+            self._response_active = False
+            self._log_usage(response)
+            await self._handle_response_done(response)
+            self.on_event(event)
+        else:
+            self.on_event(event)
+
+    async def _handle_response_done(self, response: dict[str, Any]) -> None:
+        calls = [
+            item for item in response.get("output", [])
+            if item.get("type") == "function_call"
+        ]
+        if not calls:
+            return
+        self._tool_rounds += 1
+        for call in calls:
+            try:
+                args = json.loads(call.get("arguments") or "{}")
+                if not isinstance(args, dict):
+                    raise ValueError("function arguments must be an object")
+                commands, output = execute_tool(
+                    call.get("name", ""),
+                    args,
+                    self.capture,  # type: ignore[arg-type]
+                    self.elements,
+                )
+            except Exception as error:
+                commands = []
+                output = json.dumps({"ok": False, "error": str(error)})
+            if commands:
+                self.on_commands(commands)
+            await self._send(
+                {
+                    "type": "conversation.item.create",
+                    "item": {
+                        "type": "function_call_output",
+                        "call_id": call["call_id"],
+                        "output": output,
+                    },
+                }
+            )
+        if self._tool_rounds < 4:
+            await self._send({"type": "response.create"})
+            self._response_active = True
+
+    def _log_usage(self, response: dict[str, Any]) -> None:
+        usage = response.get("usage")
+        if not usage:
+            return
+        record = {
+            "timestamp": time.time(),
+            "model": self.model,
+            "response_id": response.get("id"),
+            "usage": usage,
+            "latency_seconds": (
+                round(time.monotonic() - self._turn_started_at, 3)
+                if self._turn_started_at is not None
+                else None
+            ),
+        }
+        try:
+            self.usage_log.parent.mkdir(parents=True, exist_ok=True)
+            with self.usage_log.open("a", encoding="utf-8") as output:
+                output.write(json.dumps(record) + "\n")
+        except OSError:
+            logger.warning("Unable to write Realtime usage log", exc_info=True)
