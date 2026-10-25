@@ -15,7 +15,8 @@ export default defineConfig({
         main: resolve(root, "index.html"),
         td: resolve(root, "td.html"),
         board: resolve(root, "board.html"),
-        fiche: resolve(root, "fiche.html")
+        fiche: resolve(root, "fiche.html"),
+        landing: resolve(root, "landing.html")
       },
       output: {
         assetFileNames: assetInfo =>
