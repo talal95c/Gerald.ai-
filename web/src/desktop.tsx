@@ -8,7 +8,8 @@ import {mountNotch} from "./notch";
 import "./desktop.css";
 
 type WindowPhase = "opening" | "minimizing" | "restoring" | "closing" | null;
-type WindowState = {open: boolean; minimized: boolean; x: number; y: number; width: number; height: number; zIndex: number; token: number; phase: WindowPhase; originX: number; originY: number};
+type WindowRect = {x: number; y: number; width: number; height: number};
+type WindowState = WindowRect & {open: boolean; minimized: boolean; maximized: boolean; restoreRect: WindowRect | null; zoomTransition: boolean; zIndex: number; token: number; phase: WindowPhase; originX: number; originY: number};
 type WindowMap = Partial<Record<DesktopApp, WindowState>>;
 const dockApps: DesktopApp[] = ["Photoshop", "Notes", "Mail", "Musique", "Photos"];
 const runningApps = dockApps;
@@ -25,10 +26,12 @@ function Desktop() {
   const [focused, setFocused] = useState<DesktopApp | null>(null);
   const [now, setNow] = useState(new Date());
   const notch = useRef<HTMLDivElement>(null);
+  const notchControls = useRef<ReturnType<typeof mountNotch> | null>(null);
   const notesFrame = useRef<HTMLIFrameElement>(null);
   const paintFrame = useRef<HTMLIFrameElement>(null);
   const zCounter = useRef(10);
   const cascade = useRef(0);
+  const zoomTimers = useRef<Partial<Record<DesktopApp, number>>>({});
   const hotkeyHeld = useRef(false);
   const hotkeyTarget = useRef<"Photoshop" | "Notes" | null>(null);
   const demo = new URLSearchParams(location.search).get("demo") === "1";
@@ -39,18 +42,18 @@ function Desktop() {
     return {top, bottom, height: bottom - top};
   }, []);
   const clampDrag = useCallback((x: number, y: number, width: number) => ({
-    x: Math.max(0, Math.min(x, window.innerWidth - width)),
+    x: Math.max(0, Math.min(x, Math.max(0, window.innerWidth - width))),
     y: Math.max(0, Math.min(y, window.innerHeight - 38)),
   }), []);
   const clampToUsable = useCallback((x: number, y: number, width: number, height: number, area: ReturnType<typeof usableArea>) => ({
-    x: Math.max(0, Math.min(x, window.innerWidth - width)),
+    x: Math.max(0, Math.min(x, Math.max(0, window.innerWidth - width))),
     y: Math.max(area.top, Math.min(y, area.bottom - height)),
   }), []);
   const openWindow = useCallback((app: DesktopApp) => {
     setWindows(previous => {
       const current = previous[app];
       const zIndex = ++zCounter.current;
-      if (current?.open) return {...previous, [app]: {...current, minimized: false, zIndex, phase: current.minimized ? "restoring" : null}};
+      if (current?.open) return {...previous, [app]: {...current, minimized: false, zIndex, phase: current.minimized ? "restoring" : null, zoomTransition: false}};
       const area = usableArea();
       const width = Math.min(1100, Math.max(0, window.innerWidth * .86 - 56));
       const height = Math.min(720, Math.max(0, area.height - 56));
@@ -69,6 +72,7 @@ function Desktop() {
       const dock = document.querySelector<HTMLElement>(`.dock-item[aria-label="${app}"]`)?.getBoundingClientRect();
       return {...previous, [app]: {
         open: true, minimized: false, ...position, width, height, zIndex,
+        maximized: false, restoreRect: null, zoomTransition: false,
         token: (current?.token ?? 0) + 1, phase: "opening",
         originX: dock ? dock.left + dock.width / 2 - position.x : width / 2,
         originY: dock ? dock.top + dock.height / 2 - position.y : height / 2,
@@ -82,6 +86,54 @@ function Desktop() {
       ? {...previous, [app]: {...previous[app]!, minimized: false, zIndex: ++zCounter.current}}
       : previous);
   }, []);
+  const toggleMaximize = useCallback((app: DesktopApp) => {
+    if (!windows[app]?.open) return;
+    const reducedMotion = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+    const timer = zoomTimers.current[app];
+    if (timer !== undefined) window.clearTimeout(timer);
+    setWindows(previous => {
+      const item = previous[app];
+      if (!item) return previous;
+      const area = usableArea();
+      if (item.maximized) {
+        const saved = item.restoreRect ?? {x: 0, y: area.top, width: Math.min(1100, window.innerWidth), height: Math.min(720, area.height)};
+        const width = Math.min(saved.width, window.innerWidth);
+        const height = Math.min(saved.height, area.height);
+        const position = clampToUsable(saved.x, saved.y, width, height, area);
+        return {...previous, [app]: {...item, ...position, width, height, maximized: false, restoreRect: null, zoomTransition: !reducedMotion}};
+      }
+      return {...previous, [app]: {
+        ...item, x: 0, y: area.top, width: window.innerWidth, height: area.height,
+        maximized: true, restoreRect: {x: item.x, y: item.y, width: item.width, height: item.height},
+        zoomTransition: !reducedMotion,
+      }};
+    });
+    if (!reducedMotion) {
+      zoomTimers.current[app] = window.setTimeout(() => {
+        delete zoomTimers.current[app];
+        setWindows(previous => previous[app]
+          ? {...previous, [app]: {...previous[app]!, zoomTransition: false}}
+          : previous);
+      }, 240);
+    } else {
+      delete zoomTimers.current[app];
+    }
+  }, [clampToUsable, usableArea, windows]);
+  const restoreForDrag = useCallback((app: DesktopApp, clientX: number, clientY: number, grabX: number, grabY: number): WindowRect => {
+    const item = windows[app];
+    if (!item) return {x: 0, y: 0, width: 480, height: 320};
+    const area = usableArea();
+    const saved = item.restoreRect ?? {x: 0, y: area.top, width: Math.min(1100, window.innerWidth), height: Math.min(720, area.height)};
+    const width = Math.min(saved.width, window.innerWidth);
+    const height = Math.min(saved.height, area.height);
+    const ratio = item.width > 0 ? grabX / item.width : .5;
+    const position = clampDrag(clientX - ratio * width, clientY - grabY, width);
+    const restored = {...position, width, height};
+    setWindows(previous => previous[app]
+      ? {...previous, [app]: {...previous[app]!, ...restored, maximized: false, restoreRect: null, zoomTransition: false}}
+      : previous);
+    return restored;
+  }, [clampDrag, usableArea, windows]);
   const companion = useCompanion({demo, handleHotkeys: false, onActivate: () => openWindow("Notes")});
   const talkHandler = useRef<(pressed: boolean) => void>(() => undefined);
   const postHotkey = useCallback((app: "Photoshop" | "Notes", pressed: boolean) => {
@@ -91,13 +143,24 @@ function Desktop() {
   const handleTalk = useCallback((pressed: boolean) => {
     if (pressed) {
       if (hotkeyHeld.current) return;
-      let target = focused && voiceApps.includes(focused as "Photoshop" | "Notes") ? focused as "Photoshop" | "Notes" : null;
-      if (!target || !windows[target]?.open || windows[target]?.minimized) {
-        const visible = voiceApps.filter(app => windows[app]?.open && !windows[app]?.minimized)
+      const focusedVoice = focused && voiceApps.includes(focused as typeof voiceApps[number])
+        ? focused as typeof voiceApps[number]
+        : null;
+      let target = focusedVoice && windows[focusedVoice]?.open && !windows[focusedVoice]?.minimized
+        ? focusedVoice
+        : null;
+      if (!target) {
+        target = voiceApps.filter(app => windows[app]?.open && !windows[app]?.minimized)
           .sort((a, b) => (windows[b]?.zIndex ?? 0) - (windows[a]?.zIndex ?? 0))[0] ?? null;
-        target = visible ?? "Notes";
-        openWindow(target);
-        if (!visible) companion.openLiveBoard(false);
+      }
+      if (!target) {
+        target = voiceApps.filter(app => windows[app]?.open && windows[app]?.minimized)
+          .sort((a, b) => (windows[b]?.zIndex ?? 0) - (windows[a]?.zIndex ?? 0))[0] ?? null;
+        if (target) openWindow(target);
+      }
+      if (!target) {
+        notchControls.current?.hint("Ouvre Notes ou Photoshop pour parler à Gerald");
+        return;
       }
       hotkeyHeld.current = true;
       hotkeyTarget.current = target;
@@ -108,18 +171,24 @@ function Desktop() {
     hotkeyHeld.current = false;
     if (hotkeyTarget.current) postHotkey(hotkeyTarget.current, false);
     hotkeyTarget.current = null;
-  }, [companion.openLiveBoard, companion.src, focused, openWindow, postHotkey, windows]);
+  }, [focused, openWindow, postHotkey, windows]);
   talkHandler.current = handleTalk;
   const stableTalk = useCallback((pressed: boolean) => talkHandler.current(pressed), []);
 
   useEffect(() => {
-    if (notch.current) mountNotch(notch.current, stableTalk);
+    if (notch.current) notchControls.current = mountNotch(notch.current, stableTalk);
   }, [stableTalk]);
 
   useEffect(() => {
     const update = () => setNow(new Date());
     const timer = window.setInterval(update, 60000);
     return () => window.clearInterval(timer);
+  }, []);
+
+  useEffect(() => () => {
+    Object.values(zoomTimers.current).forEach(timer => {
+      if (timer !== undefined) window.clearTimeout(timer);
+    });
   }, []);
 
   useEffect(() => {
@@ -131,7 +200,14 @@ function Desktop() {
     const up = (event: KeyboardEvent) => {
       if (event.key === "Control" || event.key === "Shift") stableTalk(false);
     };
-    const blur = () => stableTalk(false);
+    const blur = () => {
+      stableTalk(false);
+      window.setTimeout(() => {
+        const active = document.activeElement;
+        if (active === notesFrame.current) focusWindow("Notes");
+        else if (active === paintFrame.current) focusWindow("Photoshop");
+      }, 0);
+    };
     window.addEventListener("keydown", down);
     window.addEventListener("keyup", up);
     window.addEventListener("blur", blur);
@@ -140,7 +216,7 @@ function Desktop() {
       window.removeEventListener("keyup", up);
       window.removeEventListener("blur", blur);
     };
-  }, [stableTalk]);
+  }, [focusWindow, stableTalk]);
 
   useEffect(() => {
     const ready = (event: MessageEvent) => {
@@ -161,10 +237,17 @@ function Desktop() {
         runningApps.forEach(app => {
           const item = previous[app];
           if (!item?.open) return;
-          const width = Math.min(item.width, window.innerWidth * .86 - 56, 1100);
-          const height = Math.min(item.height, area.height, 720);
+          if (item.maximized) {
+            next[app] = {
+              ...item, x: 0, y: area.top, width: window.innerWidth, height: area.height,
+              zoomTransition: false,
+            };
+            return;
+          }
+          const width = Math.min(item.width, window.innerWidth);
+          const height = Math.min(item.height, area.height);
           const position = clampToUsable(item.x, item.y, width, height, area);
-          next[app] = {...item, ...position, width, height};
+          next[app] = {...item, ...position, width, height, zoomTransition: false};
         });
         return next;
       });
@@ -187,7 +270,22 @@ function Desktop() {
     setWindows(previous => {
       const item = previous[app];
       if (!item) return previous;
-      return {...previous, [app]: {...item, ...clampDrag(x, y, item.width)}};
+      return {...previous, [app]: {...item, ...clampDrag(x, y, item.width), zoomTransition: false}};
+    });
+  };
+  const resizeWindow = (app: DesktopApp, x: number, y: number, requestedWidth: number, requestedHeight: number) => {
+    const area = usableArea();
+    const maxWidth = Math.max(0, window.innerWidth);
+    const maxHeight = area.height;
+    const minWidth = Math.min(480, maxWidth);
+    const minHeight = Math.min(320, maxHeight);
+    const width = Math.max(minWidth, Math.min(requestedWidth, maxWidth));
+    const height = Math.max(minHeight, Math.min(requestedHeight, maxHeight));
+    const position = clampToUsable(x, y, width, height, area);
+    setWindows(previous => {
+      const item = previous[app];
+      if (!item || item.maximized) return previous;
+      return {...previous, [app]: {...item, ...position, width, height, zoomTransition: false}};
     });
   };
   const closeWindow = (app: DesktopApp) => {
@@ -249,8 +347,12 @@ function Desktop() {
       if(!item?.open||item.minimized)return null;
       return <DesktopWindow
         key={`${app}-${item.token}`} title={app} x={item.x} y={item.y} width={item.width} height={item.height}
-        zIndex={item.zIndex} minimized={item.minimized} phase={item.phase} originX={item.originX} originY={item.originY}
+        zIndex={item.zIndex} minimized={item.minimized} maximized={item.maximized} zoomTransition={item.zoomTransition}
+        phase={item.phase} originX={item.originX} originY={item.originY}
         focused={focused===app} onFocus={()=>focusWindow(app)} onMove={(x,y)=>moveWindow(app,x,y)}
+        onResize={(x,y,width,height)=>resizeWindow(app,x,y,width,height)}
+        onRestoreForDrag={(clientX,clientY,grabX,grabY)=>restoreForDrag(app,clientX,clientY,grabX,grabY)}
+        onZoom={()=>toggleMaximize(app)}
         onClose={()=>closeWindow(app)} onMinimize={()=>minimizeWindow(app)} onAnimationEnd={phase=>finishAnimation(app,phase)}
       >
         {app==="Notes"

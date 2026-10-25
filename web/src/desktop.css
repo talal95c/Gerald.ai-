@@ -7,7 +7,7 @@ body.desktop-page{min-width:320px;min-height:100vh;overflow:hidden;background:#2
 .desktop-shortcut.selected{background:rgba(255,255,255,.2);border-color:rgba(255,255,255,.25)}
 .desktop-icon-svg{display:block;width:64px;height:64px;flex:none;filter:drop-shadow(0 2px 3px rgba(0,0,0,.28))}
 .desktop-shortcut:hover{background:rgba(255,255,255,.12)}
-.desktop-window{position:absolute;display:flex;flex-direction:column;overflow:hidden;border:1px solid rgba(0,0,0,.08);border-radius:14px;background:#fff;color:#262626;box-shadow:0 24px 60px -20px rgba(0,0,0,.35);transform-origin:center}
+.desktop-window{position:absolute;display:flex;flex-direction:column;overflow:hidden;box-sizing:border-box;border:1px solid rgba(0,0,0,.08);border-radius:14px;background:#fff;color:#262626;box-shadow:0 24px 60px -20px rgba(0,0,0,.35);transform-origin:center}
 .desktop-window.phase-opening,.desktop-window.phase-restoring{animation:desktop-window-open .26s cubic-bezier(.2,.8,.2,1) both}
 .desktop-window.phase-minimizing{animation:desktop-window-minimize .22s cubic-bezier(.2,.8,.2,1) both}
 .desktop-window.phase-closing{animation:desktop-window-close .14s ease-out both}
@@ -20,13 +20,14 @@ body.desktop-page{min-width:320px;min-height:100vh;overflow:hidden;background:#2
 .window-light{width:12px;height:12px;border:0;border-radius:50%;padding:0;background:#D1D1D6}
 .desktop-window.focused .window-light.close,.desktop-window-controls:hover .window-light.close{background:#FF5F57}
 .desktop-window.focused .window-light.minimize,.desktop-window-controls:hover .window-light.minimize{background:#FEBC2E}
+.desktop-window.focused .window-light.zoom,.desktop-window-controls:hover .window-light.zoom{background:#28c840}
 .window-light::before{display:block;color:rgba(0,0,0,.5);font-size:8px;line-height:1;opacity:0;transition:opacity .12s}
-.window-light.close::before{content:"×"}.window-light.minimize::before{content:"−"}
+.window-light.close::before{content:"×"}.window-light.minimize::before{content:"−"}.window-light.zoom::before{content:"↗"}
 .desktop-window-controls:hover .window-light::before,.window-light:hover::before{opacity:1}
 .window-title{color:#8e8e93}.desktop-window.focused .window-title{color:#1d1d1f}
 .desktop-window-body{position:relative;flex:1;min-height:0;background:#fff}
 .desktop-window-body iframe{display:block;width:100%;height:100%;border:0;background:#fff}
-.desktop-window.dragging iframe{pointer-events:none}
+.desktop-window.dragging iframe,.desktop-window.resizing iframe{pointer-events:none}
 .desktop-window.minimized{display:none}
 .desktop-dock{position:absolute;left:50%;bottom:24px;transform:translateX(-50%);z-index:20;display:flex;align-items:flex-end;gap:8px;padding:9px;border-radius:20px;background:rgba(247,247,247,.32);backdrop-filter:blur(10px);-webkit-backdrop-filter:blur(10px);box-shadow:0 2px 6px rgba(0,0,0,.25),inset 0 2px 6px rgba(255,255,255,.32)}
 .dock-entry{position:relative;display:flex;align-items:flex-end}
@@ -52,7 +53,7 @@ body.desktop-page{min-width:320px;min-height:100vh;overflow:hidden;background:#2
 .desktop-page .desktop-notch-host .notch-talk-pill svg{width:16px;height:16px}
 .desktop-page .desktop-notch-host .sheet{width:100%}
 @media(max-width:700px){.desktop-shortcuts{top:44px;right:10px}.desktop-menubar{padding:0 8px}.menu-left{gap:6px}.menu-left nav{gap:7px}.menu-left nav span:nth-child(3){display:none}.menu-right{gap:6px}.desktop-dock{gap:5px;padding:7px;bottom:14px}.dock-item,.dock-item .desktop-icon-svg{width:56px;height:56px}.dock-divider{height:38px;margin-bottom:9px}.dock-item.neighbor{transform:scale(1.03)}}
-@media(prefers-reduced-motion:reduce){.desktop-page .desktop-window.phase-opening,.desktop-page .desktop-window.phase-restoring,.desktop-page .desktop-window.phase-minimizing,.desktop-page .desktop-window.phase-closing,.desktop-page .dock-item.bouncing{animation-duration:.01ms!important}.desktop-page .dock-item,.desktop-page .dock-label{transition:none}}
+@media(prefers-reduced-motion:reduce){.desktop-page .desktop-window.phase-opening,.desktop-page .desktop-window.phase-restoring,.desktop-page .desktop-window.phase-minimizing,.desktop-page .desktop-window.phase-closing,.desktop-page .dock-item.bouncing{animation-duration:.01ms!important}.desktop-page .desktop-window.zoom-transition{transition:none!important}.desktop-page .dock-item,.desktop-page .dock-label{transition:none}}
 
 .mail-app,.music-app,.photos-app{height:100%;min-width:0;position:relative;color:#1d1d1f;background:#f5f5f7;font-size:13px}
 .mail-app{display:grid;grid-template-columns:180px 330px minmax(0,1fr)}
@@ -88,3 +89,14 @@ body.desktop-page{min-width:320px;min-height:100vh;overflow:hidden;background:#2
 .photo-preview{position:absolute;inset:0;z-index:4;display:grid;place-items:center;width:100%;height:100%;border:0;background:#000b;padding:38px}
 .preview-scene{width:min(900px,100%);height:min(520px,100%);box-shadow:0 12px 40px #0008}
 @media(max-width:760px){.mail-app{grid-template-columns:140px 240px minmax(0,1fr)}.mail-reading{padding:20px}.music-app{grid-template-columns:140px 1fr}.music-library{padding:18px}.photos-grid{grid-template-columns:repeat(3,1fr);grid-template-rows:repeat(4,1fr)}}
+
+.desktop-window.zoom-transition{transition:left 220ms cubic-bezier(.2,.8,.2,1),top 220ms cubic-bezier(.2,.8,.2,1),width 220ms cubic-bezier(.2,.8,.2,1),height 220ms cubic-bezier(.2,.8,.2,1)}
+.window-resize-handle{position:absolute;z-index:5;touch-action:none}
+.resize-n,.resize-s{left:12px;right:12px;height:6px}.resize-n{top:0;cursor:ns-resize}.resize-s{bottom:0;cursor:ns-resize}
+.resize-e,.resize-w{top:12px;bottom:12px;width:6px}.resize-e{right:0;cursor:ew-resize}.resize-w{left:0;cursor:ew-resize}
+.resize-ne,.resize-nw,.resize-se,.resize-sw{width:12px;height:12px}
+.resize-ne{top:0;right:0;cursor:nesw-resize}.resize-nw{top:0;left:0;cursor:nwse-resize}.resize-se{right:0;bottom:0;cursor:nwse-resize}.resize-sw{left:0;bottom:0;cursor:nesw-resize}
+.desktop-page .desktop-notch-host .notch-hint{position:absolute;top:calc(100% + 8px);left:50%;z-index:1001;max-width:calc(100vw - 24px);padding:8px 14px;transform:translate(-50%,-4px);border:1px solid rgba(255,255,255,.12);border-radius:10px;background:rgba(27,27,29,.96);box-shadow:0 8px 24px rgba(0,0,0,.2);color:#f5f5f7;font-size:13px;font-weight:500;line-height:1.35;white-space:nowrap;opacity:0;pointer-events:none;transition:opacity 160ms ease,transform 160ms ease}
+.desktop-page .desktop-notch-host .notch-hint.visible{transform:translate(-50%,0);opacity:1}
+.desktop-page .desktop-notch-host .sheet .notch-hint{top:48px}
+@media(prefers-reduced-motion:reduce){.desktop-page .desktop-notch-host .notch-hint{transition:none}}
