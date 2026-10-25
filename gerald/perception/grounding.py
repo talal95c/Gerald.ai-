@@ -76,6 +76,9 @@ def _matched_word_run(
     query_tokens = _normalize_text(query).split()
     if not query_tokens:
         return None
+    query_symbols = {
+        character for character in query if not character.isalnum() and not character.isspace()
+    }
     flattened: list[tuple[str, int]] = []
     for index, (word, _rect) in enumerate(element.word_boxes):
         flattened.extend((token, index) for token in _normalize_text(word).split())
@@ -84,6 +87,15 @@ def _matched_word_run(
         selected = {
             index for _token, index in flattened[start : start + len(query_tokens)]
         }
+        if query_symbols:
+            for index in tuple(selected):
+                for adjacent in (index - 1, index + 1):
+                    if not 0 <= adjacent < len(element.word_boxes):
+                        continue
+                    word = element.word_boxes[adjacent][0].strip()
+                    if word and all(not char.isalnum() and not char.isspace() for char in word):
+                        if any(symbol in query_symbols for symbol in word):
+                            selected.add(adjacent)
         rectangles = [element.word_boxes[index][1] for index in selected]
         left = min(rect[0] for rect in rectangles)
         top = min(rect[1] for rect in rectangles)
@@ -463,13 +475,55 @@ def resolve_target(
             matches.append((element, score, rank, word_rect or element.rect))
         best_single_rank = max((match[2] for match in matches), default=0)
         line_matches = _matched_line_runs(elements, query)
+        line_point = None
+        if line_matches and "x" in args and "y" in args:
+            x, y = args["x"], args["y"]
+            if (
+                not isinstance(x, (int, float))
+                or isinstance(x, bool)
+                or not isinstance(y, (int, float))
+                or isinstance(y, bool)
+            ):
+                raise ValueError("x and y must be numbers")
+            line_point = (float(x), float(y))
         exact_line_matches = [match for match in line_matches if match[1]]
         if exact_line_matches and best_single_rank < 3:
-            chosen = min(exact_line_matches, key=lambda match: match[0][2] * match[0][3])
+            if line_point is None:
+                chosen = min(
+                    exact_line_matches,
+                    key=lambda match: match[0][2] * match[0][3],
+                )
+            else:
+                chosen = min(
+                    exact_line_matches,
+                    key=lambda match: (
+                        hypot(
+                            line_point[0] - (match[0][0] + match[0][2] / 2),
+                            line_point[1] - (match[0][1] + match[0][3] / 2),
+                        ),
+                        match[0][2] * match[0][3],
+                    ),
+                )
             return resolved(_screen_rect(capture, chosen[0]), "text")
         fuzzy_line_matches = [match for match in line_matches if not match[1]]
         if fuzzy_line_matches and best_single_rank < 3:
-            chosen = max(fuzzy_line_matches, key=lambda match: (match[2], -match[0][2] * match[0][3]))
+            if line_point is None:
+                chosen = max(
+                    fuzzy_line_matches,
+                    key=lambda match: (match[2], -match[0][2] * match[0][3]),
+                )
+            else:
+                chosen = min(
+                    fuzzy_line_matches,
+                    key=lambda match: (
+                        hypot(
+                            line_point[0] - (match[0][0] + match[0][2] / 2),
+                            line_point[1] - (match[0][1] + match[0][3] / 2),
+                        ),
+                        -match[2],
+                        match[0][2] * match[0][3],
+                    ),
+                )
             return resolved(_screen_rect(capture, chosen[0]), "text")
         if matches:
             best_rank = max(match[2] for match in matches)
@@ -516,25 +570,43 @@ def resolve_target(
                 grounder_x, grounder_y = point
                 image_x = grounder_x * capture.image.width / max(1, grounder_image.width)
                 image_y = grounder_y * capture.image.height / max(1, grounder_image.height)
-                containing = [
-                    element
-                    for element in elements
-                    if element.rect[0] <= image_x <= element.rect[0] + element.rect[2]
-                    and element.rect[1] <= image_y <= element.rect[1] + element.rect[3]
-                    and all(element.id != weak[0].id for weak in weak_text_matches)
-                ]
-                if containing:
-                    element = min(containing, key=lambda item: item.rect[2] * item.rect[3])
-                    return resolved(_screen_rect(capture, element.rect), "grounder", coordinate_note)
-                snap_image = image_array if image_array is not None else np.asarray(capture.image)
-                snapped = _visual_snap(image_x, image_y, capture, snap_image)
-                if snapped is not None:
-                    return resolved(snapped, "grounder", coordinate_note)
-                return resolved(
-                    _raw_rect(capture, image_x, image_y),
-                    "grounder",
-                    coordinate_note,
+                model_x, model_y = args.get("x"), args.get("y")
+                valid_model_point = (
+                    isinstance(model_x, (int, float))
+                    and not isinstance(model_x, bool)
+                    and isinstance(model_y, (int, float))
+                    and not isinstance(model_y, bool)
                 )
+                if valid_model_point:
+                    try:
+                        model_x, model_y = float(model_x), float(model_y)
+                        valid_model_point = isfinite(model_x) and isfinite(model_y)
+                    except OverflowError:
+                        valid_model_point = False
+                if valid_model_point and hypot(image_x - model_x, image_y - model_y) > (
+                    0.25 * hypot(capture.image.width, capture.image.height)
+                ):
+                    point = None
+                if point is not None:
+                    containing = [
+                        element
+                        for element in elements
+                        if element.rect[0] <= image_x <= element.rect[0] + element.rect[2]
+                        and element.rect[1] <= image_y <= element.rect[1] + element.rect[3]
+                        and all(element.id != weak[0].id for weak in weak_text_matches)
+                    ]
+                    if containing:
+                        element = min(containing, key=lambda item: item.rect[2] * item.rect[3])
+                        return resolved(_screen_rect(capture, element.rect), "grounder", coordinate_note)
+                    snap_image = image_array if image_array is not None else np.asarray(capture.image)
+                    snapped = _visual_snap(image_x, image_y, capture, snap_image)
+                    if snapped is not None:
+                        return resolved(snapped, "grounder", coordinate_note)
+                    return resolved(
+                        _raw_rect(capture, image_x, image_y),
+                        "grounder",
+                        coordinate_note,
+                    )
 
     if weak_text_matches:
         x, y = args.get("x"), args.get("y")

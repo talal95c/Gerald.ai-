@@ -1,0 +1,25 @@
+{
+  "viewport": {"width": 1440, "height": 900},
+  "hit_margin_px": 8,
+  "cases": [
+    {"id": "code-bug-line", "situation": "code", "url": "pedagogy/pages/code-bug.html", "question": "Pourquoi ma moyenne est fausse ? Montre-moi la ligne qui pose problème.", "target": {"css": "text=/len\\(notes\\) -/"}, "kind": "code line"},
+    {"id": "code-terminal", "situation": "code", "url": "pedagogy/pages/code-bug.html", "question": "Où est-ce que je vois le résultat de mon programme ?", "target": {"css": "text=/Moyenne : 18/"}, "kind": "terminal output"},
+    {"id": "code-readme", "situation": "code", "url": "pedagogy/pages/code-bug.html", "question": "Où est le fichier README dans l'explorateur ?", "target": {"css": ".side >> text=README.md"}, "kind": "file tree item"},
+    {"id": "form-submit", "situation": "form", "url": "pedagogy/pages/form.html", "question": "Où je clique pour valider mon inscription ?", "target": {"css": "button:has-text(\"Envoyer\")"}, "kind": "button"},
+    {"id": "form-email", "situation": "form", "url": "pedagogy/pages/form.html", "question": "Où je mets mon adresse mail ?", "target": {"css": "label:has-text(\"Adresse e-mail\") + input"}, "kind": "field"},
+    {"id": "settings-sound", "situation": "windows settings", "url": "pedagogy/pages/settings1.html", "question": "Où je règle le volume de mon PC ?", "target": {"css": ".main >> text=Son"}, "kind": "list item"},
+    {"id": "settings-bt", "situation": "windows settings", "url": "pedagogy/pages/settings1.html", "question": "Où je connecte mes écouteurs Bluetooth ?", "target": {"css": ".side >> text=Bluetooth et appareils"}, "kind": "nav item"},
+    {"id": "sheet-total", "situation": "spreadsheet", "url": "pedagogy/pages/sheet.html", "question": "Quelle cellule contient le total du budget ?", "target": {"css": "td:text-is(\"690\")"}, "kind": "cell"},
+    {"id": "sheet-formula", "situation": "spreadsheet", "url": "pedagogy/pages/sheet.html", "question": "Où je vois la formule de la cellule ?", "target": {"css": ".fx"}, "kind": "formula bar"},
+    {"id": "video-pause", "situation": "video", "url": "pedagogy/pages/video-ohm.html", "question": "Où je mets la vidéo en pause ?", "target": {"css": ".ctl"}, "kind": "player controls"},
+    {"id": "video-r", "situation": "video", "url": "pedagogy/pages/video-ohm.html", "question": "C'est quoi le R dans la formule ? Montre-moi où c'est expliqué.", "target": {"css": "text=/R : résistance/"}, "kind": "slide text"},
+    {"id": "desktop-cours", "situation": "desktop", "url": "pedagogy/pages/desktop.html", "question": "Où est mon dossier de cours ?", "target": {"css": ".ic:has-text(\"Cours\")"}, "kind": "icon"},
+    {"id": "desktop-search", "situation": "desktop", "url": "pedagogy/pages/desktop.html", "question": "Où je cherche un fichier sur mon PC ?", "target": {"css": "text=/Rechercher/"}, "kind": "taskbar"},
+    {"id": "doc-example", "situation": "english doc", "url": "pedagogy/pages/english-doc.html", "question": "Montre-moi l'exemple de code sur cette page.", "target": {"css": "text=/squares = /"}, "kind": "code sample"},
+    {"id": "board-deg2-error", "situation": "board", "url": "pedagogy/pages/deg2-2.html", "question": "J'ai calculé delta, c'est bon ? Montre-moi où ça coince.", "target": {"css": "text=/25 \\+ 24/"}, "kind": "handwritten line"},
+    {"id": "board-linear-error", "situation": "board", "url": "pedagogy/pages/board-error.html", "question": "Quelle ligne de mon calcul est fausse ?", "target": {"css": "text=\"2x = 11 + 3\""}, "kind": "handwritten line"},
+    {"id": "article-title", "situation": "article", "url": "pedagogy/pages/water.html", "question": "Où est le titre de l'article ?", "target": {"css": "h1"}, "kind": "heading"},
+    {"id": "math-definition", "situation": "course page", "url": "pedagogy/pages/derivative.html", "question": "Où est la formule du nombre dérivé ?", "target": {"css": "text=/f'\\(a\\) =/"}, "kind": "formula"},
+    {"id": "homework-answer", "situation": "homework", "url": "pedagogy/pages/physics-ex.html", "question": "Où je dois écrire ma réponse ?", "target": {"css": "text=/Réponse/"}, "kind": "answer line"}
+  ]
+}

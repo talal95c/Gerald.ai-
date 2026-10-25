@@ -175,11 +175,12 @@ def _percentile(values: list[float], fraction: float) -> float:
     return ordered[lower] * (1 - weight) + ordered[upper] * weight
 
 
-def _place_box(
+def _find_free_box(
     image_size: tuple[int, int],
     box_size: tuple[float, float],
     occupied: list[tuple[float, float, float, float]],
-) -> tuple[float, float]:
+    preferred: tuple[float, float] | None = None,
+) -> tuple[float, float] | None:
     image_width, image_height = image_size
     width, height = box_size
     margin = 24.0
@@ -190,6 +191,12 @@ def _place_box(
         (image_width - width - margin, image_height - height - margin),
         (margin, margin),
     ]
+    if preferred is not None:
+        positions.sort(
+            key=lambda position: (
+                (position[0] - preferred[0]) ** 2 + (position[1] - preferred[1]) ** 2
+            )
+        )
     for x, y in positions:
         x = min(max(0.0, x), max(0.0, image_width - width))
         y = min(max(0.0, y), max(0.0, image_height - height))
@@ -201,7 +208,35 @@ def _place_box(
             for other_x, other_y, other_w, other_h in occupied
         ):
             return x, y
+    return None
+
+
+def _place_box(
+    image_size: tuple[int, int],
+    box_size: tuple[float, float],
+    occupied: list[tuple[float, float, float, float]],
+) -> tuple[float, float]:
+    placed = _find_free_box(image_size, box_size, occupied)
+    if placed is not None:
+        return placed
+    image_width, image_height = image_size
+    width, height = box_size
+    margin = 24.0
     return max(0.0, image_width - width - margin), max(0.0, image_height - height - margin)
+
+
+def _intersects_occupied_box(
+    box: tuple[float, float, float, float],
+    occupied: tuple[float, float, float, float],
+) -> bool:
+    x, y, width, height = box
+    other_x, other_y, other_width, other_height = occupied
+    return (
+        x < other_x + other_width
+        and x + width > other_x
+        and y < other_y + other_height
+        and y + height > other_y
+    )
 
 
 def build_plot(
@@ -322,6 +357,17 @@ def build_plot(
         box_y = _number(box_y, "y")
         if box_x < 0 or box_y < 0 or box_x + width > image_width or box_y + height > image_height:
             raise ValueError("plot box must fit within the board image")
+        occupied = occupied_boxes or []
+        requested_box = (box_x, box_y, width, height)
+        if any(_intersects_occupied_box(requested_box, other) for other in occupied):
+            replacement = _find_free_box(
+                image_size,
+                (width, height),
+                occupied,
+                preferred=(box_x, box_y),
+            )
+            if replacement is not None:
+                box_x, box_y = replacement
 
     left, top, right, bottom = PLOT_INSETS
     graph_width = max(1.0, width - left - right)

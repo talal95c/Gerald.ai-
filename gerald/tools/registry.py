@@ -66,10 +66,25 @@ def _targeted_schema(
 
 TOOL_SCHEMAS = [
     _targeted_schema("point", "Point to a screen element or image coordinate.", {"label": {"type": "string"}}),
-    _targeted_schema("circle", "Circle a screen element or image region.", {"w": {"type": "number"}, "h": {"type": "number"}}),
+    _targeted_schema(
+        "circle",
+        "Circle a screen element or image region.",
+        {
+            "w": {"type": "number"},
+            "h": {"type": "number"},
+            "target_text": {"type": "string", "description": "exact text of the target term"},
+        },
+    ),
     _schema("arrow", "Draw an arrow from one target to another.", {"from": TARGET_SCHEMA, "to": TARGET_SCHEMA}, ["from", "to"]),
     _schema("link", "Connect two targets with a labeled line.", {"a": TARGET_SCHEMA, "b": TARGET_SCHEMA, "label": {"type": "string"}}, ["a", "b"]),
-    _targeted_schema("underline", "Underline a target or image-coordinate line.", {"w": {"type": "number"}}),
+    _targeted_schema(
+        "underline",
+        "Underline a target or image-coordinate line.",
+        {
+            "w": {"type": "number"},
+            "target_text": {"type": "string", "description": "exact text of the target term"},
+        },
+    ),
     _targeted_schema("highlight", "Highlight a target or image-coordinate region.", {"w": {"type": "number"}, "h": {"type": "number"}}),
     _targeted_schema(
         "note",
@@ -302,6 +317,7 @@ def _validate_root_target(
     has_target = (
         "element_id" in args
         or (isinstance(args.get("text"), str) and bool(args.get("text")))
+        or (isinstance(args.get("target_text"), str) and bool(args.get("target_text")))
         or (isinstance(args.get("description"), str) and bool(args.get("description")))
         or {"x", "y"} <= args.keys()
     )
@@ -365,8 +381,8 @@ def execute_tool(
         elif name in {"point", "circle", "underline", "highlight", "note"}:
             optional = {
                 "point": {"label"},
-                "circle": {"w", "h"},
-                "underline": {"w"},
+                "circle": {"w", "h", "target_text"},
+                "underline": {"w", "target_text"},
                 "highlight": {"w", "h"},
                 "note": {"text", "target_text"},
             }[name]
@@ -384,6 +400,11 @@ def execute_tool(
                     target_text = args.get("text")
                 if target_text is not None:
                     target_args["text"] = target_text
+            elif "target_text" in args:
+                if "text" in args:
+                    raise ValueError("provide either text or target_text")
+                target_args = {key: value for key, value in args.items() if key != "target_text"}
+                target_args["text"] = args["target_text"]
             resolution = resolve_target(
                 target_args,
                 capture,

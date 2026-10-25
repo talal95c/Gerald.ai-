@@ -36,6 +36,14 @@ def make_capture():
     )
 
 
+def _grounder_scale_capture():
+    return capture_from_image(
+        Image.new("RGB", (400, 200), "white"),
+        MonitorRect(0, 0, 400, 200),
+        max_width=200,
+    )
+
+
 def _grounding_asset_capture(name):
     image = Image.open(Path(__file__).parent / "fixtures" / name).convert("RGB")
     return capture_from_image(
@@ -177,6 +185,63 @@ def test_hn_long_navigation_label_falls_through_to_configured_grounder(monkeypat
     assert result.rect.center[0] != -800
 
 
+def test_distant_grounder_point_falls_back_to_model_coordinates(monkeypatch):
+    capture = _grounder_scale_capture()
+    monkeypatch.setattr("gerald.perception.grounder.configured_grounder", lambda: object())
+    monkeypatch.setattr(
+        "gerald.perception.grounder.locate_with_timeout",
+        lambda *_args, **_kwargs: (390, 180),
+    )
+
+    result = resolve_target(
+        {"x": 50, "y": 25, "description": "près du calcul"},
+        capture,
+        [],
+        with_details=True,
+    )
+
+    assert result.layer == "raw"
+    assert result.rect.center == pytest.approx(capture.img_to_screen(50, 25))
+
+
+def test_near_grounder_point_is_kept_with_model_coordinates(monkeypatch):
+    capture = _grounder_scale_capture()
+    monkeypatch.setattr("gerald.perception.grounder.configured_grounder", lambda: object())
+    monkeypatch.setattr(
+        "gerald.perception.grounder.locate_with_timeout",
+        lambda *_args, **_kwargs: (100, 50),
+    )
+
+    result = resolve_target(
+        {"x": 50, "y": 25, "description": "près du calcul"},
+        capture,
+        [],
+        with_details=True,
+    )
+
+    assert result.layer == "grounder"
+    assert result.rect.center == pytest.approx(capture.img_to_screen(50, 25))
+
+
+def test_grounder_point_is_kept_when_model_coordinates_are_absent(monkeypatch):
+    capture = _grounder_scale_capture()
+    monkeypatch.setattr("gerald.perception.grounder.configured_grounder", lambda: object())
+    monkeypatch.setattr(
+        "gerald.perception.grounder.locate_with_timeout",
+        lambda *_args, **_kwargs: (390, 180),
+    )
+
+    result = resolve_target(
+        {"description": "une zone éloignée"},
+        capture,
+        [],
+        with_details=True,
+    )
+
+    assert result.layer == "grounder"
+    assert result.rect.center == pytest.approx(capture.img_to_screen(195, 90))
+
+
 def test_hn_long_navigation_label_keeps_weak_match_without_grounder(monkeypatch):
     capture = make_capture()
     bar = Element(1, "DataItem", "login submit past comments ask", (0, 10, 100, 10), "uia")
@@ -231,6 +296,42 @@ def test_ocr_text_match_narrows_to_matched_word_boxes():
     ]
 
     assert resolve_target({"text": "shortcut"}, capture, elements) == ScreenRect(-904, 88, 96, 40)
+
+
+def test_circle_target_text_matches_math_term_with_its_sign():
+    capture = capture_from_image(
+        Image.new("RGB", (400, 200), "white"),
+        MonitorRect(0, 0, 400, 200),
+        max_width=400,
+    )
+    line = Element(
+        1,
+        "Text",
+        "Δ = b² − 4ac = 25 + 24 = 49",
+        (20, 40, 300, 24),
+        "ocr",
+        (
+            ("Δ", (20, 40, 16, 24)),
+            ("=", (40, 40, 8, 24)),
+            ("b²", (56, 40, 20, 24)),
+            ("−", (80, 40, 10, 24)),
+            ("4ac", (96, 40, 36, 24)),
+            ("=", (136, 40, 8, 24)),
+            ("25", (150, 40, 20, 24)),
+            ("+", (190, 40, 10, 24)),
+            ("24", (204, 40, 20, 24)),
+            ("=", (228, 40, 8, 24)),
+            ("49", (242, 40, 20, 24)),
+        ),
+    )
+
+    commands, output = execute_tool("circle", {"target_text": "+ 24"}, capture, [line])
+
+    rect = commands[0].rect
+    assert rect.x <= 190
+    assert rect.x + rect.w >= 224
+    assert rect.w < line.rect[2]
+    assert json.loads(output)["grounding"] == "text"
 
 
 def test_ocr_phrase_match_requires_all_contiguous_query_words():
@@ -378,6 +479,50 @@ def test_line_match_joins_consecutive_ocr_elements_and_returns_span_only():
     result = resolve_target({"text": "total / (len(notes)"}, capture, elements)
 
     assert result == ScreenRect(58, 10, 128, 12)
+
+
+def test_exact_duplicate_line_match_uses_nearest_supplied_coordinates():
+    capture = capture_from_image(
+        Image.new("RGB", (400, 200), "white"),
+        MonitorRect(0, 0, 400, 200),
+        max_width=400,
+    )
+    elements = [
+        Element(1, "Text", "return", (20, 20, 42, 12), "ocr"),
+        Element(2, "Text", "total", (66, 20, 38, 12), "ocr"),
+        Element(3, "Text", "return", (20, 100, 42, 12), "ocr"),
+        Element(4, "Text", "total", (66, 100, 38, 12), "ocr"),
+    ]
+
+    result = resolve_target(
+        {"text": "return total", "x": 84, "y": 106},
+        capture,
+        elements,
+    )
+
+    assert result == ScreenRect(20, 100, 84, 12)
+
+
+def test_fuzzy_duplicate_line_match_uses_nearest_supplied_coordinates():
+    capture = capture_from_image(
+        Image.new("RGB", (400, 200), "white"),
+        MonitorRect(0, 0, 400, 200),
+        max_width=400,
+    )
+    elements = [
+        Element(1, "Text", "return", (20, 20, 42, 12), "ocr"),
+        Element(2, "Text", "tota", (66, 20, 30, 12), "ocr"),
+        Element(3, "Text", "return", (20, 100, 42, 12), "ocr"),
+        Element(4, "Text", "tota", (66, 100, 30, 12), "ocr"),
+    ]
+
+    result = resolve_target(
+        {"text": "return total", "x": 80, "y": 106},
+        capture,
+        elements,
+    )
+
+    assert result == ScreenRect(20, 100, 76, 12)
 
 
 def test_french_elision_matches_token_with_curly_apostrophe():
