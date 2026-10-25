@@ -3,7 +3,7 @@
 Gerald est un assistant pédagogique de bureau : maintenez le raccourci, posez
 votre question à voix haute et il explique ce qui est affiché en dessinant des
 repères directement à l'écran. Il capture l'écran uniquement au déclenchement
-du raccourci et ne commande pas vos applications.
+du raccourci et ne commande une application qu'après une autorisation explicite.
 
 ## Installation (Windows)
 
@@ -26,6 +26,7 @@ disponibles; la reconnaissance UIA et l'OCR Windows sont optionnels.
 - Maintenir `Ctrl+Shift` : parler et partager une capture ponctuelle.
 - `Ctrl+Shift+Enter` ou l'icône de zone de notification : saisir une question.
 - `Ctrl+Shift+R` ou l'action de la zone de notification : enregistrer un récapitulatif de la leçon.
+- `Ctrl+Shift+B` ou l'action « Tableau » de la zone de notification : ouvrir/fermer le tableau.
 - `Échap` : annuler une demande d'action, interrompre Gerald ou effacer les dessins.
 
 Avant la première action de chaque tour, Gerald demande une autorisation réelle
@@ -39,3 +40,8 @@ Modifiez `GERALD_HOTKEY`, `GERALD_MODEL`, `GERALD_VOICE`,
 aussi; les fournisseurs d'éléments et les raccourcis globaux dépendent des
 capacités du système. Pour les détails techniques, voir
 [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md).
+
+Le localisateur visuel optionnel est désactivé par défaut
+(`GERALD_GROUNDER=none`). `GERALD_GROUNDER=openrouter` utilise
+`OPENROUTER_API_KEY`; `GERALD_GROUNDER=moondream` nécessite
+`python -m pip install -e ".[grounder-local]"` et charge Moondream sur le CPU.

@@ -10,6 +10,8 @@ interface native.
 | `capture/screen.py` | Sélectionne le moniteur sous le curseur, conserve son origine physique, redimensionne et encode une capture JPEG. |
 | `perception/elements.py` | Interroge UI Automation et l'OCR si disponible, filtre et sérialise le contexte de l'écran. |
 | `perception/grounding.py` | Résout un identifiant ou un point en rectangle physique sans dépendre de Qt. |
+| `perception/grounder.py` | Fournit des localisateurs visuels OpenRouter et Moondream, optionnels et appelés avec une limite de temps. |
+| `board.py` | Affiche le tableau, conserve séparément l'encre utilisateur et celle de Gerald, et capture le widget à la demande. |
 | `tools/registry.py` | Déclare les schémas Realtime et transforme les appels en commandes de dessin simples. |
 | `actions/input.py` | Exécute les actions desktop confirmées avec limite par tour, abort Échap et détection de prise de contrôle. |
 | `tools/recap.py` | Enregistre un récap Markdown dans `~/Gerald/lessons` et tente de l'ouvrir. |
@@ -59,3 +61,14 @@ précède la continuation pour que le modèle puisse vérifier le résultat.
 récapitulatif textuelle, sans capture d'écran. L'outil `save_recap` écrit le
 Markdown dans `~/Gerald/lessons/` puis tente de l'ouvrir avec l'application
 associée du système.
+
+`Ctrl+Shift+B` ouvre le tableau sur le moniteur sous le curseur. Le tableau
+accepte le stylet et la souris; son rendu n'est capturé que lorsqu'un tour
+Gerald est déclenché. Les strokes utilisateur sont regroupés comme éléments
+`ink`; l'encre Gerald reste dans une couche séparée et les outils du tableau ne
+peuvent pas effacer l'encre utilisateur. Si le tableau était utilisé, le récap
+peut inclure une image PNG du tableau.
+
+Le localisateur visuel est désactivé par défaut (`GERALD_GROUNDER=none`).
+OpenRouter utilise `OPENROUTER_API_KEY`; le modèle local Moondream est installé
+avec l'extra `grounder-local` et s'exécute sur CPU.

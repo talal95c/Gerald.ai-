@@ -3,6 +3,7 @@ from __future__ import annotations
 import asyncio
 from concurrent.futures import ThreadPoolExecutor
 import logging
+import os
 import sys
 import threading
 import time
@@ -16,6 +17,10 @@ AUDIO_BYTES_FOR_100MS = 24000 * 2 // 10
 
 def _has_audio_to_commit(audio_sent_bytes: int) -> bool:
     return audio_sent_bytes >= AUDIO_BYTES_FOR_100MS
+
+
+def _should_hide_overlay_for_capture(capture_excluded: bool, platform: str | None = None) -> bool:
+    return (platform or os.name) != "nt" or not capture_excluded
 
 
 def _reset_failed_capture(app_state: dict, generation: int) -> bool:
@@ -67,11 +72,12 @@ def main() -> int:
     from pynput import keyboard
 
     from gerald.audio.mic import Microphone
+    from gerald.board import BoardWindow
     from gerald.brain.realtime import RealtimeClient
     from gerald.capture.session import CaptureRequest
     from gerald.capture.screen import capture_screen
     from gerald.overlay.window import OverlayWindow
-    from gerald.perception.elements import collect_elements_detailed, serialize_context
+    from gerald.perception.elements import Element, collect_elements_detailed, serialize_context
 
     settings = load_settings()
     app = QApplication(sys.argv)
@@ -91,6 +97,8 @@ def main() -> int:
         capture_overlay = pyqtSignal(object)
         action_confirmation = pyqtSignal(object)
         confirmation_expired = pyqtSignal(str)
+        board_tool = pyqtSignal(object)
+        board_snapshot = pyqtSignal(object)
         mic_level = pyqtSignal(float)
         output_level = pyqtSignal(float)
         audio_unavailable = pyqtSignal()
@@ -98,7 +106,24 @@ def main() -> int:
 
     bridge = Bridge()
     overlay = OverlayWindow()
+    board = BoardWindow()
     overlay.show()
+
+    def request_board_snapshot():
+        completed = threading.Event()
+        result = {}
+        bridge.board_snapshot.emit((completed, result))
+        if not completed.wait(5):
+            raise TimeoutError("Board capture timed out")
+        return result.get("snapshot")
+
+    def execute_board_tool(name, args):
+        completed = threading.Event()
+        result = {}
+        bridge.board_tool.emit((name, args, completed, result))
+        if not completed.wait(15):
+            return '{"ok":false,"error":"board tool timed out"}'
+        return result.get("output", '{"ok":false,"error":"board tool failed"}')
 
     def set_capture_overlay_visibility(visible: bool, *, clear: bool = False) -> None:
         if clear:
@@ -119,23 +144,20 @@ def main() -> int:
 
     def capture_after_action():
         ready = threading.Event()
-        bridge.capture_overlay.emit((False, False, ready))
-        if not ready.wait(5):
-            raise TimeoutError("Overlay capture hide timed out")
+        hide_overlay = _should_hide_overlay_for_capture(overlay.capture_excluded)
+        if hide_overlay:
+            bridge.capture_overlay.emit((False, False, ready))
+            if not ready.wait(5):
+                raise TimeoutError("Overlay capture hide timed out")
         try:
-            capture = capture_screen(settings.max_image_width)
-            collection = collect_elements_detailed(capture)
-            context = serialize_context(
-                collection.elements,
-                capture.image_width,
-                capture.image_height,
-            )
-            return capture, collection.elements, context
+            snapshot = request_board_snapshot()
+            return collect_capture(time.monotonic(), snapshot)
         finally:
-            restored = threading.Event()
-            bridge.capture_overlay.emit((True, False, restored))
-            if not restored.wait(5):
-                logger.warning("Overlay capture restore timed out")
+            if hide_overlay:
+                restored = threading.Event()
+                bridge.capture_overlay.emit((True, False, restored))
+                if not restored.wait(5):
+                    logger.warning("Overlay capture restore timed out")
 
     def request_action_confirmation(text, point, timeout) -> bool:
         import uuid
@@ -158,6 +180,7 @@ def main() -> int:
         prompt,
         require_confirmation=settings.require_confirmation,
         request_action_confirmation=request_action_confirmation,
+        on_board_tool=execute_board_tool,
         capture_after_action=capture_after_action,
         on_marks_visible=set_action_marks_visible,
     )
@@ -211,16 +234,27 @@ def main() -> int:
     typed_hotkey = required | {"enter"}
     capture_executor = ThreadPoolExecutor(max_workers=1, thread_name_prefix="gerald-capture")
     partial_capture_lock = threading.Lock()
-    partial_capture: dict[str, object] = {"capture": None, "elements": []}
+    partial_capture: dict[str, object] = {"capture": None, "elements": [], "board_mode": False}
 
-    def collect_capture(started_at: float | None):
-        capture = capture_screen(settings.max_image_width)
+    def collect_capture(started_at: float | None, board_snapshot=None):
+        if board_snapshot is None:
+            capture = capture_screen(settings.max_image_width)
+            board_rects = []
+        else:
+            capture, board_rects = board_snapshot
         with partial_capture_lock:
-            partial_capture.update(capture=capture, elements=[])
+            partial_capture.update(capture=capture, elements=[], board_mode=board_snapshot is not None)
+
+        def include_ink(elements):
+            result = list(elements)
+            next_id = max((element.id for element in result), default=-1) + 1
+            for index, rect in enumerate(board_rects):
+                result.append(Element(next_id + index, "ink", f"ink {index + 1}", rect, "board"))
+            return result
 
         def publish_elements(elements) -> None:
             with partial_capture_lock:
-                partial_capture["elements"] = list(elements)
+                partial_capture["elements"] = include_ink(elements)
 
         collection = collect_elements_detailed(
             capture,
@@ -228,18 +262,21 @@ def main() -> int:
             started_at=started_at,
             on_update=publish_elements,
         )
-        publish_elements(collection.elements)
+        elements = include_ink(collection.elements)
+        publish_elements(elements)
         if not collection.complete:
             logger.warning(
                 "OCR collection incomplete; using %d collected screen elements",
-                len(collection.elements),
+                len(elements),
             )
         context = serialize_context(
-            collection.elements,
+            elements,
             capture.image_width,
             capture.image_height,
         )
-        return capture, collection.elements, context
+        if board_snapshot is not None:
+            context = f"BOARD MODE\n{context}"
+        return capture, elements, context
 
     def on_microphone_audio(audio: bytes, level: float) -> None:
         bridge.mic_level.emit(level)
@@ -272,8 +309,18 @@ def main() -> int:
             previous_request.cancel()
         app_state["capture_generation"] += 1
         generation = app_state["capture_generation"]
-        set_capture_overlay_visibility(False, clear=True)
-        request = CaptureRequest(capture_executor, lambda: collect_capture(request.started_at))
+        board_snapshot = board.capture() if board.isVisible() else None
+        hide_overlay = _should_hide_overlay_for_capture(overlay.capture_excluded)
+        app_state["capture_overlay_hidden"] = hide_overlay
+        if hide_overlay:
+            set_capture_overlay_visibility(False, clear=True)
+        else:
+            overlay.clear()
+            app.processEvents()
+        request = CaptureRequest(
+            capture_executor,
+            lambda: collect_capture(request.started_at, board_snapshot),
+        )
         request.start_on_press()
         app_state["capture_request"] = request
         app_state["capture_generation_for_request"] = generation
@@ -295,6 +342,7 @@ def main() -> int:
                 with partial_capture_lock:
                     capture = partial_capture["capture"]
                     elements = list(partial_capture["elements"])
+                    board_mode = bool(partial_capture["board_mode"])
                 if capture is None:
                     bridge.capture_terminal_failed.emit(
                         (generation, "Capture d'écran indisponible après expiration du budget OCR.")
@@ -309,6 +357,8 @@ def main() -> int:
                     capture.image_width,
                     capture.image_height,
                 )
+                if board_mode:
+                    context = f"BOARD MODE\n{context}"
                 captured = capture, elements, context
             except Exception as error:
                 bridge.capture_terminal_failed.emit((generation, str(error)))
@@ -424,8 +474,29 @@ def main() -> int:
         overlay.close_text_input()
         schedule(client.send_recap())
 
+    def toggle_board() -> None:
+        if app_state["active"]:
+            mic.stop()
+            request = app_state.get("capture_request")
+            if request is not None:
+                request.cancel()
+            app_state["capture_generation"] += 1
+            app_state.update(active=False, released=False, capture=None, capture_request=None)
+            schedule(client.cancel())
+        if board.isVisible():
+            board.close()
+            return
+        from PyQt6.QtGui import QCursor
+
+        screen = QApplication.screenAt(QCursor.pos()) or QApplication.primaryScreen()
+        if screen is not None:
+            board.open_on_screen(screen)
+
     def key_press(name: str) -> None:
         app_state["pressed"].add(name)
+        if name == "z" and "ctrl" in app_state["pressed"] and board.isVisible():
+            board.undo()
+            return
         if name == "esc":
             if overlay.dismiss_confirmation():
                 client.abort_actions()
@@ -436,6 +507,9 @@ def main() -> int:
                 overlay.clear()
                 return
             if not (app_state["active"] or app_state["response_active"] or app_state["recap_pending"]):
+                if board.isVisible():
+                    board.close()
+                    return
                 overlay.clear()
                 return
             mic.stop()
@@ -450,6 +524,9 @@ def main() -> int:
             overlay.clear()
             if not audio_capability["available"]:
                 overlay.set_status("error")
+            return
+        if {"ctrl", "shift", "b"} <= app_state["pressed"]:
+            toggle_board()
             return
         if (required | {"r"}) <= app_state["pressed"]:
             open_lesson_recap()
@@ -498,6 +575,29 @@ def main() -> int:
             overlay.expire_confirmation(token)
 
         @pyqtSlot(object)
+        def board_tool(self, request) -> None:
+            name, args, completed, result = request
+            result["output"] = (
+                board.execute_tool(name, args)
+                if board.isVisible()
+                else '{"ok":false,"error":"Board mode is not active"}'
+            )
+            completed.set()
+
+        @pyqtSlot(object)
+        def board_snapshot(self, request) -> None:
+            completed, result = request
+            result["snapshot"] = board.capture() if board.isVisible() else None
+            completed.set()
+
+        @pyqtSlot(list)
+        def commands(self, commands) -> None:
+            if board.isVisible():
+                board.add_commands(commands)
+            else:
+                overlay.add_commands(commands)
+
+        @pyqtSlot(object)
         def action_marks_visible(self, request) -> None:
             overlay.set_marks_visible(request[0])
             request[1].set()
@@ -511,6 +611,9 @@ def main() -> int:
     bridge.capture_overlay.connect(ui_request_slots.capture_overlay)
     bridge.action_confirmation.connect(ui_request_slots.action_confirmation)
     bridge.confirmation_expired.connect(ui_request_slots.confirmation_expired)
+    bridge.board_tool.connect(ui_request_slots.board_tool)
+    bridge.board_snapshot.connect(ui_request_slots.board_snapshot)
+    bridge.commands.connect(ui_request_slots.commands)
     bridge.action_marks_visible.connect(ui_request_slots.action_marks_visible)
     bridge.capture_terminal_failed.connect(ui_request_slots.terminal_capture_failed)
     bridge.capture_failed.connect(
@@ -521,7 +624,6 @@ def main() -> int:
             QMessageBox.warning(None, "Gerald", message),
         )
     )
-    bridge.commands.connect(overlay.add_commands)
     bridge.mic_level.connect(
         lambda level: overlay.set_status(
             "listening" if audio_capability["available"] else "error",
@@ -569,6 +671,8 @@ def main() -> int:
     text_action.triggered.connect(open_typed_question)
     recap_action = menu.addAction("Récap de la leçon")
     recap_action.triggered.connect(open_lesson_recap)
+    board_action = menu.addAction("Tableau")
+    board_action.triggered.connect(toggle_board)
     menu.addSeparator()
     quit_action = menu.addAction("Quitter Gerald")
     quit_action.triggered.connect(app.quit)
@@ -594,6 +698,7 @@ def main() -> int:
         listener.stop()
         mic.stop()
         capture_executor.shutdown(wait=False, cancel_futures=True)
+        board.close()
         overlay.close()
         try:
             asyncio.run_coroutine_threadsafe(client.close(), loop).result(timeout=2)

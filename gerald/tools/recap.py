@@ -6,11 +6,18 @@ from pathlib import Path
 import subprocess
 import sys
 from datetime import datetime
+from PIL import Image
 
 logger = logging.getLogger(__name__)
 
 
-def save_recap(markdown: str, home: Path | None = None, *, open_file: bool = True) -> Path:
+def save_recap(
+    markdown: str,
+    home: Path | None = None,
+    *,
+    open_file: bool = True,
+    board_image: Image.Image | None = None,
+) -> Path:
     if not isinstance(markdown, str) or not markdown.strip():
         raise ValueError("markdown must be a non-empty string")
     lessons = (home or Path.home()) / "Gerald" / "lessons"
@@ -38,4 +45,14 @@ def save_recap(markdown: str, home: Path | None = None, *, open_file: bool = Tru
                 )
         except OSError:
             logger.warning("Could not open lesson recap %s", path, exc_info=True)
+    if board_image is not None:
+        suffix = 1
+        while True:
+            image_path = lessons / f"board{'' if suffix == 1 else f'-{suffix}'}.png"
+            try:
+                with image_path.open("xb") as image_file:
+                    board_image.save(image_file, format="PNG")
+                break
+            except FileExistsError:
+                suffix += 1
     return path

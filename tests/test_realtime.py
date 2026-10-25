@@ -82,6 +82,23 @@ def test_push_to_talk_sends_audio_commit_image_and_response_in_order():
     asyncio.run(scenario())
 
 
+def test_non_board_turn_clears_previous_board_recap_image():
+    async def scenario():
+        client, capture = make_client()
+
+        async def record_send(_event):
+            return None
+
+        client._send = record_send
+        await client.finish_turn(capture, client.elements, "BOARD MODE", has_audio=False)
+        assert client.last_board_image is capture.full_image
+
+        await client.finish_turn(capture, client.elements, "screen context", has_audio=False)
+        assert client.last_board_image is None
+
+    asyncio.run(scenario())
+
+
 def test_function_round_trip_sends_one_followup_after_output():
     async def scenario():
         received = asyncio.Queue()

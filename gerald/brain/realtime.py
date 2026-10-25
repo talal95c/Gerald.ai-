@@ -18,7 +18,7 @@ from gerald.audio.player import AudioPlayer
 from gerald.capture.screen import Capture
 from gerald.perception.elements import Element
 from gerald.tools.recap import save_recap
-from gerald.tools.registry import TOOL_SCHEMAS, execute_tool
+from gerald.tools.registry import BOARD_TOOL_NAMES, TOOL_SCHEMAS, execute_tool
 
 logger = logging.getLogger(__name__)
 REALTIME_URL = "wss://api.openai.com/v1/realtime"
@@ -43,6 +43,7 @@ class RealtimeClient:
             [str, tuple[int, int, int, int] | None, float], bool
         ]
         | None = None,
+        on_board_tool: Callable[[str, dict[str, Any]], str] | None = None,
     ) -> None:
         self.api_key = api_key
         self.model = model
@@ -52,6 +53,9 @@ class RealtimeClient:
         self.on_event = on_event or (lambda event: None)
         self.on_commands = on_commands or (lambda commands: None)
         self.on_marks_visible = on_marks_visible or (lambda _visible: None)
+        self.on_board_tool = on_board_tool or (
+            lambda name, _args: json.dumps({"ok": False, "error": f"board is unavailable for {name}"})
+        )
         self.input_actions = input_actions or InputActions(
             require_confirmation=require_confirmation,
             request_confirmation=request_action_confirmation,
@@ -69,6 +73,7 @@ class RealtimeClient:
         self._turn_started_at: float | None = None
         self._closed = False
         self._response_active = False
+        self.last_board_image = None
 
     @property
     def session_url(self) -> str:
@@ -186,6 +191,7 @@ class RealtimeClient:
     ) -> None:
         self.capture = capture
         self.image_array = np.asarray(capture.full_image or capture.image)
+        self.last_board_image = capture.full_image if "BOARD MODE" in context else None
         self.elements = elements
         if has_audio:
             await self._send({"type": "input_audio_buffer.commit"})
@@ -311,10 +317,18 @@ class RealtimeClient:
             elif name == "save_recap":
                 path = await asyncio.get_running_loop().run_in_executor(
                     None,
-                    save_recap,
-                    args.get("markdown", ""),
+                    partial(
+                        save_recap,
+                        args.get("markdown", ""),
+                        board_image=self.last_board_image,
+                    ),
                 )
                 output = json.dumps({"ok": True, "path": str(path)})
+            elif name in BOARD_TOOL_NAMES:
+                output = await asyncio.get_running_loop().run_in_executor(
+                    None,
+                    partial(self.on_board_tool, name, args),
+                )
             else:
                 commands, output = execute_tool(
                     name,
@@ -391,6 +405,7 @@ class RealtimeClient:
             self.capture = capture
             self.image_array = np.asarray(capture.full_image or capture.image)
             self.elements = elements
+            self.last_board_image = capture.full_image if "BOARD MODE" in context else None
             await self._send(
                 {
                     "type": "conversation.item.create",
