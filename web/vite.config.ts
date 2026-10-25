@@ -13,7 +13,9 @@ export default defineConfig({
     rollupOptions: {
       input: {
         main: resolve(root, "index.html"),
-        td: resolve(root, "td.html")
+        td: resolve(root, "td.html"),
+        board: resolve(root, "board.html"),
+        fiche: resolve(root, "fiche.html")
       },
       output: {
         assetFileNames: assetInfo =>

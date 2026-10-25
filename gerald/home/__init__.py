@@ -66,5 +66,6 @@ def open_home(
     window = NotchWindow(bridge)
     _remember(window)
     _td_window = TdWindow(bridge)
+    bridge.tdRequested.connect(_td_window.show_td)
     _td_window.show_td()
     return _open(window)

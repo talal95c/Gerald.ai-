@@ -343,6 +343,14 @@ class Store:
             ).fetchone()
         return self._document(row)
 
+    def document_text(self, document_id: int) -> str:
+        with self._lock:
+            rows = self.connection.execute(
+                "SELECT text FROM chunks WHERE document_id = ? ORDER BY ord",
+                (document_id,),
+            ).fetchall()
+        return "\n\n".join(row["text"] for row in rows)
+
     def _finish_document(
         self,
         document_id: int,
