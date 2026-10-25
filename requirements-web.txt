@@ -1,0 +1,3 @@
+# Web demo server only (scripts/web_voice_board.py); the desktop app uses pyproject.toml.
+numpy>=1.26
+Pillow>=10.0

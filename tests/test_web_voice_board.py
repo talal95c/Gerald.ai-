@@ -451,3 +451,55 @@ def test_public_https_origin_is_allowed_and_unknown_host_is_rejected(
     )
     assert status == 403
     assert json.loads(body)["error"] == "origin or host not allowed"
+
+
+def test_session_limiter_caps_per_client_and_per_day():
+    now = [0.0]
+    limiter = web_voice_board.SessionLimiter(per_client_hour=2, per_day=3, clock=lambda: now[0])
+    assert limiter.allow("a") and limiter.allow("a")
+    assert not limiter.allow("a")
+    assert limiter.allow("b")
+    assert not limiter.allow("c")
+    now[0] = 3_600.0
+    assert not limiter.allow("a")
+    now[0] = 86_400.0
+    assert limiter.allow("a")
+
+
+def test_session_returns_429_when_limit_reached(monkeypatch):
+    monkeypatch.setenv("OPENAI_API_KEY", "test-key")
+    calls = []
+
+    def fake_urlopen(request, timeout):
+        calls.append(request)
+        return _StubResponse(b"v=0\r\nanswer\r\n")
+
+    monkeypatch.setattr(web_voice_board, "urlopen", fake_urlopen)
+    instance = web_voice_board.WebVoiceHTTPServer(
+        ("127.0.0.1", 0),
+        web_voice_board.WebVoiceHandler,
+        host="127.0.0.1",
+        limiter=web_voice_board.SessionLimiter(per_client_hour=1),
+    )
+    thread = threading.Thread(target=instance.serve_forever, daemon=True)
+    thread.start()
+    try:
+        headers = {
+            "Host": f"127.0.0.1:{instance.server_port}",
+            "Content-Type": "application/sdp",
+        }
+        first = _request(instance, "POST", "/api/session", b"v=0\r\noffer\r\n", headers)
+        second = _request(instance, "POST", "/api/session", b"v=0\r\noffer\r\n", headers)
+    finally:
+        instance.shutdown()
+        instance.server_close()
+        thread.join(timeout=2)
+    assert first[0] == 201
+    assert second[0] == 429
+    assert len(calls) == 1
+
+
+def test_healthz_skips_host_check(server):
+    status, body, _ = _request(server, "GET", "/healthz", headers={"Host": "10.0.0.5:10000"})
+    assert status == 200
+    assert json.loads(body) == {"ok": True}

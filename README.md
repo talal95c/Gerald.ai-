@@ -76,3 +76,10 @@ Captures : [accueil](docs/notch-greeting.png), [encoche réduite](docs/notch-col
    Grounder… (menu de Gerald), et définissez `GERALD_GROUNDER=moondream-cloud` dans `.env`.
 4. Gardez la session Colab ouverte tant que vous utilisez le tunnel; l'URL quick tunnel
    est temporaire et ne nécessite pas de compte Cloudflare.
+## Démo web en ligne (Render)
+
+`render.yaml` déploie la démo web (`scripts/web_voice_board.py` : landing, faux bureau,
+TD, tableau, Photoshop) comme un service Python gratuit. Dans Render : New > Blueprint,
+choisissez ce dépôt, puis saisissez `OPENAI_API_KEY` ; la clé reste côté serveur.
+`GERALD_MAX_SESSIONS_PER_CLIENT_HOUR` (10) et `GERALD_MAX_SESSIONS_PER_DAY` (60) limitent
+les sessions vocales pour protéger le crédit OpenAI (0 = sans limite).

@@ -1,0 +1,19 @@
+services:
+  - type: web
+    name: gerald
+    runtime: python
+    plan: free
+    buildCommand: pip install -U pip && pip install -r requirements-web.txt
+    startCommand: PYTHONPATH=. python scripts/web_voice_board.py --host 0.0.0.0
+    healthCheckPath: /healthz
+    envVars:
+      - key: PYTHON_VERSION
+        value: 3.11.9
+      - key: GERALD_MODEL
+        value: gpt-realtime-2
+      - key: GERALD_MAX_SESSIONS_PER_CLIENT_HOUR
+        value: "10"
+      - key: GERALD_MAX_SESSIONS_PER_DAY
+        value: "60"
+      - key: OPENAI_API_KEY
+        sync: false
