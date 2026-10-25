@@ -4,7 +4,7 @@ from types import SimpleNamespace
 
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
-from PyQt6.QtCore import QRect, Qt
+from PyQt6.QtCore import QPoint, QPointF, QRect, Qt
 from PyQt6.QtGui import QColor
 from PyQt6.QtTest import QTest
 from PyQt6.QtWidgets import QApplication, QPushButton
@@ -291,6 +291,162 @@ def test_tablet_stroke_retains_pen_pressure():
     board.tabletEvent(Event(Event.Type.TabletMove, QPointF(35, 45), 0.4))
 
     assert board.user_strokes == [[(30.0, 40.0, 0.7), (35.0, 45.0, 0.4)]]
+    board.close()
+    app.processEvents()
+
+
+def _add_plot_for_window_test(board):
+    args = {
+        "functions": [{"expr": "x**2-5*x+6", "label": "f(x)"}],
+        "x_min": -1,
+        "x_max": 6,
+        "x": 100,
+        "y": 100,
+        "w": 420,
+        "h": 300,
+    }
+    assert json.loads(board.execute_tool("plot", args))["ok"]
+    return board._gerald[-1]
+
+
+def test_plot_window_title_bar_moves_box_without_ink_or_restarting_reveal():
+    app = QApplication.instance() or QApplication([])
+    board = BoardWindow()
+    board.resize(800, 600)
+    item = _add_plot_for_window_test(board)
+    item["created"] -= 1
+    created = item["created"]
+    board.show()
+    app.processEvents()
+
+    QTest.mousePress(board, Qt.MouseButton.LeftButton, pos=QPoint(150, 114))
+    QTest.mouseMove(board, QPoint(180, 134))
+    app.processEvents()
+    assert board.cursor().shape() == Qt.CursorShape.SizeAllCursor
+    QTest.mouseRelease(board, Qt.MouseButton.LeftButton, pos=QPoint(180, 134))
+    app.processEvents()
+
+    assert item["plot"].box == (130.0, 120.0, 420.0, 300.0)
+    assert item["created"] == created
+    assert board.user_strokes == []
+    board.close()
+    app.processEvents()
+
+
+def test_plot_window_grip_resizes_and_respects_minimum_and_board_bounds():
+    app = QApplication.instance() or QApplication([])
+    board = BoardWindow()
+    board.resize(800, 600)
+    item = _add_plot_for_window_test(board)
+    board.show()
+    app.processEvents()
+
+    QTest.mousePress(board, Qt.MouseButton.LeftButton, pos=QPoint(506, 386))
+    QTest.mouseMove(board, QPoint(120, 120))
+    app.processEvents()
+    assert board.cursor().shape() == Qt.CursorShape.SizeFDiagCursor
+    QTest.mouseRelease(board, Qt.MouseButton.LeftButton, pos=QPoint(120, 120))
+    app.processEvents()
+
+    x, y, width, height = item["plot"].box
+    assert width == 260
+    assert height == 180
+    assert x >= 0 and y >= 0
+    assert x + width <= 800
+    assert y + height <= 600
+    assert board.user_strokes == []
+    board.close()
+    app.processEvents()
+
+
+def test_plot_window_close_button_removes_plot():
+    app = QApplication.instance() or QApplication([])
+    board = BoardWindow()
+    board.resize(800, 600)
+    _add_plot_for_window_test(board)
+    board.show()
+    app.processEvents()
+
+    QTest.mouseClick(
+        board,
+        Qt.MouseButton.LeftButton,
+        pos=QPoint(506, 114),
+    )
+    app.processEvents()
+
+    assert board._gerald == []
+    assert board.user_strokes == []
+    board.close()
+    app.processEvents()
+
+
+def test_plot_window_chrome_intercepts_mouse_strokes_but_body_accepts_them():
+    app = QApplication.instance() or QApplication([])
+    board = BoardWindow()
+    board.resize(800, 600)
+    _add_plot_for_window_test(board)
+    board.show()
+    app.processEvents()
+
+    QTest.mousePress(board, Qt.MouseButton.LeftButton, pos=QPoint(150, 114))
+    QTest.mouseMove(board, QPoint(170, 124))
+    QTest.mouseRelease(board, Qt.MouseButton.LeftButton, pos=QPoint(170, 124))
+    app.processEvents()
+    assert board.user_strokes == []
+
+    QTest.mousePress(board, Qt.MouseButton.LeftButton, pos=QPoint(220, 220))
+    QTest.mouseMove(board, QPoint(240, 240))
+    QTest.mouseRelease(board, Qt.MouseButton.LeftButton, pos=QPoint(240, 240))
+    app.processEvents()
+
+    assert len(board.user_strokes) == 1
+    assert len(board.user_strokes[0]) >= 1
+    board.close()
+    app.processEvents()
+
+
+def test_plot_window_tablet_chrome_intercepts_pen_and_body_keeps_pressure():
+    class Event:
+        class Type:
+            TabletPress = 1
+            TabletMove = 2
+            TabletRelease = 3
+
+        def __init__(self, event_type, x, y, pressure=0.7):
+            self._type = event_type
+            self._position = QPointF(x, y)
+            self._pressure = pressure
+
+        def type(self):
+            return self._type
+
+        def position(self):
+            return self._position
+
+        def pressure(self):
+            return self._pressure
+
+        def accept(self):
+            pass
+
+    app = QApplication.instance() or QApplication([])
+    board = BoardWindow()
+    board.resize(800, 600)
+    item = _add_plot_for_window_test(board)
+
+    board.tabletEvent(Event(Event.Type.TabletPress, 150, 114))
+    board.tabletEvent(Event(Event.Type.TabletMove, 170, 124))
+    board.tabletEvent(Event(Event.Type.TabletRelease, 170, 124))
+
+    assert item["plot"].box == (120.0, 110.0, 420.0, 300.0)
+    assert board.user_strokes == []
+
+    board.tabletEvent(Event(Event.Type.TabletPress, 220, 220, 0.8))
+    board.tabletEvent(Event(Event.Type.TabletMove, 230, 230, 0.4))
+    board.tabletEvent(Event(Event.Type.TabletRelease, 230, 230, 0.4))
+
+    assert len(board.user_strokes) == 1
+    assert board.user_strokes[0] == [(220.0, 220.0, 0.8), (230.0, 230.0, 0.4)]
     board.close()
     app.processEvents()
 
