@@ -122,6 +122,7 @@ class BoardWindow(QWidget):
     def set_exercise(self, title: str, lines: list[str]) -> None:
         self._exercise_title = title
         self._exercise_lines = list(lines)
+        self._position_toolbar()
         self.update()
 
     def open_on_screen(self, screen, dark: bool | None = None) -> None:
@@ -148,6 +149,11 @@ class BoardWindow(QWidget):
             return
         self._toolbar.adjustSize()
         x = max(0, (self.width() - self._toolbar.width()) // 2)
+        if self._exercise_title:
+            card_width = min(420, max(280, self.width() - 32))
+            card_left = self.width() - card_width - 24
+            if x + self._toolbar.width() > card_left - 12:
+                x = max(0, card_left - self._toolbar.width() - 12)
         y = min(20, max(0, self.height() - self._toolbar.height()))
         self._toolbar.move(x, y)
         self._toolbar.show()
