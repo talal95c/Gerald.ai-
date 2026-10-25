@@ -1,8 +1,16 @@
+from types import SimpleNamespace
+
 from PIL import Image
 
-from gerald.app import _finalize_board_collection, _include_board_ink
+from gerald.app import _finalize_board_collection, _include_board_ink, _key_name
 from gerald.capture.screen import MonitorRect, capture_from_image
 from gerald.perception.grounding import ScreenRect, resolve_target
+
+
+def test_key_name_maps_windows_control_character_and_virtual_key_codes():
+    assert _key_name(SimpleNamespace(char="\x02", vk=66)) == "b"
+    assert _key_name(SimpleNamespace(char=None, vk=48)) == "0"
+    assert _key_name(SimpleNamespace(char="\x03", vk=None)) == "c"
 
 
 def test_board_ink_rect_maps_from_screen_to_image_and_back():

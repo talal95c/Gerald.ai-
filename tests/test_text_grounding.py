@@ -1,3 +1,4 @@
+import asyncio
 import json
 import sys
 import threading
@@ -16,6 +17,8 @@ from gerald.perception.elements import (
     _map_windows_ocr_box,
     _split_ocr_words,
     _tile_bounds,
+    _run_windows_ocr_passes,
+    _windows_inverted_strips,
     _windows_ocr_scale,
     collect_elements,
     collect_elements_detailed,
@@ -46,6 +49,55 @@ def test_text_grounding_accepts_typographical_errors():
     elements = [Element(2, "Button", "Settings", (20, 10, 40, 20), "uia")]
 
     assert resolve_target({"text": "Settngs"}, capture, elements) == ScreenRect(-920, 80, 160, 80)
+
+
+def test_hn_long_navigation_label_uses_ocr_word_rect_before_container():
+    capture = make_capture()
+    bar = Element(1, "DataItem", "login submit past comments ask", (0, 10, 100, 10), "uia")
+    navigation = Element(
+        2,
+        "text",
+        "login submit past",
+        (0, 10, 60, 10),
+        "ocr",
+        (
+            ("login", (0, 10, 20, 10)),
+            ("submit", (22, 10, 25, 10)),
+            ("past", (50, 10, 18, 10)),
+        ),
+    )
+
+    result = resolve_target({"text": "login"}, capture, [bar, navigation])
+
+    assert result == ScreenRect(-1000, 80, 80, 40)
+
+
+def test_hn_long_navigation_label_falls_through_to_configured_grounder(monkeypatch):
+    capture = make_capture()
+    bar = Element(1, "DataItem", "login submit past comments ask", (0, 10, 100, 10), "uia")
+    monkeypatch.setattr("gerald.perception.grounder.configured_grounder", lambda: object())
+    monkeypatch.setattr(
+        "gerald.perception.grounder.locate_with_timeout",
+        lambda *_args, **_kwargs: (80, 50),
+    )
+
+    result = resolve_target(
+        {"text": "login", "description": "login link at top right"},
+        capture,
+        [bar],
+        with_details=True,
+    )
+
+    assert result.layer == "grounder"
+    assert result.rect.center[0] != -800
+
+
+def test_hn_long_navigation_label_keeps_weak_match_without_grounder(monkeypatch):
+    capture = make_capture()
+    bar = Element(1, "DataItem", "login submit past comments ask", (0, 10, 100, 10), "uia")
+    monkeypatch.setattr("gerald.perception.grounder.configured_grounder", lambda: None)
+
+    assert resolve_target({"text": "login"}, capture, [bar]) == ScreenRect(-1000, 80, 400, 40)
 
 
 def test_text_ambiguity_uses_nearest_coordinate():
@@ -288,6 +340,27 @@ def test_full_window_uia_container_does_not_suppress_ocr_search_label():
     assert any(element.name == "Search" and element.source == "ocr" for element in collection)
 
 
+def test_empty_edit_container_keeps_ocr_but_named_button_dedupes_it():
+    capture = make_capture()
+
+    class Provider:
+        def __init__(self, elements):
+            self.elements = elements
+
+        def get_elements(self, _capture):
+            return self.elements
+
+    editor = Element(0, "EditControl", "", (-1000, 40, 400, 200), "uia")
+    editor_ocr = Element(0, "text", "print", (-950, 60, 40, 18), "ocr")
+    editor_result = collect_elements(capture, Provider([editor]), Provider([editor_ocr]))
+    assert any(element.name == "print" for element in editor_result)
+
+    button = Element(0, "ButtonControl", "Save", (-950, 60, 60, 18), "uia")
+    button_ocr = Element(0, "text", "Save", (-950, 60, 60, 18), "ocr")
+    button_result = collect_elements(capture, Provider([button]), Provider([button_ocr]))
+    assert not any(element.source == "ocr" and element.name == "Save" for element in button_result)
+
+
 def test_ocr_budget_returns_completed_tiles_as_partial_results(monkeypatch):
     capture = capture_from_image(
         Image.new("RGB", (400, 200), "white"),
@@ -319,9 +392,15 @@ def test_ocr_budget_returns_completed_tiles_as_partial_results(monkeypatch):
 
     monkeypatch.setattr(elements_module, "_tesseract_languages", lambda: "eng")
     updates = []
+
+    class EmptyUIA:
+        def get_elements(self, _capture):
+            return []
+
     try:
         result = collect_elements_detailed(
             capture,
+            uia_provider=EmptyUIA(),
             ocr_provider=OCRProvider(upscale=True, backend="tesseract"),
             budget=0.05,
             on_update=lambda elements: updates.append(elements),
@@ -404,6 +483,52 @@ def test_windows_ocr_scale_respects_engine_dimension_limit():
         max_image_dimension = 3000
 
     assert _windows_ocr_scale(1920, _tile_bounds(1080), FakeEngine()) == 1
+
+
+def test_windows_ocr_scale_reads_class_dimension_limit():
+    class FakeEngine:
+        max_image_dimension = 3000
+
+    assert _windows_ocr_scale(1920, _tile_bounds(1080), FakeEngine(), FakeEngine) == 1
+
+
+def test_windows_ocr_passes_use_one_engine_sequentially():
+    class FakeEngine:
+        active = 0
+        calls = 0
+
+        async def recognize_async(self, value):
+            self.active += 1
+            if self.active > 1:
+                raise OSError(22, "Another RecognizeAsync operation is already running!")
+            await asyncio.sleep(0)
+            self.calls += 1
+            self.active -= 1
+            return [value]
+
+    engine = FakeEngine()
+
+    async def invoke(value):
+        return await engine.recognize_async(value)
+
+    results = asyncio.run(
+        _run_windows_ocr_passes([lambda value=value: invoke(value) for value in range(4)])
+    )
+    assert results == [[0], [1], [2], [3]]
+    assert engine.calls == 4
+
+
+def test_windows_inverted_passes_are_per_strip_and_bounded():
+    image = Image.new("RGB", (240, 480), "white")
+    draw = ImageDraw.Draw(image)
+    draw.rectangle((0, 12, 239, 58), fill="#ff8c00")
+    draw.rectangle((0, 240, 239, 287), fill="#222222")
+
+    strips = _windows_inverted_strips(image, [(0, 120), (120, 240), (240, 360), (360, 480)])
+
+    assert len(strips) <= 6
+    assert any(top < 60 for _band, top, _bottom in strips)
+    assert any(240 <= top < 300 for _band, top, _bottom in strips)
 
 
 def test_windows_ocr_boxes_map_back_using_actual_scale():

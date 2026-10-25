@@ -64,9 +64,9 @@ def _text_score(query: str, candidate: str) -> tuple[int, float] | None:
     return None
 
 
-def _matched_word_rect(element: Element, query: str) -> tuple[int, int, int, int]:
+def _matched_word_rect(element: Element, query: str) -> tuple[int, int, int, int] | None:
     if element.source != "ocr" or not element.word_boxes:
-        return element.rect
+        return None
     query_tokens = _normalize_text(query).split()
     flattened: list[tuple[str, int]] = []
     for index, (word, _rect) in enumerate(element.word_boxes):
@@ -87,7 +87,7 @@ def _matched_word_rect(element: Element, query: str) -> tuple[int, int, int, int
             ):
                 selected.add(index)
     if not selected:
-        return element.rect
+        return None
     rectangles = [element.word_boxes[index][1] for index in selected]
     left = min(rect[0] for rect in rectangles)
     top = min(rect[1] for rect in rectangles)
@@ -302,49 +302,67 @@ def resolve_target(
         raise ValueError("description must be a string")
     target_text = args.get("text")
     query = None if force_coordinates else args.get("text")
+    weak_text_matches = []
     if query is not None:
         if not isinstance(query, str):
             raise ValueError("text must be a string")
         matches = []
+        normalized_query = _normalize_text(query)
         for element in elements:
             score = _text_score(query, element.name)
-            if score is not None:
-                matches.append((element, score))
-        if matches:
-            has_point = "x" in args and "y" in args
-            if has_point:
-                x, y = args["x"], args["y"]
-                if (
-                    not isinstance(x, (int, float))
-                    or isinstance(x, bool)
-                    or not isinstance(y, (int, float))
-                    or isinstance(y, bool)
-                ):
-                    raise ValueError("x and y must be numbers")
-                image_x, image_y = float(x), float(y)
-
-                def point_sort(match):
-                    element, score = match
-                    ex, ey, ew, eh = element.rect
-                    distance = hypot(image_x - (ex + ew / 2), image_y - (ey + eh / 2))
-                    area = ew * eh
-                    return distance, -score[0], -score[1], area, element.id
-
-                element, _score = min(matches, key=point_sort)
+            word_rect = _matched_word_rect(element, query)
+            if score is None and word_rect is None:
+                continue
+            score = score or (3, 1.0)
+            normalized_name = _normalize_text(element.name)
+            if normalized_name == normalized_query:
+                rank = 4
+            elif word_rect is not None:
+                rank = 3
+            elif score[0] >= 3:
+                estimated_width = max(1, len(normalized_query) * 8)
+                is_long = len(normalized_name.split()) > 3 or element.rect[2] > 3 * estimated_width
+                rank = 1 if is_long else 2
             else:
-                element, _score = min(
-                    matches,
-                    key=lambda match: (
-                        -match[1][0],
-                        -match[1][1],
-                        match[0].rect[2] * match[0].rect[3],
-                        match[0].id,
-                    ),
-                )
-            rect = element.rect
-            if _normalize_text(element.name) != _normalize_text(query):
-                rect = _matched_word_rect(element, query)
-            return resolved(_screen_rect(capture, rect), _element_layer(element))
+                rank = 2
+            matches.append((element, score, rank, word_rect or element.rect))
+        if matches:
+            best_rank = max(match[2] for match in matches)
+            matches = [match for match in matches if match[2] == best_rank]
+            if best_rank == 1:
+                weak_text_matches = matches
+            else:
+                has_point = "x" in args and "y" in args
+                if has_point:
+                    x, y = args["x"], args["y"]
+                    if (
+                        not isinstance(x, (int, float))
+                        or isinstance(x, bool)
+                        or not isinstance(y, (int, float))
+                        or isinstance(y, bool)
+                    ):
+                        raise ValueError("x and y must be numbers")
+                    image_x, image_y = float(x), float(y)
+
+                    def point_sort(match):
+                        element, score, _rank, _rect = match
+                        ex, ey, ew, eh = element.rect
+                        distance = hypot(image_x - (ex + ew / 2), image_y - (ey + eh / 2))
+                        area = ew * eh
+                        return distance, -score[0], -score[1], area, element.id
+
+                    element, _score, _rank, rect = min(matches, key=point_sort)
+                else:
+                    element, _score, _rank, rect = min(
+                        matches,
+                        key=lambda match: (
+                            -match[1][0],
+                            -match[1][1],
+                            match[0].rect[2] * match[0].rect[3],
+                            match[0].id,
+                        ),
+                    )
+                return resolved(_screen_rect(capture, rect), _element_layer(element))
 
     grounder_query = description or (target_text if isinstance(target_text, str) else "")
     if ("element_id" not in args or force_coordinates) and grounder_query:
@@ -363,6 +381,7 @@ def resolve_target(
                     for element in elements
                     if element.rect[0] <= image_x <= element.rect[0] + element.rect[2]
                     and element.rect[1] <= image_y <= element.rect[1] + element.rect[3]
+                    and all(element.id != weak[0].id for weak in weak_text_matches)
                 ]
                 if containing:
                     element = min(containing, key=lambda item: item.rect[2] * item.rect[3])
@@ -376,6 +395,18 @@ def resolve_target(
                     "grounder",
                     coordinate_note,
                 )
+
+    if weak_text_matches:
+        element, _score, _rank, rect = min(
+            weak_text_matches,
+            key=lambda match: (
+                -match[1][0],
+                -match[1][1],
+                match[0].rect[2] * match[0].rect[3],
+                match[0].id,
+            ),
+        )
+        return resolved(_screen_rect(capture, rect), _element_layer(element))
 
     if query is not None:
         if "x" not in args or "y" not in args:

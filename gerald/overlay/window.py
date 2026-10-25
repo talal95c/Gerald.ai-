@@ -250,7 +250,8 @@ def _screen_mappings() -> list[_ScreenMapping]:
         )
         for screen in QApplication.screens()
     ]
-    native = _native_windows_monitors() if os.name == "nt" else None
+    platform_name = QApplication.platformName().casefold()
+    native = _native_windows_monitors() if os.name == "nt" and platform_name != "offscreen" else None
     return _build_screen_mappings(screens, native)
 
 
@@ -335,13 +336,24 @@ class _ConfirmationPill(QWidget):
         layout = QHBoxLayout(self)
         layout.setContentsMargins(16, 10, 16, 10)
         layout.setSpacing(10)
-        self.label = QLabel(text, self)
+        self.setToolTip(text)
+        display_text = text
+        opening = text.find("«")
+        closing = text.rfind("»")
+        if opening >= 0 and closing > opening:
+            inner = text[opening + 1 : closing].strip()
+            if len(inner) > 120:
+                inner = f"{inner[:59]}…{inner[-60:]}"
+            display_text = f"{text[: opening + 1]}\u00a0{inner}\u00a0{text[closing:]}"
+        display_text = display_text.replace("« ", "«\u00a0").replace(" »", "\u00a0»")
+        self.label = QLabel(display_text, self)
+        self.label.setToolTip(text)
         label_font = QFont(owner._font_family, 13, QFont.Weight.Medium)
         self.label.setFont(label_font)
         self.label.setWordWrap(True)
         self.label.setStyleSheet("QLabel { background: transparent; color: #F5F5F7; }")
         self.label.setMaximumWidth(280)
-        words = text.split()
+        words = display_text.split(" ")
         metrics = QFontMetrics(label_font)
         lines = 1
         line = ""

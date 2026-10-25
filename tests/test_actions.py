@@ -251,6 +251,50 @@ def test_action_approval_is_once_per_session_and_repeats_for_new_turn():
     assert len(prompts) == 2
 
 
+def test_confirmation_cursor_movement_is_rebaselined_between_click_and_type():
+    mouse = FakeMouse()
+    prompt_count = 0
+
+    def approve(*_args):
+        nonlocal prompt_count
+        prompt_count += 1
+        mouse.position = (100 + prompt_count * 100, 100 + prompt_count * 100)
+        return True
+
+    actions = InputActions(
+        mouse_factory=lambda: mouse,
+        request_confirmation=approve,
+        click_delay=0,
+        delay_wait=lambda *_args: False,
+    )
+    capture, image = setup_capture()
+    session = actions.new_session()
+    click = actions.execute(
+        session,
+        "click",
+        {"x": 50, "y": 50, "confirmed": True},
+        capture,
+        [],
+        image,
+        lambda _commands: None,
+        lambda _visible: None,
+    )
+    typed = actions.execute(
+        session,
+        "type_text",
+        {"text": "hello", "confirmed": True},
+        capture,
+        [],
+        image,
+        lambda _commands: None,
+        lambda _visible: None,
+    )
+
+    assert json.loads(click)["ok"] is True
+    assert json.loads(typed)["ok"] is True
+    assert prompt_count == 2
+
+
 def test_decline_or_timeout_returns_user_declined_without_input():
     calls = []
     actions = InputActions(

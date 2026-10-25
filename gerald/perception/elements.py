@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 from collections import deque
+from collections.abc import Awaitable
 from concurrent.futures import FIRST_COMPLETED, ThreadPoolExecutor, wait
 from dataclasses import dataclass
 from functools import lru_cache
@@ -173,13 +174,24 @@ def _tile_bounds(image_height: int, tile_count: int = 4, overlap: int = 48) -> l
     ]
 
 
-def _windows_ocr_scale(source_width: int, bands: list[tuple[int, int]], engine) -> float:
-    try:
-        max_dimension = int(engine.max_image_dimension)
-        if max_dimension <= 0:
-            max_dimension = 4096
-    except Exception:
-        max_dimension = 4096
+def _windows_ocr_scale(
+    source_width: int,
+    bands: list[tuple[int, int]],
+    engine,
+    engine_type=None,
+) -> float:
+    max_dimension = 4096
+    owners = (engine_type, type(engine), engine)
+    for owner in owners:
+        if owner is None:
+            continue
+        try:
+            value = int(owner.max_image_dimension)
+        except Exception:
+            continue
+        if value > 0:
+            max_dimension = value
+            break
     max_band_height = max((bottom - top for top, bottom in bands), default=1)
     if source_width * 2 <= max_dimension and max_band_height * 2 <= max_dimension:
         return 2.0
@@ -201,6 +213,37 @@ def _map_windows_ocr_box(
         max(1, round(width / scale_x)),
         max(1, round(height / scale_y)),
     )
+
+
+def _windows_inverted_strips(
+    source: Image.Image,
+    bands: list[tuple[int, int]],
+    *,
+    strip_height: int = 48,
+    limit: int = 6,
+) -> list[tuple[int, int, int]]:
+    candidates = []
+    for band_index, (band_top, band_bottom) in enumerate(bands):
+        for strip_top in range(band_top, band_bottom, strip_height):
+            strip_bottom = min(band_bottom, strip_top + strip_height)
+            strip = source.crop((0, strip_top, source.width, strip_bottom))
+            luminance = ImageStat.Stat(strip.convert("L")).mean[0]
+            saturation = ImageStat.Stat(strip.convert("HSV")).mean[1]
+            if luminance < 140 or saturation > 48:
+                candidates.append(
+                    (max(255 - luminance, saturation), band_index, strip_top, strip_bottom)
+                )
+    selected = sorted(candidates, reverse=True)[:limit]
+    return [(band_index, top, bottom) for _score, band_index, top, bottom in selected]
+
+
+async def _run_windows_ocr_passes(
+    passes: list[Callable[[], Awaitable[list[OCRWord]]]],
+) -> list[list[OCRWord]]:
+    results = []
+    for run_pass in passes:
+        results.append(await run_pass())
+    return results
 
 
 class UIAProvider:
@@ -456,7 +499,7 @@ class OCRProvider:
             engine = OcrEngine.try_create_from_user_profile_languages()
             if engine is None:
                 return []
-            scale = _windows_ocr_scale(source.width, bands, engine)
+            scale = _windows_ocr_scale(source.width, bands, engine, OcrEngine)
             scaled_width = max(1, round(source.width * scale))
             scaled_height = max(1, round(source.height * scale))
             scale_x = scaled_width / source.width
@@ -512,35 +555,40 @@ class OCRProvider:
                         )
                 return found
 
-            async def recognize_band(
-                band_index: int,
-                source_top: int,
-                source_bottom: int,
-            ) -> list[OCRWord]:
+            failure_logged = False
+
+            def log_pass_failure() -> None:
+                nonlocal failure_logged
+                if not failure_logged:
+                    logger.warning("Windows OCR pass failed", exc_info=True)
+                    failure_logged = True
+
+            for band_index, (source_top, source_bottom) in enumerate(bands):
                 top = round(source_top * scale_y)
                 bottom = round(source_bottom * scale_y)
                 tile = image.crop((0, top, image.width, bottom))
-                luminance = ImageStat.Stat(tile.convert("L")).mean[0]
-                saturation = ImageStat.Stat(tile.convert("HSV")).mean[1]
-                passes = [recognize_pass(tile, source_top, band_index, False)]
-                if luminance < 140 or saturation > 48:
-                    passes.append(recognize_pass(tile, source_top, band_index, True))
-                completed = await asyncio.gather(*passes, return_exceptions=True)
-                found: list[OCRWord] = []
-                for result in completed:
-                    if isinstance(result, list):
-                        found.extend(result)
-                return found
-
-            tasks = [
-                asyncio.create_task(recognize_band(index, top, bottom))
-                for index, (top, bottom) in enumerate(bands)
-            ]
-            for task in asyncio.as_completed(tasks):
                 try:
-                    words.extend(await task)
+                    results = await _run_windows_ocr_passes(
+                        [lambda: recognize_pass(tile, source_top, band_index, False)]
+                    )
+                    words.extend(results[0])
                 except Exception:
-                    logger.debug("Windows OCR band failed", exc_info=True)
+                    log_pass_failure()
+                elements = _elements_from_ocr_words(_dedupe_ocr_words(words), capture)
+                if on_partial is not None:
+                    on_partial(elements)
+
+            for band_index, source_top, source_bottom in _windows_inverted_strips(source, bands):
+                top = round(source_top * scale_y)
+                bottom = round(source_bottom * scale_y)
+                tile = image.crop((0, top, image.width, bottom))
+                try:
+                    results = await _run_windows_ocr_passes(
+                        [lambda: recognize_pass(tile, source_top, band_index, True)]
+                    )
+                    words.extend(results[0])
+                except Exception:
+                    log_pass_failure()
                 elements = _elements_from_ocr_words(_dedupe_ocr_words(words), capture)
                 if on_partial is not None:
                     on_partial(elements)
@@ -583,44 +631,35 @@ def collect_elements_detailed(
     except Exception:
         logger.warning("UIA element collection failed", exc_info=True)
         uia = []
+
     def merge(ocr: list[Element]) -> list[Element]:
         result = list(uia[:150])
         for candidate in ocr:
             cx, cy, cw, ch = candidate.rect
-            candidate_area = max(1, cw * ch)
-            container_roles = {"window", "pane", "document", "group"}
-            interactive_roles = {
-                "button",
-                "checkbox",
-                "combobox",
-                "edit",
-                "hyperlink",
-                "listitem",
-                "menuitem",
-                "radiobutton",
-                "slider",
-                "spinner",
-                "tabitem",
-                "treeitem",
-            }
-            overlaps = False
-            for element in uia[:150]:
-                role = element.role.casefold().removesuffix("control")
-                if role in container_roles:
-                    continue
-                ex, ey, ew, eh = element.rect
-                ui_area = max(1, ew * eh)
-                comparable = ui_area <= 4 * candidate_area
-                interactive_leaf = role in interactive_roles
-                overlap = (
-                    max(0, min(cx + cw, ex + ew) - max(cx, ex))
-                    * max(0, min(cy + ch, ey + eh) - max(cy, ey))
-                    / candidate_area
+            enclosing = [
+                element
+                for element in uia[:150]
+                if element.rect[0] <= cx
+                and element.rect[1] <= cy
+                and element.rect[0] + element.rect[2] >= cx + cw
+                and element.rect[1] + element.rect[3] >= cy + ch
+            ]
+            smallest = min(
+                enclosing,
+                key=lambda element: element.rect[2] * element.rect[3],
+                default=None,
+            )
+            candidate_name = " ".join(
+                "".join(character if character.isalnum() else " " for character in candidate.name.casefold()).split()
+            )
+            smallest_name = (
+                " ".join(
+                    "".join(character if character.isalnum() else " " for character in smallest.name.casefold()).split()
                 )
-                if overlap > 0.5 and (comparable or interactive_leaf):
-                    overlaps = True
-                    break
-            if not overlaps:
+                if smallest is not None
+                else ""
+            )
+            if not candidate_name or f" {candidate_name} " not in f" {smallest_name} ":
                 result.append(candidate)
         final = []
         for index, element in enumerate(result[:300]):

@@ -125,6 +125,24 @@ def test_confirmation_pill_renders_and_declines_without_accepting_focus():
     app.processEvents()
 
 
+def test_confirmation_text_elides_display_only_and_keeps_guillemets_together():
+    app = QApplication.instance() or QApplication([])
+    overlay = OverlayWindow()
+    text = f"Gerald veut taper « {'a' * 140} »"
+    overlay.show_confirmation(text, (100, 100, 20, 20), threading.Event(), {"approved": False})
+    app.processEvents()
+
+    pill = overlay._confirmation
+    assert pill is not None
+    assert "…" in pill.label.text()
+    assert "«\u00a0" in pill.label.text()
+    assert "\u00a0»" in pill.label.text()
+    assert pill.toolTip() == text
+    assert pill.label.toolTip() == text
+    overlay.close()
+    app.processEvents()
+
+
 def test_confirmation_position_avoids_target_and_flips_above_when_needed():
     assert _confirmation_position((90, 90, 20, 20), (0, 0, 600, 400), (300, 68)) == (0, 122)
     assert _confirmation_position((190, 330, 20, 20), (0, 0, 400, 400), (300, 68)) == (50, 250)
@@ -146,6 +164,25 @@ def test_expired_confirmation_ignores_late_approval():
     assert result == {"approved": False, "expired": True}
     overlay.close()
     app.processEvents()
+
+
+def test_offscreen_screen_mappings_skip_native_monitor_pairing(monkeypatch):
+    QApplication.instance() or QApplication([])
+    from gerald.overlay import window as window_module
+
+    native_calls = []
+    monkeypatch.setattr(window_module, "os", SimpleNamespace(name="nt"))
+    monkeypatch.setattr(
+        window_module,
+        "_native_windows_monitors",
+        lambda: native_calls.append(True) or [("NATIVE", (0, 0, 1600, 1600))],
+    )
+
+    mappings = window_module._screen_mappings()
+
+    assert native_calls == []
+    assert mappings
+    assert mappings[0].physical[2] == round(mappings[0].logical[2] * mappings[0].ratio)
 
 
 def test_new_confirmation_replaces_old_and_old_button_is_stale():

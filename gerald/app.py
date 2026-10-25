@@ -54,6 +54,16 @@ def _key_name(key: object) -> str:
     if "alt" in value:
         return "alt"
     char = getattr(key, "char", None)
+    codepoint = ord(char) if isinstance(char, str) and len(char) == 1 else None
+    if char is None or (codepoint is not None and (codepoint < 32 or 127 <= codepoint <= 159)):
+        virtual_key = getattr(key, "vk", None)
+        if isinstance(virtual_key, int):
+            if 0x41 <= virtual_key <= 0x5A:
+                return chr(virtual_key).lower()
+            if 0x30 <= virtual_key <= 0x39:
+                return chr(virtual_key)
+        if codepoint is not None and 0x01 <= codepoint <= 0x1A:
+            return chr(codepoint + 0x60)
     if char:
         return char.lower()
     return value.removeprefix("key.").removeprefix("key.")

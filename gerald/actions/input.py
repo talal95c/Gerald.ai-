@@ -140,6 +140,7 @@ class InputActions:
             on_commands([PointCommand(target.rect)])
         elif name == "scroll" and target is not None and self.require_confirmation and name not in session.approved_kinds:
             on_commands([PointCommand(target.rect)])
+        mouse = None
         if self.require_confirmation and name not in session.approved_kinds:
             prompt = self._confirmation_prompt(name, args)
             with session.confirmation_lock:
@@ -148,10 +149,17 @@ class InputActions:
                         prompt, target_rect, self.confirmation_timeout
                     ):
                         return error("user declined")
+                    try:
+                        mouse = self.mouse_factory()
+                        with session.lock:
+                            session.last_mouse_position = self._position(mouse)
+                    except Exception as failure:
+                        return error(f"input unavailable: {failure}")
                     session.approved_kinds.add(name)
 
         try:
-            mouse = self.mouse_factory()
+            if mouse is None:
+                mouse = self.mouse_factory()
             initial_position = self._position(mouse)
             with session.lock:
                 if session.action_count >= 8:
