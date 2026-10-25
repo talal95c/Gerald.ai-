@@ -29,6 +29,12 @@ def _curve_color(index: int, palette: PlotPalette) -> QColor:
     return QColor(palette.curve if index == 0 else palette.secondary_curves[index - 1])
 
 
+def _font_at_local_size(font_family: str, pixel_size: int, image_to_local_scale: float) -> QFont:
+    font = QFont(font_family)
+    font.setPixelSize(max(1, round(pixel_size / max(0.01, image_to_local_scale))))
+    return font
+
+
 def _nice_step(span: float) -> float:
     raw = span / 7
     power = 10 ** math.floor(math.log10(raw))
@@ -59,6 +65,7 @@ def draw_plot(
     progress: float,
     font_family: str,
     palette: PlotPalette,
+    image_to_local_scale: float = 1.0,
 ) -> None:
     _x, _y, width, height = plot.box
     bounds = QRectF(0, 0, width, height)
@@ -71,8 +78,7 @@ def draw_plot(
     graph = QRectF(left, top, max(1.0, width - left - right), max(1.0, height - top - bottom))
     x_ticks = _ticks(plot.x_min, plot.x_max)
     y_ticks = _ticks(plot.y_min, plot.y_max)
-    tick_font = QFont(font_family)
-    tick_font.setPixelSize(11)
+    tick_font = _font_at_local_size(font_family, 13, image_to_local_scale)
     metrics = QFontMetricsF(tick_font)
     painter.setFont(tick_font)
 
@@ -170,8 +176,7 @@ def draw_plot(
             painter.setBrush(QColor(palette.point_fill))
             painter.drawEllipse(QPointF(point_x, point_y), 3, 3)
             if point.label:
-                label_font = QFont(font_family)
-                label_font.setPixelSize(12)
+                label_font = _font_at_local_size(font_family, 13, image_to_local_scale)
                 painter.setFont(label_font)
                 label_metrics = QFontMetricsF(label_font)
                 label_width = label_metrics.horizontalAdvance(point.label) + 12
@@ -207,8 +212,7 @@ def draw_plot(
                 painter.drawText(pill, Qt.AlignmentFlag.AlignCenter, point.label)
 
     if len(plot.curves) > 1 or plot.curves[0].label != plot.curves[0].expr:
-        legend_font = QFont(font_family)
-        legend_font.setPixelSize(11)
+        legend_font = _font_at_local_size(font_family, 14, image_to_local_scale)
         painter.setFont(legend_font)
         legend_x = left
         for index, curve in enumerate(plot.curves):

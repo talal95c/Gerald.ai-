@@ -564,6 +564,7 @@ class BoardWindow(QWidget):
                     min(1.0, (time.monotonic() - item["created"]) / 0.6),
                     "Google Sans Flex",
                     PLOT_PALETTE,
+                    scale,
                 )
                 painter.restore()
             elif item["kind"] == "command":
