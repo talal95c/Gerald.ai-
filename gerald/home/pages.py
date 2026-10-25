@@ -1210,6 +1210,7 @@ class ChatPage(QWidget):
         bubble_layout = QVBoxLayout(bubble)
         bubble_layout.setContentsMargins(16, 10, 16, 10)
         text_label = QLabel(text)
+        text_label.setFont(self.font())
         text_label.setWordWrap(True)
         text_label.setSizePolicy(
             QSizePolicy.Policy.Preferred, QSizePolicy.Policy.Preferred

@@ -39,6 +39,9 @@ def _is_open(widget: QWidget | None) -> bool:
 
 def open_home(store, indexer, settings, on_library_changed, *, ask_fn=None) -> QWidget:
     global _window
+    from gerald.home.fonts import ensure_fonts
+
+    ensure_fonts()
     if _is_open(_window):
         return _open(_window)
 
