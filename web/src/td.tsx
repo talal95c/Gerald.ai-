@@ -530,7 +530,11 @@ function TD(){
     const down=(event:KeyboardEvent)=>{if(event.ctrlKey&&event.shiftKey&&!event.repeat){event.preventDefault();beginPushToTalk();}};
     const up=(event:KeyboardEvent)=>{if(event.key==="Control"||event.key==="Shift")endPushToTalk();};
     const blur=()=>endPushToTalk();
-    const message=(event:MessageEvent)=>{if(event.source!==window.parent||event.data?.type!=="gerald-hotkey")return;if(event.data.pressed)beginPushToTalk();else endPushToTalk();};
+    const message=(event:MessageEvent)=>{
+      if(event.origin!==location.origin||event.data?.type!=="gerald-hotkey")return;
+      if(event.source!==window.parent&&event.source!==frame.current?.contentWindow)return;
+      if(event.data.pressed)beginPushToTalk();else endPushToTalk();
+    };
     window.addEventListener("keydown",down);window.addEventListener("keyup",up);window.addEventListener("blur",blur);
     window.addEventListener("message",message);
     return()=>{window.removeEventListener("keydown",down);window.removeEventListener("keyup",up);window.removeEventListener("blur",blur);window.removeEventListener("message",message);};
@@ -588,7 +592,7 @@ function TD(){
       </svg>
       <div className="gerald-pointer" aria-hidden="true" style={{left:Math.round(cursor.x),top:Math.round(cursor.y),opacity:cursor.visible?1:0}}><i/>Gerald</div>
     </div>
-    <div className={`td-assist${liveMode||docMode?" live":""}`}>
+    <div className={`td-assist${liveMode||docMode?" live":""}${boardOpen?" board-open":""}`}>
       {!voiceMode&&answer&&<div className="td-answer" key={answer.q}><span className="td-q">{answer.q}</span><p>{answer.text||"…"}</p><button className="td-go" onClick={()=>clickExercise(answer.ex)}>Viens, on va au tableau · {answer.ex.title} →</button></div>}
       {voiceMode&&!liveMode&&suggestion&&<button className="td-go" onClick={()=>openBoard(activeExercise.id)}>Viens, on va au tableau · {activeExercise.title} →</button>}
       {voiceMode&&caption&&<div className={`td-caption${captionFading?" fade":""}`}><Reveal text={caption}/></div>}

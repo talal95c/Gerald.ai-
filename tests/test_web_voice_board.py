@@ -90,7 +90,7 @@ def test_session_posts_sdp_and_filtered_realtime_config(monkeypatch, server):
     lines = ["Résous dans ℝ : x² − 5x + 6 = 0"]
     query = urlencode({"title": title, "lines": json.dumps(lines, ensure_ascii=False)})
 
-    status, body, _headers = _request(
+    status, body, response_headers = _request(
         server,
         "POST",
         f"/api/session?{query}",
@@ -171,6 +171,7 @@ def test_session_posts_sdp_and_filtered_realtime_config(monkeypatch, server):
         "vert (intent=valide)",
         "bleu (intent=remarque)",
         "l'écriture normale reste noire",
+        "souligne aussi le terme fautif en rouge (intent=correction) dans le même tour",
     ):
         assert color_intent in session["instructions"]
     assert "une seule underline ou circle (intent=correction)" in session["instructions"]
@@ -322,7 +323,7 @@ def test_foreign_origin_or_host_is_rejected(monkeypatch, server, headers):
         return _StubResponse(b"should not be called")
 
     monkeypatch.setattr(web_voice_board, "urlopen", fake_urlopen)
-    status, body, _headers = _request(
+    status, body, response_headers = _request(
         server,
         "POST",
         "/api/session",
@@ -331,6 +332,7 @@ def test_foreign_origin_or_host_is_rejected(monkeypatch, server, headers):
     )
 
     assert status == 403
+    assert response_headers["Connection"].lower() == "close"
     assert json.loads(body)["error"] == "origin or host not allowed"
     assert not called
 
