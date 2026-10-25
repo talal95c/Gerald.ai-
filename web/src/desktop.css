@@ -29,7 +29,10 @@ body.desktop-page{min-width:320px;min-height:100vh;overflow:hidden;background:#2
 .desktop-window-body iframe{display:block;width:100%;height:100%;border:0;background:#fff}
 .desktop-window.dragging iframe,.desktop-window.resizing iframe{pointer-events:none}
 .desktop-window.minimized{display:none}
-.desktop-dock{position:absolute;left:50%;bottom:24px;transform:translateX(-50%);z-index:20;display:flex;align-items:flex-end;gap:8px;padding:9px;border-radius:20px;background:rgba(247,247,247,.32);backdrop-filter:blur(10px);-webkit-backdrop-filter:blur(10px);box-shadow:0 2px 6px rgba(0,0,0,.25),inset 0 2px 6px rgba(255,255,255,.32)}
+.desktop-dock{position:absolute;left:50%;bottom:24px;transform:translateX(-50%);z-index:20;display:flex;align-items:flex-end;gap:8px;padding:9px;border-radius:20px;background:rgba(247,247,247,.32);backdrop-filter:blur(10px);-webkit-backdrop-filter:blur(10px);box-shadow:0 2px 6px rgba(0,0,0,.25),inset 0 2px 6px rgba(255,255,255,.32);transition:transform 220ms cubic-bezier(.2,.8,.2,1)}
+.desktop-dock.dock-autohide{transform:translate(-50%,calc(100% + 32px))}
+.desktop-dock.dock-autohide.dock-revealed{transform:translate(-50%,0);z-index:100000}
+.dock-hot-zone{position:fixed;right:0;bottom:0;left:0;height:6px;z-index:100000;pointer-events:auto}
 .dock-entry{position:relative;display:flex;align-items:flex-end}
 .dock-item{position:relative;width:70px;height:70px;padding:0;border:0;border-radius:18px;background:transparent;transition:transform 180ms cubic-bezier(.2,.8,.2,1);transform-origin:50% 100%}
 .dock-item .desktop-icon-svg{width:70px;height:70px;filter:drop-shadow(0 2px 3px rgba(0,0,0,.28))}
@@ -44,7 +47,7 @@ body.desktop-page{min-width:320px;min-height:100vh;overflow:hidden;background:#2
 .desktop-menubar{position:absolute;inset:0 0 auto;height:28px;z-index:30;display:flex;align-items:center;justify-content:space-between;padding:0 18px;background:rgba(246,246,246,.55);backdrop-filter:blur(24px) saturate(180%);-webkit-backdrop-filter:blur(24px) saturate(180%);border-bottom:1px solid rgba(0,0,0,.06);color:#1d1d1f;font-size:13px;font-weight:500}
 .menu-left,.menu-left nav,.menu-right{display:flex;align-items:center}.menu-left{gap:12px}.menu-left strong{font-weight:700}.menu-left nav{gap:16px}.menu-right{gap:14px}.menu-right svg{width:17px;height:16px}.menu-right time{white-space:nowrap}
 .menu-gerald{width:20px;height:14px}
-.desktop-notch-host{position:fixed;left:50%;top:0;transform:translateX(-50%);width:min(840px,100vw);z-index:1000;pointer-events:none}
+.desktop-notch-host{position:fixed;left:50%;top:0;transform:translateX(-50%);width:min(840px,100vw);z-index:100001;pointer-events:none}
 .desktop-page .desktop-notch-host .notch{position:relative;inset:auto;width:100%;pointer-events:auto}
 .desktop-page .desktop-notch-host .pill-notch{position:relative;left:auto;top:auto;transform:none;margin:0 auto;width:100%;pointer-events:auto}
 .desktop-page .desktop-notch-host .notch-pill-controls{display:flex;align-items:center;justify-content:space-between;gap:8px;width:max-content;min-width:220px;height:42px;margin:0 auto;padding:0 10px 0 14px;pointer-events:auto}
@@ -100,3 +103,4 @@ body.desktop-page{min-width:320px;min-height:100vh;overflow:hidden;background:#2
 .desktop-page .desktop-notch-host .notch-hint.visible{transform:translate(-50%,0);opacity:1}
 .desktop-page .desktop-notch-host .sheet .notch-hint{top:48px}
 @media(prefers-reduced-motion:reduce){.desktop-page .desktop-notch-host .notch-hint{transition:none}}
+@media(prefers-reduced-motion:reduce){.desktop-page .desktop-dock{transition:none}}
