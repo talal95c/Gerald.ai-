@@ -7,7 +7,7 @@ import "./board.css";
 import {getBridge} from "./bridge";
 import {Orb} from "./orb";
 import {Reveal} from "./reveal";
-import {annotationLeader, annotationSize, arrowEndpoints, createCursorMotion, cursorRestBeside, intentColor, placeAnnotation, pointsToPath, seedFrom, sketchArrow, sketchEllipsePoints, type AnnotationRect, type CursorPoint, type CursorVisual} from "./annotations";
+import {annotationLeader, annotationSize, arrowEndpoints, createCursorMotion, cursorRestBeside, intentColor, placeAnnotation, pointsToPath, seedFrom, sketchArrow, sketchEllipsePoints, type AnnotationRect, type CursorMotion, type CursorPoint, type CursorVisual} from "./annotations";
 import {mountNotch} from "./notch";
 
 const bridge = getBridge();
@@ -31,6 +31,13 @@ function unionBounds(...rects:AnnotationRect[]):AnnotationRect {
   const left=Math.min(...rects.map(rect=>rect.x)),top=Math.min(...rects.map(rect=>rect.y));
   const right=Math.max(...rects.map(rect=>rect.x+rect.w)),bottom=Math.max(...rects.map(rect=>rect.y+rect.h));
   return {x:left,y:top,w:right-left,h:bottom-top};
+}
+function pointsLength(points:CursorPoint[]):number {
+  return points.reduce((length,point,index)=>index?length+Math.hypot(point.x-points[index-1].x,point.y-points[index-1].y):0,0);
+}
+function moveToRest(queue:CursorMotion,to:CursorPoint):Promise<void> {
+  const current=queue.current();
+  return Math.hypot(to.x-current.x,to.y-current.y)<4?Promise.resolve():queue.moveTo(to);
 }
 function animateHeadProgress(onProgress:(progress:number)=>void):Promise<void> {
   if(window.matchMedia("(prefers-reduced-motion: reduce)").matches){onProgress(1);return Promise.resolve();}
@@ -142,7 +149,7 @@ function TD(){
         addMark({id,kind:"tip",rect:placement.rect,text:args.text,color,annotationTarget:r?pos:undefined,leader:r?placement.leader:false});
         await waitForPaint();
         pendingAnnotations.current.delete(id);
-        await queue.moveTo(restBeside(unionBounds(pos,placement.rect),[pos,placement.rect]));
+        await moveToRest(queue,restBeside(unionBounds(pos,placement.rect),[pos,placement.rect]));
       });
       return {ok:true,target:pos,annotation:placement.rect};
     }
@@ -153,7 +160,7 @@ function TD(){
         await queue.moveTo({x:pos.x,y:pos.y});
         addMark({id,kind:"write",rect:pos,text:String(args.text??args.latex??""),color:color??"#111"});
         const text=String(args.text??args.latex??""),size=Number(args.size)||32;
-        await queue.moveTo(restBeside({x:pos.x,y:pos.y-size,w:Math.max(size,text.length*size*.65),h:size*1.25}));
+        await moveToRest(queue,restBeside({x:pos.x,y:pos.y-size,w:Math.max(size,text.length*size*.65),h:size*1.25}));
       });
       return {ok:true};
     }
@@ -170,7 +177,7 @@ function TD(){
         addMark({id,kind:"note",rect:placement.rect,text,color,annotationTarget:r,leader:placement.leader});
         await waitForPaint();
         pendingAnnotations.current.delete(id);
-        await queue.moveTo(restBeside(unionBounds(r,placement.rect),[r,placement.rect]));
+        await moveToRest(queue,restBeside(unionBounds(r,placement.rect),[r,placement.rect]));
       });
       return {ok:true,target:r,annotation:placement.rect};
     }
@@ -185,9 +192,9 @@ function TD(){
         await queue.moveTo(shaft[0]);
         addMark({id,kind:"arrow",rect:{x:x1,y:y1,w:x2-x1,h:y2-y1},text,to:{x:x2,y:y2,w:0,h:0},color,progress:0,head:0,shaftPoints:shaft,headPoints:head});
         await waitForPaint();
-        for(let start=0;start<shaft.length-1;start+=3){const end=Math.min(start+3,shaft.length-1);await queue.moveTo(shaft[end],progress=>updateMarkProgress(id,(start+(end-start)*progress)/(shaft.length-1)));}
+        await queue.moveAlong(shaft,Math.max(380,Math.min(800,pointsLength(shaft)*2.5)),progress=>updateMarkProgress(id,progress));
         await animateHeadProgress(progress=>updateMarkHead(id,progress));
-        await queue.moveTo(restBeside(bounds));
+        await moveToRest(queue,restBeside(bounds));
       });
       return {ok:true,target:{x:x2,y:y2},from:{x:x1,y:y1},to:{x:x2,y:y2}};
     }
@@ -202,7 +209,7 @@ function TD(){
         await waitForPaint();
         await queue.moveTo(end,progress=>updateMarkProgress(id,progress));
         const bounds=name==="underline"?{x:rect.x-rect.w/2,y:rect.y+rect.h/2-2,w:rect.w,h:4}:{x:rect.x-rect.w/2,y:rect.y-rect.h/2,w:rect.w,h:rect.h};
-        await queue.moveTo(restBeside(bounds));
+        await moveToRest(queue,restBeside(bounds));
       });
     }else if(name==="circle"){
       const points=sketchEllipsePoints(rect.x,rect.y,rect.w/2,rect.h/2,seedFrom(id));
@@ -212,15 +219,15 @@ function TD(){
         await queue.moveTo(points[0]);
         addMark({...mark,progress:0,points,ghostPoints});
         await waitForPaint();
-        for(let start=0;start<points.length-1;start+=4){const end=Math.min(start+4,points.length-1);await queue.moveTo(points[end],progress=>updateMarkProgress(id,(start+(end-start)*progress)/(points.length-1)));}
-        await queue.moveTo(restBeside(bounds));
+        await queue.moveAlong(points,Math.max(650,Math.min(1100,pointsLength(points)*2.2)),progress=>updateMarkProgress(id,progress));
+        await moveToRest(queue,restBeside(bounds));
       });
     }else{
       const bounds=name==="point"?{x:rect.x-5,y:rect.y-5,w:10,h:10}:rect;
       motion.enqueue(async queue=>{
         await queue.moveTo({x:rect.x,y:rect.y});
         addMark({...mark,progress:1});
-        await queue.moveTo(restBeside(bounds));
+        await moveToRest(queue,restBeside(bounds));
       });
     }
     return {ok:true,target:{x:rect.x,y:rect.y}};

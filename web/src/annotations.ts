@@ -11,6 +11,7 @@ export const POINTER_OFFSET = {x: 12, y: 16};
 export const POINTER_SIZE = {w: 100, h: 34};
 export type CursorMotion = {
   moveTo: (to: CursorPoint, onProgress?: (progress: number) => void) => Promise<void>;
+  moveAlong: (points: CursorPoint[], durationMs: number, onProgress?: (progress: number) => void) => Promise<void>;
   enqueue: (action: (motion: CursorMotion) => void | Promise<void>) => Promise<void>;
   clear: () => void;
   waitForAnimations: () => Promise<void>;
@@ -119,6 +120,57 @@ export function createCursorMotion(
         onProgress?.(progress);
       });
       position = {...to};
+    },
+    moveAlong(points, durationMs, onProgress) {
+      if (!points.length) {
+        onProgress?.(1);
+        return Promise.resolve();
+      }
+      const end = points[points.length - 1];
+      const cumulative = [0];
+      for (let index = 1; index < points.length; index += 1) {
+        cumulative.push(cumulative[index - 1] + Math.hypot(points[index].x - points[index - 1].x, points[index].y - points[index - 1].y));
+      }
+      const totalLength = cumulative[cumulative.length - 1];
+      if (reducedMotion || totalLength < 1 || durationMs <= 0) {
+        position = {...end};
+        onUpdate({...position, visible: true});
+        onProgress?.(1);
+        return Promise.resolve();
+      }
+      onUpdate({...position, visible: true});
+      const startedAt = performance.now();
+      return new Promise<void>((resolve) => {
+        const frame = (now: number) => {
+          const linear = Math.min(1, (now - startedAt) / durationMs);
+          const progress = linear < 0.5
+            ? 4 * linear ** 3
+            : 1 - ((-2 * linear + 2) ** 3) / 2;
+          const distance = totalLength * progress;
+          let segment = 1;
+          while (segment < points.length - 1 && cumulative[segment] < distance) segment += 1;
+          while (segment < points.length - 1 && cumulative[segment] === cumulative[segment - 1]) segment += 1;
+          const segmentLength = cumulative[segment] - cumulative[segment - 1];
+          const segmentProgress = segmentLength
+            ? Math.max(0, Math.min(1, (distance - cumulative[segment - 1]) / segmentLength))
+            : 1;
+          const from = points[segment - 1], to = points[segment];
+          position = {
+            x: from.x + (to.x - from.x) * segmentProgress,
+            y: from.y + (to.y - from.y) * segmentProgress,
+          };
+          onUpdate({...position, visible: true});
+          onProgress?.(progress);
+          if (linear < 1) requestAnimationFrame(frame);
+          else {
+            position = {...end};
+            onUpdate({...position, visible: true});
+            onProgress?.(1);
+            resolve();
+          }
+        };
+        requestAnimationFrame(frame);
+      });
     },
     enqueue(action) {
       queue = queue.then(() => action(motion)).catch((error: unknown) => {

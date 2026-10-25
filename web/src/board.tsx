@@ -3,7 +3,7 @@ import { createRoot } from "react-dom/client";
 import katex from "katex";
 import "katex/dist/katex.min.css";
 import "./board.css";
-import {annotationLeader, annotationSize, arrowEndpoints, createCursorMotion, cursorRestBeside, intentColor, placeAnnotation, pointsToPath, seedFrom, sketchArrow, sketchEllipsePoints, segmentBoardText, type AnnotationRect, type BoardTextPart, type CursorPoint, type CursorVisual} from "./annotations";
+import {annotationLeader, annotationSize, arrowEndpoints, createCursorMotion, cursorRestBeside, intentColor, placeAnnotation, pointsToPath, seedFrom, sketchArrow, sketchEllipsePoints, segmentBoardText, type AnnotationRect, type BoardTextPart, type CursorMotion, type CursorPoint, type CursorVisual} from "./annotations";
 import { mountNotch } from "./notch";
 
 type Pt = {x: number; y: number; p: number};
@@ -83,6 +83,11 @@ function animateHeadProgress(onProgress: (progress: number) => void): Promise<vo
     };
     requestAnimationFrame(frame);
   });
+}
+
+function moveToRest(queue: CursorMotion, to: CursorPoint): Promise<void> {
+  const current = queue.current();
+  return Math.hypot(to.x - current.x, to.y - current.y) < 4 ? Promise.resolve() : queue.moveTo(to);
 }
 
 const isNumber = (value: unknown): value is number => typeof value === "number" && Number.isFinite(value);
@@ -729,7 +734,7 @@ function Board() {
         await queue.moveTo({x: Number(args.x), y: Number(args.y)});
         setGeraldTexts((items) => [...items, {id, text, x: Number(args.x), y: Number(args.y), size, color: color ?? "#111", html, parts}]);
         const bounds = {x: Number(args.x), y: Number(args.y) - size, w: Math.max(size, text.length * size * 0.65), h: size * 1.25};
-        await queue.moveTo(restBeside(bounds));
+        await moveToRest(queue, restBeside(bounds));
       });
       return {ok: true};
     }
@@ -747,7 +752,7 @@ function Board() {
         });
         await waitForPaint();
         pendingAnnotations.current.delete(id);
-        await queue.moveTo(restBeside(unionBounds(point, placement.rect), [point, placement.rect]));
+        await moveToRest(queue, restBeside(unionBounds(point, placement.rect), [point, placement.rect]));
       });
       return {ok: true, target: {x: point.x, y: point.y, w: point.w, h: point.h}, annotation: placement.rect};
     }
@@ -764,13 +769,10 @@ function Board() {
         await queue.moveTo(shaft[0]);
         addMark({id, kind: "arrow", x: x1, y: y1, w: x2 - x1, h: y2 - y1, text: "", color, progress: 0, head: 0, shaftPoints: shaft, headPoints: head});
         await waitForPaint();
-        for (let startIndex = 0; startIndex < shaft.length - 1; startIndex += 3) {
-          const endIndex = Math.min(startIndex + 3, shaft.length - 1);
-          await queue.moveTo(shaft[endIndex], (progress) =>
-            updateMarkProgress(id, (startIndex + (endIndex - startIndex) * progress) / (shaft.length - 1)));
-        }
+        await queue.moveAlong(shaft, Math.max(380, Math.min(800, sketchLength(shaft) * 2.5)),
+          (progress) => updateMarkProgress(id, progress));
         await animateHeadProgress((progress) => updateMarkHead(id, progress));
-        await queue.moveTo(restBeside(arrowBounds));
+        await moveToRest(queue, restBeside(arrowBounds));
       });
       return {ok: true, target: {x: x2, y: y2}, from: {x: x1, y: y1}, to: {x: x2, y: y2}};
     }
@@ -795,7 +797,7 @@ function Board() {
           addMark(mark);
           await waitForPaint();
           pendingAnnotations.current.delete(id);
-          await queue.moveTo(restBeside(unionBounds(target, placement.rect), [target, placement.rect]));
+          await moveToRest(queue, restBeside(unionBounds(target, placement.rect), [target, placement.rect]));
         });
         return {ok: true, target, annotation: placement.rect};
       }
@@ -822,12 +824,9 @@ function Board() {
           await queue.moveTo(points[0]);
           addMark({...mark, progress: 0, points, ghostPoints});
           await waitForPaint();
-          for (let startIndex = 0; startIndex < points.length - 1; startIndex += 4) {
-            const endIndex = Math.min(startIndex + 4, points.length - 1);
-            await queue.moveTo(points[endIndex], (progress) =>
-              updateMarkProgress(id, (startIndex + (endIndex - startIndex) * progress) / (points.length - 1)));
-          }
-          await queue.moveTo(restBeside(bounds));
+          await queue.moveAlong(points, Math.max(650, Math.min(1100, sketchLength(points) * 2.2)),
+            (progress) => updateMarkProgress(id, progress));
+          await moveToRest(queue, restBeside(bounds));
         });
       } else {
         const bounds = name === "point"
@@ -838,7 +837,7 @@ function Board() {
         motion.enqueue(async (queue) => {
           await queue.moveTo({x, y});
           addMark({...mark, progress: 1});
-          await queue.moveTo(restBeside(bounds));
+          await moveToRest(queue, restBeside(bounds));
         });
       }
       return {ok: true, target: {x, y}};
