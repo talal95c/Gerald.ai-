@@ -7,7 +7,7 @@ import {annotationLeader, annotationSize, placeAnnotation, segmentBoardText, typ
 import { mountNotch } from "./notch";
 
 type Pt = {x: number; y: number; p: number};
-type Stroke = {pts: Pt[]; erase: boolean};
+type Stroke = {pts: Pt[]; erase: boolean; color: string};
 type Win = {x: number; y: number; w: number; h: number};
 type PlotCurveData = {expr: string; label: string; samples: (number[] | null)[]};
 type PlotPointData = {label: string; x: number; y: number; x_img: number; y_img: number};
@@ -222,6 +222,12 @@ const tools = [
   {id: "clear", label: "Effacer", d: "M4 6h12M8 6V4h4v2M6 6l.8 10h6.4L14 6"},
   {id: "plot", label: "Courbe", d: "M3 3v14h14M5.5 6c2 9 4 9 5.5 5s3-5 5.5-1"},
 ];
+const penColors = [
+  {name: "noir", value: "#111"},
+  {name: "bleu", value: "#2563EB"},
+  {name: "rouge", value: "#DC2626"},
+  {name: "vert", value: "#16A34A"},
+];
 
 function drawPlotSnapshot(ctx: CanvasRenderingContext2D, data: PlotData, box: Win) {
   const [xMin, xMax] = data.x_range, [yMin, yMax] = data.y_range;
@@ -297,6 +303,7 @@ function Board() {
   const exerciseCard = useRef<HTMLElement>(null);
   const strokes = useRef<Stroke[]>([]);
   const [tool, setTool] = useState("pen");
+  const [penColor, setPenColor] = useState(penColors[0].value);
   const [plotData, setPlotData] = useState<PlotData | null>(null);
   const [plotBox, setPlotBox] = useState<Win>({x: 24, y: 140, w: 520, h: 360});
   const [plotVisible, setPlotVisible] = useState(false);
@@ -325,7 +332,7 @@ function Board() {
     ctx.lineJoin = "round";
     for (const stroke of strokes.current) {
       ctx.globalCompositeOperation = stroke.erase ? "destination-out" : "source-over";
-      ctx.strokeStyle = "#262626";
+      ctx.strokeStyle = stroke.erase ? "#111" : stroke.color ?? "#111";
       for (let i = 1; i < stroke.pts.length; i++) {
         const a = stroke.pts[i - 1], b = stroke.pts[i];
         ctx.lineWidth = stroke.erase ? 26 : 1.4 + 2.6 * b.p;
@@ -498,35 +505,42 @@ function Board() {
       const y = Math.min(...ys);
       return [{
         rect: {x: x - 5, y: y - 5, w: Math.max(12, Math.max(...xs) - x + 10), h: Math.max(12, Math.max(...ys) - y + 10)},
+        color: stroke.color ?? penColors[0].value,
       }];
     });
-    const clusters: AnnotationRect[] = [];
-    for (const {rect} of strokeBoxes) {
-      let merged = {...rect};
+    const clusters: Array<{rect: AnnotationRect; colors: Set<string>}> = [];
+    for (const {rect, color} of strokeBoxes) {
+      const merged = {rect: {...rect}, colors: new Set([color])};
       for (let index = 0; index < clusters.length;) {
         const item = clusters[index];
-        const nearby = merged.x <= item.x + item.w + 14 && item.x <= merged.x + merged.w + 14
-          && merged.y <= item.y + item.h + 14 && item.y <= merged.y + merged.h + 14;
+        const nearby = merged.rect.x <= item.rect.x + item.rect.w + 14 && item.rect.x <= merged.rect.x + merged.rect.w + 14
+          && merged.rect.y <= item.rect.y + item.rect.h + 14 && item.rect.y <= merged.rect.y + merged.rect.h + 14;
         if (!nearby) {
           index += 1;
           continue;
         }
-        const right = Math.max(merged.x + merged.w, item.x + item.w);
-        const bottom = Math.max(merged.y + merged.h, item.y + item.h);
-        merged.x = Math.min(merged.x, item.x);
-        merged.y = Math.min(merged.y, item.y);
-        merged.w = right - merged.x;
-        merged.h = bottom - merged.y;
+        const right = Math.max(merged.rect.x + merged.rect.w, item.rect.x + item.rect.w);
+        const bottom = Math.max(merged.rect.y + merged.rect.h, item.rect.y + item.rect.h);
+        merged.rect.x = Math.min(merged.rect.x, item.rect.x);
+        merged.rect.y = Math.min(merged.rect.y, item.rect.y);
+        merged.rect.w = right - merged.rect.x;
+        merged.rect.h = bottom - merged.rect.y;
+        item.colors.forEach((itemColor) => merged.colors.add(itemColor));
         clusters.splice(index, 1);
         index = 0;
       }
       clusters.push(merged);
     }
-    const inkElements = clusters.map((rect, index) => ({
-      id: 10000 + index,
-      text: `encre élève #${index + 1}`,
-      rect,
-    }));
+    const inkElements = clusters.map(({rect, colors}, index) => {
+      const colorName = colors.size === 1
+        ? penColors.find(({value}) => value === [...colors][0])?.name
+        : undefined;
+      return {
+        id: 10000 + index,
+        text: `encre élève #${index + 1}${colorName ? ` (${colorName})` : ""}`,
+        rect,
+      };
+    });
     return [...domElements, ...inkElements];
   };
   const placeBeside = (target: AnnotationRect, text: string, kind: "note" | "tip") => {
@@ -671,7 +685,11 @@ function Board() {
   const down = (e: React.PointerEvent<HTMLCanvasElement>) => {
     if (e.button > 0) return;
     e.currentTarget.setPointerCapture(e.pointerId);
-    strokes.current.push({pts: [{x: e.clientX, y: e.clientY, p: e.pressure || .5}], erase: tool === "eraser"});
+    strokes.current.push({
+      pts: [{x: e.clientX, y: e.clientY, p: e.pressure || .5}],
+      erase: tool === "eraser",
+      color: penColor,
+    });
   };
   const move = (e: React.PointerEvent<HTMLCanvasElement>) => {
     if (!e.currentTarget.hasPointerCapture(e.pointerId)) return;
@@ -688,6 +706,11 @@ function Board() {
     else setTool(id);
     tick((value) => value + 1);
   };
+  const renderTool = (item: (typeof tools)[number]) => <button key={item.id}
+    className={(item.id === tool || (item.id === "plot" && plotVisible)) ? "on" : ""}
+    onClick={() => act(item.id)} title={item.label} aria-label={item.label}>
+    <svg viewBox="0 0 20 20"><path d={item.d}/></svg>
+  </button>;
   return <main className="board">
     <canvas ref={canvas} className={tool} onPointerDown={down} onPointerMove={move}/>
     <aside className="ex-card" ref={exerciseCard} data-gerald-id="100"><div className="ex-label"><i/>{title.toUpperCase()}</div>{lines.map((line, index) => <p key={index} data-gerald-id={101 + index}>{line}</p>)}</aside>
@@ -728,10 +751,15 @@ function Board() {
     {plotVisible && plotData && <PlotWindow key={plotRevision} data={plotData} initialBox={plotBox}
       onClose={() => setPlotVisible(false)} onBoxChange={setPlotBox}/>}
     <nav className="board-tools">
-      {tools.map((item) => <button key={item.id} className={(item.id === tool || (item.id === "plot" && plotVisible)) ? "on" : ""}
-        onClick={() => act(item.id)} title={item.label} aria-label={item.label}>
-        <svg viewBox="0 0 20 20"><path d={item.d}/></svg>
-      </button>)}
+      {tools.slice(0, 2).map(renderTool)}
+      {penColors.map((color) => <button key={color.value} className="swatch"
+        style={{"--swatch-color": color.value} as React.CSSProperties}
+        onClick={() => {setPenColor(color.value); setTool("pen");}}
+        title={`Couleur du stylo : ${color.name}`}
+        aria-label={`Couleur du stylo : ${color.name}`}
+        aria-pressed={penColor === color.value}/>)}
+      <span className="sep"/>
+      {tools.slice(2).map(renderTool)}
       <span className="sep"/>
       <button className="close" onClick={() => window.parent !== window && window.parent.geraldTD?.close ? window.parent.geraldTD.close() : history.length > 1 ? history.back() : window.close()} aria-label="Fermer le tableau">Fermer</button>
     </nav>

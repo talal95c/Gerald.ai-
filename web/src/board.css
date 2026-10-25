@@ -19,6 +19,8 @@ html,body,#root{margin:0;height:100%;overflow:hidden}
 .plot-svg .pt{opacity:0;animation:fade .25s forwards}.plot-svg .pt circle{fill:#E8C547;stroke:#161616;stroke-width:1.5}.plot-svg .pt-label{font-size:11.5px;font-weight:500;fill:#262626;paint-order:stroke;stroke:#fff;stroke-width:4px}
 @keyframes draw{to{stroke-dashoffset:0}}
 .board-tools{z-index:8}
+.board-tools button.swatch::before{content:"";width:24px;height:24px;border:1px solid rgba(247,246,243,.35);border-radius:50%;background:var(--swatch-color)}
+.board-tools button.swatch[aria-pressed="true"]::before{outline:1px solid #F7F6F3;outline-offset:2px}
 .plot-win{z-index:4}
 .gerald-text-layer,.gerald-marks{position:absolute;inset:0;z-index:3;pointer-events:none}
 .gerald-write{position:absolute;color:#111;font-family:"KaTeX_Main","Times New Roman",serif;font-weight:400;line-height:1.25;white-space:pre}
