@@ -49,6 +49,24 @@ function Wave({status}: {status: string}) {
   return <span className={`wave ${status}`} aria-hidden="true">{[0,1,2,3,4].map(i=><i key={i} style={{animationDelay:`${i*90}ms`}}/>)}</span>;
 }
 
+function Folders({docs}: {docs: AppState["documents"]}) {
+  const [open, setOpen] = useState<string | null>(null);
+  const groups = docs.reduce<Record<string, AppState["documents"]>>((acc, d) => { (acc[d.folder || "Mes cours"] ??= []).push(d); return acc; }, {});
+  if (open && groups[open]) return <div className="folder-open">
+    <button className="add" onClick={()=>setOpen(null)}>← Dossiers</button><span className="folder-title">{open}</span>
+    <div className="fan">{groups[open].map((doc,i)=><article className="sheet-card" key={doc.id} style={{animationDelay:`${i*45}ms`}}>
+      <i className={`dot ${doc.status}`} /><b>{doc.filename}</b><small>{doc.status === "ready" ? "Prêt" : doc.error || "Indexation…"}</small>
+      <button aria-label={`Supprimer ${doc.filename}`} onClick={()=>bridge.deleteDocument(doc.id)}>×</button></article>)}</div>
+  </div>;
+  return <div className="folders">
+    {Object.entries(groups).map(([name, items])=><button className="folder" key={name} onClick={()=>setOpen(name)}>
+      <span className="papers">{items.slice(0,3).map((d,i)=><i key={d.id} style={{"--i":i} as React.CSSProperties}/>)}</span>
+      <span className="pocket"/><span className="folder-name">{name}</span><span className="folder-count">{items.length} fichier{items.length>1?"s":""}</span>
+    </button>)}
+    <button className="folder add-folder" onClick={()=>bridge.addDocuments()}><span className="plus">+</span><span className="folder-name">Ajouter</span></button>
+  </div>;
+}
+
 function App() {
   const [mode, setMode] = useState("greeting");
   const [state, setState] = useState(emptyState);
@@ -93,7 +111,7 @@ function App() {
         : <button className="quit" onClick={()=>bridge.quit()} aria-label="Quitter">⏻</button>}
     </div>
     {mode === "settings" && <div className="content" key={tab}>
-      {tab === "Documents" && <>{state.documents.map(doc=><p className="row" key={doc.id}><i className={`dot ${doc.status}`} /><span>{doc.filename}{doc.error&&<small>{doc.error}</small>}</span><button aria-label={`Supprimer ${doc.filename}`} onClick={()=>bridge.deleteDocument(doc.id)}>×</button></p>)}<button className="add" onClick={()=>bridge.addDocuments()}>+ Ajouter</button></>}
+      {tab === "Documents" && <Folders docs={state.documents}/>}
       {tab === "Historique" && (historyMessages ? <><button className="add" onClick={()=>setHistoryMessages(null)}>← Retour</button>{historyMessages.map((m,i)=><p className={`msg ${m.role}`} key={i}>{m.text}</p>)}</>
         : state.conversations.map(c=><button className="row link" key={c.id} onClick={()=>bridge.messages(c.id, json=>setHistoryMessages(JSON.parse(json)))}><i className={`tag ${c.source}`}>{c.source === "agent" ? "Voix" : "Écrit"}</i><span>{c.title}</span></button>))}
       {tab === "Raccourcis" && <p className="row"><span>Maintenir pour parler</span><kbd>{state.hotkey_label}</kbd></p>}

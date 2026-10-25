@@ -1,4 +1,4 @@
-export type Document = { id: number; filename: string; status: string; error?: string };
+export type Document = { id: number; filename: string; status: string; error?: string; folder?: string };
 export type Conversation = { id: number; title: string; source: string; updated_at: string };
 export type AppState = {
   greeting: string;

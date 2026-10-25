@@ -81,6 +81,7 @@ class Bridge(QObject):
                 "filename": value(document, "filename", ""),
                 "status": value(document, "status", "ready"),
                 "error": value(document, "error"),
+                "folder": value(document, "folder") or value(document, "course") or "Mes cours",
             }
             for course in self.store.list_courses()
             for document in self.store.list_documents(value(course, "id"))

@@ -26,8 +26,12 @@ MOCK_BRIDGE = """
   const state = {
     greeting: "Bonjour.", hotkey_label: "CTRL + SHIFT",
     documents: [
-      {id: 1, filename: "Polynômes du second degré.md", status: "ready", error: ""},
-      {id: 2, filename: "Fonctions affines.md", status: "indexing", error: ""}
+      {id: 1, filename: "Cours — Second degré.pdf", status: "ready", error: "", folder: "Polynômes du second degré"},
+      {id: 2, filename: "TD 4 — Exercices.pdf", status: "ready", error: "", folder: "Polynômes du second degré"},
+      {id: 3, filename: "Fiche discriminant.md", status: "indexing", error: "", folder: "Polynômes du second degré"},
+      {id: 4, filename: "Cours — Fonctions affines.pdf", status: "ready", error: "", folder: "Fonctions affines"},
+      {id: 5, filename: "Exercices corrigés.pdf", status: "ready", error: "", folder: "Fonctions affines"},
+      {id: 6, filename: "Cours — Suites.pdf", status: "ready", error: "", folder: "Suites numériques"}
     ],
     conversations: [
       {id: 1, title: "Résoudre une équation du second degré", source: "chat", updated_at: "2025-02-15T12:00:00+00:00"},
