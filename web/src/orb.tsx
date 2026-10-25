@@ -1,5 +1,4 @@
 import React, { useEffect, useRef } from "react";
-import { VoiceRing } from "./voicering";
 import { GeraldMark } from "./logo";
 
 const N = 72;
@@ -29,10 +28,12 @@ function path(radii: number[], size: number, scale: number, t: number, wobble: n
   return d + "Z";
 }
 
-export function Orb({status, size = 26}: {status: string; size?: number}) {
+export function Orb({status, size = 26, level}: {status: string; size?: number; level?: number}) {
   const halo = useRef<SVGPathElement>(null), ring = useRef<SVGPathElement>(null), core = useRef<SVGPathElement>(null), rim = useRef<SVGPathElement>(null);
   const target = useRef(status);
   target.current = status;
+  const amp = useRef(level);
+  amp.current = level;
   useEffect(() => {
     const n0 = sides[target.current] ?? 0;
     let current = shape(n0, -Math.PI / 2), frame = 0, t = 0, last = performance.now();
@@ -42,7 +43,7 @@ export function Orb({status, size = 26}: {status: string; size?: number}) {
       const goal = shape(n, -Math.PI / 2 + (n === 4 ? Math.PI / 4 : 0) + (s === "thinking" ? t * 0.9 : 0));
       const k = 1 - Math.exp(-dt * 6);
       current = current.map((r, i) => r + (goal[i] - r) * k);
-      const pulse = s === "listening" ? 1 + Math.sin(t * 5) * 0.05 : s === "speaking" ? 1 + Math.abs(Math.sin(t * 7)) * 0.07 : 1 + Math.sin(t * 1.6) * 0.025;
+      const pulse = s === "listening" ? 1 + Math.sin(t * 5) * 0.05 : s === "speaking" ? 1 + Math.min(1, amp.current ?? Math.abs(Math.sin(t * 7))) * 0.1 : 1 + Math.sin(t * 1.6) * 0.025;
       const wobble = s === "listening" ? 0.035 : s === "speaking" ? 0.02 : 0.012;
       const inner = path(current, size, 0.72 * pulse, t + 1, wobble);
       halo.current?.setAttribute("d", path(current, size, 1.12 * pulse, t, wobble * 2.2));
@@ -56,8 +57,7 @@ export function Orb({status, size = 26}: {status: string; size?: number}) {
   }, [size]);
   const id = `orb${size}`;
   const idle = status === "idle";
-  const speaking = status === "speaking";
-  return <span className={`orb-wrap ${idle ? "orb-idle" : ""} ${speaking ? "orb-speaking" : ""}`} style={{width:size, height:size}}>
+  return <span className={`orb-wrap ${idle ? "orb-idle" : ""} ${status === "speaking" ? "orb-speaking" : ""}`} style={{width:size, height:size}}>
   <svg style={{overflow:"visible", flex:"none"}} className={`orb orb-shape o-${status}`} width={size} height={size} viewBox={`0 0 ${size} ${size}`} aria-hidden="true">
     <defs>
       <linearGradient id={`${id}h`} x1="0" y1="0" x2="1" y2="1"><stop offset="0" stopColor="#5E6BFF"/><stop offset=".5" stopColor="#A99BFF"/><stop offset="1" stopColor="#F2C4F0"/></linearGradient>
@@ -78,6 +78,5 @@ export function Orb({status, size = 26}: {status: string; size?: number}) {
     <path ref={rim} fill="none" stroke={`url(#${id}r)`} strokeWidth={Math.max(0.8, size * 0.025)}/>
   </svg>
   <GeraldMark size={Math.round(size * .55)}/>
-  {speaking && <VoiceRing active size={size}/>}
   </span>;
 }

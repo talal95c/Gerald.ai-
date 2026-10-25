@@ -77,6 +77,7 @@ def test_scaled_y_tick_labels_do_not_clip_in_the_left_gutter(monkeypatch):
 
 def test_expression_parser_accepts_allowed_math_forms():
     assert parse_expression("x**2 - 5*x + 6")(2) == 0
+    assert parse_expression("x^2 - 5x + 6")(2) == 0
     assert math.isclose(parse_expression("sqrt(x**2) + sin(pi / 2)")(3), 4)
     assert math.isclose(parse_expression("abs(-x) + log(e)")(3), 4)
 

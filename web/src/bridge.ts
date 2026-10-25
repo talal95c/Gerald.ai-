@@ -51,7 +51,12 @@ const mock: GeraldBridge = {
   stateChanged: mockSignal<string>(), modeChanged: mockSignal<string>(),
   answer: mockSignal<string>(), answerError: mockSignal<string>(), recapReady: mockSignal<string>(),
   setMode: () => undefined, ask: () => undefined, messages: (_id, cb) => cb("[]"), documentText: (_id, cb) => cb(""),
-  addDocuments: () => undefined, deleteDocument: () => undefined, openBoard: () => undefined, openTd: () => undefined,
+  addDocuments: () => undefined, deleteDocument: () => undefined,
+  openBoard: (title, lines) => {
+    const query = new URLSearchParams({title, lines, voice: "1"});
+    window.location.assign(`/board.html?${query}`);
+  },
+  openTd: () => undefined,
   endSession: () => undefined, openRecap: () => undefined, requestFocus: () => undefined,
   quit: () => undefined
 };
