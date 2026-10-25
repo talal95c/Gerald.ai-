@@ -8,14 +8,14 @@ import { FONT, T } from "../theme";
 export const Meet: React.FC = () => {
   const frame = useCurrentFrame();
   const { fps } = useVideoConfig();
-  const press = interpolate(frame, [3.0 * fps, 3.15 * fps, 4.4 * fps, 4.55 * fps], [0, 1, 1, 0], { extrapolateLeft: "clamp", extrapolateRight: "clamp" });
+  const press = interpolate(frame, [2.9 * fps, 3.05 * fps, 4.2 * fps, 4.35 * fps], [0, 1, 1, 0], { extrapolateLeft: "clamp", extrapolateRight: "clamp" });
   const brand = useP(0, 1.0);
   return (
     <Bg>
       <AbsoluteFill style={{ alignItems: "center", justifyContent: "center", textAlign: "center" }}>
         <div style={{ opacity: brand, scale: `${0.85 + 0.15 * brand}`, filter: `blur(${(1 - brand) * 12}px)` }}><Brand size={120} /></div>
-        <Reveal at={0.9} style={{ marginTop: 40 }}><Badge dot>Voice tutor for students · Beta</Badge></Reveal>
-        <Reveal at={1.2} style={{ marginTop: 30 }}><H size={100}>You write on the board.<br />Gerald corrects you.</H></Reveal>
+        <Reveal at={0.9} style={{ marginTop: 40 }}><Badge dot>The world's first tutor that lives on your screen</Badge></Reveal>
+        <Reveal at={1.2} style={{ marginTop: 30 }}><H size={100}>It sees. It talks. It draws.<br />You finally learn.</H></Reveal>
         <Reveal at={2.4} style={{ marginTop: 40, display: "flex", alignItems: "center", gap: 14, font: `30px ${FONT.body}`, color: T.mut }}>
           <Orb size={26} /> Hold <Keycap label="Ctrl" pressed={press} size={30} /> + <Keycap label="Shift" pressed={press} size={30} /> and speak
         </Reveal>
@@ -68,9 +68,9 @@ export const Board: React.FC<{ footage: string | null }> = ({ footage }) => {
           <Footage src={footage} label="board recording"><BoardMock /></Footage>
         </div>
       </Stage>
-      <Caption at={0.8} out={4.2}>Work your exercise by hand on Gerald's board. It follows every line.</Caption>
-      <Caption at={4.6} out={7.8}>It circles the mistake and explains it out loud.</Caption>
-      <Caption at={8.2}>You still find the answer.</Caption>
+      <Caption at={0.8} out={4.2}>You write. Gerald watches every line.</Caption>
+      <Caption at={4.6} out={8.4}>It circles the mistake — and explains it out loud.</Caption>
+      <Caption at={8.8}>Like the best teacher you ever had. Right next to you.</Caption>
     </Bg>
   );
 };
@@ -135,9 +135,9 @@ export const Desktop: React.FC<{ footage: string | null }> = ({ footage }) => {
           <Footage src={footage} label="photoshop recording"><PhotoshopMock /></Footage>
         </div>
       </div>
-      <Caption at={0.6} out={3.6}>Hold Ctrl + Shift from any app. Gerald sees what you see.</Caption>
-      <Caption at={4.0} out={7.4}>It points at what matters. You do the clicking.</Caption>
-      <Caption at={7.8}>One step at a time, then "your turn". It only acts if you allow it.</Caption>
+      <Caption at={0.6} out={3.6}>One key. Any app. Gerald sees what you see.</Caption>
+      <Caption at={4.0} out={7.2}>It points. You click. It checks.</Caption>
+      <Caption at={7.6}>Design, code, maths — anything.</Caption>
     </Bg>
   );
 };
@@ -146,13 +146,13 @@ export const Desktop: React.FC<{ footage: string | null }> = ({ footage }) => {
 const TdMock: React.FC = () => {
   const cur = useGlide([
     { t: 0, x: 760, y: 500 },
-    { t: 1.2, x: 760, y: 500 },
-    { t: 2.0, x: 330, y: 318 },
-    { t: 4.6, x: 330, y: 318 },
-    { t: 5.4, x: 1100, y: 360 },
+    { t: 0.8, x: 760, y: 500 },
+    { t: 1.5, x: 330, y: 318 },
+    { t: 3.2, x: 330, y: 318 },
+    { t: 3.9, x: 1100, y: 360 },
   ]);
-  const plot = useP(5.6, 1.4, Easing.inOut(Easing.cubic));
-  const under = useP(2.2, 0.6);
+  const plot = useP(4.0, 1.4, Easing.inOut(Easing.cubic));
+  const under = useP(1.6, 0.6);
   const pts = Array.from({ length: 61 }, (_, i) => {
     const x = -0.6 + (i / 60) * 6.2;
     return [x, x * x - 5 * x + 6] as const;
@@ -168,7 +168,7 @@ const TdMock: React.FC = () => {
         <p style={{ fontSize: 22, lineHeight: 1.55, marginTop: 14 }}>Résoudre dans ℝ l'équation <i>x² − 5x + 6 = 0</i>. On calculera d'abord le discriminant <span style={{ position: "relative" }}>Δ = b² − 4ac<span style={{ position: "absolute", left: 0, bottom: -4, height: 3, width: `${under * 100}%`, background: T.violet, borderRadius: 3 }} /></span>, puis les racines.</p>
         <div style={{ fontSize: 30, marginTop: 30, fontWeight: 700 }}>Exercice 2</div>
         <p style={{ fontSize: 22, lineHeight: 1.55, marginTop: 14 }}>Même question pour 2x² + 3x − 2 = 0.</p>
-        <Bubble at={2.4} out={5.2} x={60} y={330} size={20}>Start with Δ. What are a, b and c here?</Bubble>
+        <Bubble at={1.8} out={3.8} x={60} y={330} size={20}>Start with Δ. What are a, b and c here?</Bubble>
       </div>
       <div style={{ position: "relative", borderRadius: 18, border: `1px solid ${T.line}`, backgroundColor: "#fff", backgroundImage: "radial-gradient(rgba(0,0,0,.13) 1.4px,transparent 1.7px)", backgroundSize: "30px 30px", overflow: "hidden" }}>
         <svg viewBox="0 0 580 420" style={{ position: "absolute", inset: 0, width: "100%", height: "100%" }}>
@@ -194,8 +194,8 @@ export const Td: React.FC<{ footage: string | null }> = ({ footage }) => {
       <div style={{ position: "absolute", left: 120, right: 120, top: 130, bottom: 190, borderRadius: 24, boxShadow: "0 40px 80px -40px rgba(30,40,120,.4)", opacity: p, scale: `${0.97 + 0.03 * p}` }}>
         <Footage src={footage} label="TD + board recording"><TdMock /></Footage>
       </div>
-      <Caption at={0.6} out={4.8}>Drop your courses. Gerald reads the exercise you have open.</Caption>
-      <Caption at={5.2}>When a drawing helps, it opens a board and plots the exact curve.</Caption>
+      <Caption at={0.6} out={3.4}>Drop your courses. Gerald learns them.</Caption>
+      <Caption at={3.8}>The exact curve, plotted live on your board.</Caption>
     </Bg>
   );
 };

@@ -8,7 +8,7 @@ npm run dev                      # Remotion Studio → http://localhost:3000/Lau
 npx remotion render Launch out/gerald-launch.mp4
 ```
 
-Structure (`src/Video.tsx`, 1920×1080 · 30 fps · ~89 s): hook → problem (chatbot dumps the answer, next-morning blank page, PISA 474) → thesis → **Gerald** (board: sees, circles, speaks) → any app (fake desktop + Photoshop guided by voice) → TD + board → how it works → proof/trust → CTA. See `STORYBOARD.md`.
+Structure (`src/Video.tsx`, 1920×1080 · 30 fps · ~65 s): hook → chatbot gives the answer → PISA 474 → **Meet Gerald** → board (sees, circles, speaks) → any app (fake desktop + Photoshop) → your courses + board → not a chatbot (92 %) → CTA. Voice-over: OpenAI TTS (`scripts_vo.py`, needs `OPENAI_API_KEY`; set `voiceOver: false` to mute). See `STORYBOARD.md`.
 
 ## Real footage
 
@@ -22,4 +22,4 @@ Each slot is shown with `objectFit: cover` in a 16:9 frame; record at 1920×1080
 
 ## Audio
 
-`public/audio/` — Mixkit tracks (free licence, see `CREDITS.md`). Default: *Driving Ambition* (film score, lifts at ~35 s = the "Meet Gerald" beat). Swap with the `music` prop (`motivating-mornings.mp3` is the brighter corporate alternative). SFX from remotion.media.
+`public/audio/` — Mixkit tracks (free licence, see `CREDITS.md`). Default: *Motivating Mornings* (123 BPM, lifts at ~10 s), ducked under the voice-over. Swap with the `music` prop (`driving-ambition.mp3` is the calmer film-score alternative). SFX from remotion.media.

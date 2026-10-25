@@ -1,23 +1,20 @@
-# Storyboard — Gerald launch video (~88 s)
+# Storyboard — Gerald launch video (~65 s, marketing cut)
 
-Readable without sound: a black caption pill carries the message of every scene. Every sentence on screen comes from the pitch deck (`pitch/index.html`), the landing (`web/src/landing.tsx`) or a measured result in the repo — nothing invented.
+Startup-launch tone (« vend du rêve »), readable without sound: a caption pill per scene + an OpenAI TTS voice-over (`public/audio/vo/`, voice *marin*, script in `scripts_vo.py`). Music: Mixkit *Motivating Mornings* (123 BPM, lifts at ~10 s), ducked under the voice.
 
-| # | t (s) | Scene | What you see | On-screen text | Source |
-|---|------|-------|--------------|----------------|--------|
-| 1 | 0–6.5 | Problem (dark) | Headline reveals word by word, blue underline on "nobody next to you" | "Learning alone in front of a screen means learning with nobody next to you." | Deck · slide 3 title |
-| 2 | 6–13 | 01 · AI gives the answer | Chat window: the student asks, a chatbot streams the full solution; the window greys out | "AI gives the answer. Chatbots solve the exercise for you." → "You copy it. You don't understand it." | Deck · slide 3 point 01 |
-| 3 | 12.5–18.5 | 02 · It can't see your screen | Headline | "Screenshots, copy-paste, re-explaining context on every question." / "The learning flow breaks." | Deck · slide 3 point 02 |
-| 4 | 18–24.5 | The number (dark) | Counter 495 → **474**, "−21 pts" | "Average maths score, down 21 points since 2018 — a historic drop. Source: OECD, PISA 2022 results (Dec. 2023)" | Deck · slide 3 stat (OECD PISA 2022: France maths 474, 2018: 495) |
-| 5 | 24–30 | 03 · A real tutor is rare | Centered headline | "A tutor points, draws, makes you think. But not at 11 pm, and not for everyone." | Deck · slide 3 point 03 |
-| 6 | 29.5–35.5 | Meet Gerald | Brand mark, badge, hero claim, Ctrl + Shift keycaps press | "Voice tutor for students · Beta" / "You write on the board. Gerald corrects you." / "Hold Ctrl + Shift and speak" | Landing hero · README shortcuts |
-| 7 | 35–47.5 | The board | Landing hero board replayed: handwriting, Gerald's cursor glides to "+ 24", violet circle, bubble "Careful: it's minus 4ac. 4 × 1 × 6 = 24.", correction, tick, "Bravo! Both roots are right." **Footage slot `board`** | "Work your exercise by hand on Gerald's board. It follows every line." → "It circles the mistake and explains it out loud." → "You still find the answer." | Landing hero lead + HeroBoard copy |
-| 8 | 47–58.5 | Any app · Windows first | Fake desktop + Photoshop-like window: Gerald points the shape tool, the user draws, points the colour, fill. **Footage slot `photoshop`** | "Hold Ctrl + Shift from any app. Gerald sees what you see." → "It points at what matters. You do the clicking." → "One step at a time, then "your turn". It only acts if you allow it." | Landing How-step 2 + Feature 01 title · Deck slide 4 "It guides" |
-| 9 | 58–66.5 | Your courses · the board | TD left, board right; Gerald underlines Δ = b² − 4ac, plots the parabola with roots 2 and 3. **Footage slot `td`** | "Drop your courses. Gerald reads the exercise you have open." → "When a drawing helps, it opens a board and plots the exact curve." | Landing How-step 1 + Features 01/02 |
-| 10 | 66–75 | Under the hood | 5 nodes (Trigger · Perception · Brain · Tools · Render) lit by a travelling pulse | Deck node texts verbatim; caption "Trust order: UIA element → OCR word → visual grounder → never the model's raw coordinate." | Deck · slides 6 and 8 |
-| 11 | 74.5–81.5 | Trust & privacy | 3 cards: 77 → **92 %**, Vision on demand, Real consent | "A tutor on your screen, not a spy." / harness: 17 scenarios, gpt-5.5 judge, 8 criteria, 77 % → 91–93 % | Deck · slides 7 and 9 · `evals/pedagogy/scenarios.json` (17) |
-| 12 | 81–88 | CTA | Brand, claim, keycaps, buttons Try the demo / Learn live, GitHub | "Doesn't give you the answer. Helps you find it." / "Any app · Windows first · open source (MIT)" | Deck · slides 1, 4 and 12 · landing CTAs |
+| # | Scene | What you see | Caption(s) | Voice-over |
+|---|-------|--------------|------------|------------|
+| 1 | Hook (dark) | "11 pm. One exercise. Stuck. Alone." word by word, blinking equation, "That ends today." | — | Every student knows this moment… That ends today. |
+| 2 | Chatbot | Chat window streams the full solution, greys out | "Chatbots hand you the answer in 3 seconds." → "You learn nothing. Education deserves better." | Chatbots hand you the answer… Education deserves better. |
+| 3 | The number (dark) | 495 → **474**, −21 pts (OECD PISA 2022) | "A historic low. Private tutors cost a fortune. Until now." | Maths scores are at a historic low… Until now. |
+| 4 | Meet Gerald | Brand pop, badge "The world's first tutor that lives on your screen", "It sees. It talks. It draws. You finally learn.", Ctrl + Shift press | — | Meet Gerald. The world's first private tutor that lives on your screen. |
+| 5 | The board (**footage `board`**) | Handwriting, Gerald's cursor glides, violet circle on "+ 24", bubble, correction, tick, "Bravo" | "You write. Gerald watches every line." → "It circles the mistake — and explains it out loud." → "Like the best teacher you ever had. Right next to you." | You write. Gerald watches every line… you still find the answer yourself. |
+| 6 | Any app (**footage `photoshop`**) | Fake desktop + Photoshop: shape tool → rectangle → colour → fill | "One key. Any app. Gerald sees what you see." → "It points. You click. It checks." → "Design, code, maths — anything." | One key. Any app… Design, code, maths. Anything. |
+| 7 | Your courses (**footage `td`**) | TD + board, Δ underlined, parabola plotted with roots | "Drop your courses. Gerald learns them." → "The exact curve, plotted live on your board." | Drop your courses… plots the exact curve, live. |
+| 8 | Not a chatbot | "A revolution in learning. For every student. Any screen." + cards 77 → **92 %**, Real-time, Private | — | Real-time voice and vision… This is a revolution in learning. |
+| 9 | CTA | Brand, "Never be stuck again.", claim, keycaps, Try the demo / Learn live, GitHub | — | Gerald. It doesn't give you the answer… Never be stuck again. Try it today. |
 
-The Photoshop bubbles ("A rectangle? Start with the shape tool." …) describe the live demo scenario being recorded by the main session; they are replaced by the real recording.
+Scene lengths are derived from the voice-over durations (`src/vo.ts`, generated by `scripts_vo.py` → `public/audio/vo/manifest.json`); to change the script, edit `LINES` in `scripts_vo.py`, run it with `OPENAI_API_KEY`, and regenerate `src/vo.ts`.
 
 ## Footage to record (16:9, 1920×1080, no audio needed)
 
