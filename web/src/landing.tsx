@@ -4,8 +4,8 @@ import { createRoot } from "react-dom/client";
 import "./landing.css";
 import { GeraldMark } from "./logo";
 
-const DEMO_HREF = "./app.html?demo=1";
-const LIVE_HREF = "./app.html";
+const DEMO_HREF = "./desktop.html?demo=1";
+const LIVE_HREF = "./desktop.html";
 
 function useReveal() {
   useEffect(() => {

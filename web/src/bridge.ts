@@ -67,7 +67,7 @@ const mock: GeraldBridge = {
 
 export function getBridge(): GeraldBridge {
   if (window.bridge) return window.bridge;
-  if (!window.qt && /(?:^|\/)app\.html$/.test(location.pathname)) return webBridge;
+  if (!window.qt && /(?:^|\/)(?:app|desktop)\.html$/.test(location.pathname)) return webBridge;
   if (window.qt && window.QWebChannel) {
     new window.QWebChannel(window.qt.webChannelTransport, channel => {
       window.bridge = channel.objects.bridge;

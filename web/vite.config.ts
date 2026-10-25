@@ -17,7 +17,8 @@ export default defineConfig({
         board: resolve(root, "board.html"),
         fiche: resolve(root, "fiche.html"),
         landing: resolve(root, "landing.html"),
-        app: resolve(root, "app.html")
+        app: resolve(root, "app.html"),
+        desktop: resolve(root, "desktop.html")
       },
       output: {
         assetFileNames: assetInfo =>
