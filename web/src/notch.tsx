@@ -148,6 +148,7 @@ function App() {
         : recap ? <button className="end" onClick={()=>bridge.openRecap(recap)}>Fiche →</button>
         : <button className="quit" onClick={()=>bridge.quit()} aria-label="Quitter">⏻</button>}
     </div>
+    {state.session_open && state.recap_error && !state.recap_pending && <p className="recap-error" role="status">{state.recap_error}</p>}
     {mode === "settings" && <div className="content" key={tab}>
       {tab === "Documents" && <Folders docs={state.documents} hotkey={state.hotkey_label}/>}
       {tab === "Historique" && (historyMessages ? <><button className="add" onClick={()=>setHistoryMessages(null)}>← Retour</button>{historyMessages.map((m,i)=><p className={`msg ${m.role}`} key={i}>{m.text}</p>)}</>
