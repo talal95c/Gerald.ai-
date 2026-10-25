@@ -1,14 +1,32 @@
 from __future__ import annotations
 
 import math
+from dataclasses import dataclass
 
 from PyQt6.QtCore import QPointF, QRectF, Qt
 from PyQt6.QtGui import QColor, QFont, QFontMetricsF, QPainter, QPainterPath, QPen
 
-from gerald.tools.diagram_render import draw_diagram_card
 from gerald.tools.plot import PLOT_INSETS, PlotCommand
 
-_CURVE_COLORS = (None, QColor("#FF9F0A"), QColor("#30D158"))
+
+@dataclass(frozen=True)
+class PlotPalette:
+    curve: str
+    secondary_curves: tuple[str, str]
+    point_fill: str
+    point_outline: str
+    label_fill: str
+    label_border: str
+    label_text: str
+    grid: str
+    axis: str
+    tick: str
+    card: str
+    card_border: str
+
+
+def _curve_color(index: int, palette: PlotPalette) -> QColor:
+    return QColor(palette.curve if index == 0 else palette.secondary_curves[index - 1])
 
 
 def _nice_step(span: float) -> float:
@@ -40,24 +58,26 @@ def draw_plot(
     plot: PlotCommand,
     progress: float,
     font_family: str,
-    accent: QColor,
+    palette: PlotPalette,
 ) -> None:
     _x, _y, width, height = plot.box
     bounds = QRectF(0, 0, width, height)
     painter.save()
-    draw_diagram_card(painter, bounds, 255)
+    painter.setPen(QPen(QColor(palette.card_border), 1))
+    painter.setBrush(QColor(palette.card))
+    painter.drawRoundedRect(bounds, 16, 16)
 
     left, top, right, bottom = PLOT_INSETS
     graph = QRectF(left, top, max(1.0, width - left - right), max(1.0, height - top - bottom))
     x_ticks = _ticks(plot.x_min, plot.x_max)
     y_ticks = _ticks(plot.y_min, plot.y_max)
     tick_font = QFont(font_family)
-    tick_font.setPixelSize(10)
+    tick_font.setPixelSize(11)
     metrics = QFontMetricsF(tick_font)
     painter.setFont(tick_font)
 
     painter.save()
-    painter.setPen(QPen(QColor("#E9E9ED"), 1))
+    painter.setPen(QPen(QColor(palette.grid), 1))
     for tick in x_ticks:
         x = graph.left() + (tick - plot.x_min) / (plot.x_max - plot.x_min) * graph.width()
         painter.drawLine(QPointF(x, graph.top()), QPointF(x, graph.bottom()))
@@ -76,11 +96,29 @@ def draw_plot(
         if plot.y_min <= 0 <= plot.y_max
         else graph.bottom()
     )
-    painter.setPen(QPen(QColor("#6E6E73"), 1.25))
+    painter.setPen(QPen(QColor(palette.axis), 1.25))
     painter.drawLine(QPointF(graph.left(), axis_y), QPointF(graph.right(), axis_y))
     painter.drawLine(QPointF(axis_x, graph.top()), QPointF(axis_x, graph.bottom()))
+    arrow_size = 5
+    arrow_half_width = 2.5
+    painter.drawLine(
+        QPointF(graph.right(), axis_y),
+        QPointF(graph.right() - arrow_size, axis_y - arrow_half_width),
+    )
+    painter.drawLine(
+        QPointF(graph.right(), axis_y),
+        QPointF(graph.right() - arrow_size, axis_y + arrow_half_width),
+    )
+    painter.drawLine(
+        QPointF(axis_x, graph.top()),
+        QPointF(axis_x - arrow_half_width, graph.top() + arrow_size),
+    )
+    painter.drawLine(
+        QPointF(axis_x, graph.top()),
+        QPointF(axis_x + arrow_half_width, graph.top() + arrow_size),
+    )
 
-    painter.setPen(QColor("#6E6E73"))
+    painter.setPen(QColor(palette.tick))
     for tick in x_ticks:
         x = graph.left() + (tick - plot.x_min) / (plot.x_max - plot.x_min) * graph.width()
         label = _format_tick(tick)
@@ -100,9 +138,10 @@ def draw_plot(
 
     painter.save()
     painter.setClipRect(graph)
+    painter.setBrush(Qt.BrushStyle.NoBrush)
     visible_count = max(1, math.ceil(len(plot.curves[0].samples) * min(1.0, max(0.0, progress))))
     for curve_index, curve in enumerate(plot.curves):
-        color = accent if curve_index == 0 else _CURVE_COLORS[curve_index]
+        color = _curve_color(curve_index, palette)
         path = QPainterPath()
         active = False
         for sample in curve.samples[:visible_count]:
@@ -127,12 +166,12 @@ def draw_plot(
         for point in plot.points:
             point_x = point.x_img - plot.box[0]
             point_y = point.y_img - plot.box[1]
-            painter.setPen(QPen(QColor("#FFFFFF"), 1))
-            painter.setBrush(accent)
+            painter.setPen(QPen(QColor(palette.point_outline), 1))
+            painter.setBrush(QColor(palette.point_fill))
             painter.drawEllipse(QPointF(point_x, point_y), 3, 3)
             if point.label:
                 label_font = QFont(font_family)
-                label_font.setPixelSize(11)
+                label_font.setPixelSize(12)
                 painter.setFont(label_font)
                 label_metrics = QFontMetricsF(label_font)
                 label_width = label_metrics.horizontalAdvance(point.label) + 12
@@ -161,22 +200,22 @@ def draw_plot(
                         label_height,
                     )
                 placed_labels.append(pill)
-                painter.setPen(QPen(QColor("#E5E5EA"), 1))
-                painter.setBrush(QColor("#FFFFFF"))
+                painter.setPen(QPen(QColor(palette.label_border), 1))
+                painter.setBrush(QColor(palette.label_fill))
                 painter.drawRoundedRect(pill, 8, 8)
-                painter.setPen(QColor("#1D1D1F"))
+                painter.setPen(QColor(palette.label_text))
                 painter.drawText(pill, Qt.AlignmentFlag.AlignCenter, point.label)
 
     if len(plot.curves) > 1 or plot.curves[0].label != plot.curves[0].expr:
         legend_font = QFont(font_family)
-        legend_font.setPixelSize(10)
+        legend_font.setPixelSize(11)
         painter.setFont(legend_font)
         legend_x = left
         for index, curve in enumerate(plot.curves):
-            color = accent if index == 0 else _CURVE_COLORS[index]
+            color = _curve_color(index, palette)
             painter.setPen(QPen(color, 2.5, Qt.PenStyle.SolidLine, Qt.PenCapStyle.RoundCap))
             painter.drawLine(QPointF(legend_x, 18), QPointF(legend_x + 18, 18))
-            painter.setPen(QColor("#1D1D1F"))
+            painter.setPen(QColor(palette.label_text))
             painter.drawText(QPointF(legend_x + 24, 22), curve.label)
             legend_x += 34 + QFontMetricsF(legend_font).horizontalAdvance(curve.label)
     painter.restore()

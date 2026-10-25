@@ -3,7 +3,7 @@ import os
 import pytest
 from PyQt6.QtWidgets import QApplication
 
-from gerald.home.fonts import ensure_fonts
+from gerald.home.typography import ensure_fonts
 
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 

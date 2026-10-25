@@ -5,6 +5,7 @@ from types import SimpleNamespace
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
 from PyQt6.QtCore import QRect, Qt
+from PyQt6.QtGui import QColor
 from PyQt6.QtTest import QTest
 from PyQt6.QtWidgets import QApplication, QPushButton
 
@@ -138,15 +139,52 @@ def test_toolbar_is_visible_and_centered_at_top():
 
     toolbar = board._toolbar
     assert toolbar.isVisible()
+    assert toolbar.height() == 56
     assert toolbar.y() == 20
     assert toolbar.x() == (board.width() - toolbar.width()) // 2
-    assert [button.text() for button in toolbar.findChildren(QPushButton)] == [
-        "Pen",
-        "Eraser",
-        "Undo",
-        "Clear",
-        "Close",
+    buttons = toolbar.findChildren(QPushButton)
+    assert all(button.height() >= 44 for button in buttons)
+    assert [button.text() for button in buttons] == [
+        "Stylo",
+        "Gomme",
+        "Annuler",
+        "Effacer",
+        "Fermer",
     ]
+    board.close()
+    app.processEvents()
+
+
+def test_exercise_card_is_visible_and_unchanged_by_board_actions():
+    app = QApplication.instance() or QApplication([])
+    board = BoardWindow()
+    board.resize(900, 700)
+    board.set_exercise("Exercice 1", ["Résous dans ℝ : x² − 5x + 6 = 0"])
+    board.show()
+    app.processEvents()
+
+    image = board.grab().toImage()
+    assert image.pixelColor(470, 70) == QColor("#EEEEEE")
+    capture, rects = board.capture()
+    assert capture.image.getpixel((470, 70)) == (238, 238, 238)
+    text_pixels = capture.image.crop((472, 62, 870, 120)).convert("RGB")
+    assert any(
+        text_pixels.getpixel((x, y)) != (238, 238, 238)
+        for y in range(text_pixels.height)
+        for x in range(text_pixels.width)
+    )
+    assert rects == []
+    assert board._exercise_title == "Exercice 1"
+    assert board._exercise_lines == ["Résous dans ℝ : x² − 5x + 6 = 0"]
+
+    board.user_strokes = [[(1, 2, 1.0)], [(3, 4, 1.0)]]
+    board.undo()
+    assert len(board.user_strokes) == 1
+    board.clear_user_ink()
+    board.clear_gerald()
+    assert board._exercise_title == "Exercice 1"
+    assert board._exercise_lines == ["Résous dans ℝ : x² − 5x + 6 = 0"]
+
     board.close()
     app.processEvents()
 
@@ -218,6 +256,41 @@ def test_tablet_eraser_press_uses_eraser_path_without_creating_stroke(monkeypatc
     assert board._current is None
     assert len(board.user_strokes) == 1
     assert event.accepted
+    board.close()
+    app.processEvents()
+
+
+def test_tablet_stroke_retains_pen_pressure():
+    from PyQt6.QtCore import QPointF
+
+    class Event:
+        class Type:
+            TabletPress = 1
+            TabletMove = 2
+
+        def __init__(self, event_type, position, pressure):
+            self._type = event_type
+            self._position = position
+            self._pressure = pressure
+
+        def type(self):
+            return self._type
+
+        def position(self):
+            return self._position
+
+        def pressure(self):
+            return self._pressure
+
+        def accept(self):
+            pass
+
+    app = QApplication.instance() or QApplication([])
+    board = BoardWindow()
+    board.tabletEvent(Event(Event.Type.TabletPress, QPointF(30, 40), 0.7))
+    board.tabletEvent(Event(Event.Type.TabletMove, QPointF(35, 45), 0.4))
+
+    assert board.user_strokes == [[(30.0, 40.0, 0.7), (35.0, 45.0, 0.4)]]
     board.close()
     app.processEvents()
 
