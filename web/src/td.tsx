@@ -23,7 +23,7 @@ const exercises = [
 ];
 type Rect = {x:number;y:number;w:number;h:number};
 type ViewElement = {id:number;text:string;rect:Rect};
-type PaintElement = ViewElement & {active:boolean;selected:boolean;isColor:boolean;isLayer:boolean;tag:string;value:string};
+type PaintElement = ViewElement & {active:boolean;selected:boolean;isColor:boolean;isLayer:boolean;tag:string;value:string;in_dialog:boolean;dialog?:string};
 type ViewApi = {elements:()=>ViewElement[];exec:(name:string,args:Record<string,any>)=>Promise<Record<string,any>>;close?:()=>void;waitForAnimations:()=>Promise<void>};
 type BoardApi = ViewApi & {snapshot:()=>string};
 type GeraldVoiceState = {turn:number;settledTurn:number;pendingTools:number;settledAt:number;responsesCreated:number;responsesDone:number};
@@ -251,19 +251,68 @@ function TD(){
     if(!iframe||!doc)return [];
     const frameRect=iframe.getBoundingClientRect();
     const scaleX=frameRect.width/Math.max(1,iframe.clientWidth),scaleY=frameRect.height/Math.max(1,iframe.clientHeight);
-    const candidates=[...doc.querySelectorAll<HTMLElement>("button,a,input,select,[role='button'],[role='menuitem'],[title],[class*='layer']")];
-    return [...new Set(candidates)].flatMap(element=>{
+    const visible=(element:HTMLElement)=>{
       const rect=element.getBoundingClientRect(),style=doc.defaultView?.getComputedStyle(element);
-      if(!rect.width||!rect.height||style?.display==="none"||style?.visibility==="hidden"||Number(style?.opacity)===0)return [];
+      return Boolean(rect.width&&rect.height&&style?.display!=="none"&&style?.visibility!=="hidden"&&Number(style?.opacity)!==0);
+    };
+    const nodes=[...doc.querySelectorAll<HTMLElement>("*")].filter(visible);
+    const hasDataClickTarget=(element:HTMLElement)=>[...element.attributes].some(attribute=>{
+      const name=attribute.name.toLowerCase(),value=attribute.value.trim();
+      return Boolean(value&&(/^data-(?:key|action|click|target|tool|command|layer-id)$/.test(name)
+        ||(name==="data-id"&&/(?:^|[_-])(?:button|item|tool|action|toggle)$/i.test(value))));
+    });
+    const clickable=new Set(nodes.filter(element=>{
+      const style=doc.defaultView?.getComputedStyle(element);
+      return style?.cursor==="pointer"||typeof element.onclick==="function"||hasDataClickTarget(element);
+    }));
+    const hasClickableAncestor=(element:HTMLElement)=>{
+      let parent=element.parentElement;
+      while(parent){
+        if(clickable.has(parent))return true;
+        parent=parent.parentElement;
+      }
+      return false;
+    };
+    const dialogs=nodes.filter(element=>element.matches("[role='dialog'],dialog,.popup,.modal,[aria-modal='true']"));
+    const dialogTitle=(element:HTMLElement)=>{
+      const title=element.querySelector<HTMLElement>("[data-id='popup_title'],h1,h2,h3");
+      return title?.innerText.trim()||element.getAttribute("aria-label")?.trim()||"Dialog";
+    };
+    const activeDialog=dialogs[dialogs.length-1];
+    const candidates=nodes.filter(element=>{
+      const semantic=element.matches("button,a,input,select,[role='button'],[role='menuitem'],[title],[class*='layer']");
+      return (semantic||clickable.has(element))&&!hasClickableAncestor(element);
+    });
+    return candidates.map((element,index)=>{
+      const rect=element.getBoundingClientRect();
       let id=paintIds.current.get(element);
       if(!id){id=nextPaintId.current++;paintIds.current.set(element,id);element.dataset.geraldId=String(id);}
-      const className=typeof element.className==="string"?element.className:String(element.getAttribute("class")??"");
+      const className=element.getAttribute("class")??"";
       const active=/active/i.test(className)||element.getAttribute("aria-pressed")==="true";
       const selected=/selected/i.test(className)||element.getAttribute("aria-selected")==="true";
-      const input=element instanceof HTMLInputElement?element:null;
-      const text=(element.innerText||element.getAttribute("title")||element.getAttribute("aria-label")||input?.value||"").trim();
-      return [{id,text,active,selected,isColor:input?.type==="color",isLayer:/layers_list|layer-row|layer_row/i.test(className)||element.hasAttribute("data-layer-id"),tag:element.tagName.toLowerCase(),value:input?.value??"",rect:{x:frameRect.x+rect.x*scaleX,y:frameRect.y+rect.y*scaleY,w:rect.width*scaleX,h:rect.height*scaleY}}];
-    });
+      const input=element.tagName==="INPUT"?element as HTMLInputElement:null;
+      const select=element.tagName==="SELECT"?element as HTMLSelectElement:null;
+      const image=element.tagName==="IMG"?element as HTMLImageElement:element.querySelector<HTMLImageElement>("img");
+      const inputValue=input?.value.trim()??select?.value.trim()??"";
+      const inputLabel=input?.id==="color_hex"?"Hex":input?.type==="color"?"Colour":
+        input?.getAttribute("aria-label")||input?.title||input?.placeholder||input?.id.replaceAll("_"," ")||"";
+      const inputText=input?(inputValue?`${inputLabel?`${inputLabel} `:""}${inputValue}`:inputLabel):inputValue;
+      const text=(element.innerText?.trim()
+        ||image?.alt.trim()||image?.title.trim()
+        ||element.getAttribute("title")?.trim()||element.getAttribute("aria-label")?.trim()
+        ||inputText
+        ||element.parentElement?.innerText?.trim()||"").trim();
+      const containingDialog=dialogs.filter(dialog=>dialog.contains(element)).pop();
+      return {order:index,item:{
+        id,text,active,selected,isColor:input?.type==="color"||input?.id==="color_hex",
+        isLayer:/layers_list|layer-row|layer_row/i.test(className)||element.hasAttribute("data-layer-id"),
+        tag:element.tagName.toLowerCase(),value:inputValue,
+        in_dialog:Boolean(containingDialog),dialog:containingDialog?dialogTitle(containingDialog):undefined,
+        rect:{x:frameRect.x+rect.x*scaleX,y:frameRect.y+rect.y*scaleY,w:rect.width*scaleX,h:rect.height*scaleY},
+      }};
+    }).sort((a,b)=>Number(b.item.in_dialog)-Number(a.item.in_dialog)
+      ||Number(b.item.active||b.item.selected)-Number(a.item.active||a.item.selected)
+      ||a.order-b.order).slice(0,150).map(entry=>entry.item);
   };
   const paintTargetRect=(args:Record<string,any>):Rect|null=>{
     const elements=paintElements();
@@ -441,10 +490,16 @@ function TD(){
     else if(paintMode){
       const items=paintElements();
       const active=items.find(item=>item.active||item.selected)?.text||"unknown";
-      const color=items.find(item=>item.isColor)?.value||"unknown";
+      const paintDoc=paintFrame.current?.contentDocument;
+      const mainColor=paintDoc?.querySelector<HTMLInputElement>("#color_hex")?.value
+        ||paintDoc?.querySelector<HTMLInputElement>("input[type='color']")?.value||"unknown";
+      const color=mainColor.trim().toLowerCase();
       const layerCount=items.filter(item=>item.isLayer).length;
-      const rows=items.map(item=>`[${item.id}] "${item.text}" (${Math.round(item.rect.x)},${Math.round(item.rect.y)},${Math.round(item.rect.w)},${Math.round(item.rect.h)})${item.active?" active":""}${item.selected?" selected":""}`).join("\n");
-      const content:Array<Record<string,string>>=[{type:"input_text",text:`Paint editor visible elements in top-document CSS pixels:\n${rows}\nPaint state: active tool=${active}; current color=${color}; layer count=${layerCount}.`}];
+      const dialog=items.find(item=>item.in_dialog)?.dialog||"";
+      voiceLog().push({type:"paint_collector",turn:responseTurn.current||voiceState().turn,count:items.length,dialog:dialog||null,colour:color});
+      const rows=items.map(item=>`[${item.id}] "${item.text}" (${Math.round(item.rect.x)},${Math.round(item.rect.y)},${Math.round(item.rect.w)},${Math.round(item.rect.h)})${item.active?" active":""}${item.selected?" selected":""}${item.in_dialog?" in_dialog:true":""}`).join("\n");
+      const dialogState=dialog?`; dialog: ${JSON.stringify(dialog)}`:"";
+      const content:Array<Record<string,string>>=[{type:"input_text",text:`Paint editor visible elements in top-document CSS pixels:\n${rows}\nPaint state: active tool=${active}; colour: ${color}; layer count=${layerCount}${dialogState}.`}];
       const image=paintImage();
       if(image)content.push({type:"input_image",image_url:image});
       sendEvent({type:"conversation.item.create",item:{type:"message",role:"user",content}});
