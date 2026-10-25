@@ -30,7 +30,7 @@ function board(){
 function clips(sl,on){
   sl.querySelectorAll('.clip video').forEach(v=>{
     if(!on){v.pause();return}
-    v.currentTime=0;v.muted=false;v.play().catch(()=>{v.muted=true;v.play().catch(()=>{})});
+    v.currentTime=0;v.muted=true;v.play().catch(()=>{});
   });
 }
 document.querySelectorAll('.clip').forEach(f=>{
